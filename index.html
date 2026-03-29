@@ -262,12 +262,16 @@ table.d tr:hover td{background:var(--sf2)}
     return;
   }
 
-  // ── Decompress subject/period keys ──
+  // ── Decompress data ──
   (function(){
     const SK=DD.subjectKeys,PK=DD.periodKeys;
     const SKR={},PKR={};
     Object.entries(SK).forEach(([f,s])=>{SKR[s]=f});
     Object.entries(PK).forEach(([f,s])=>{PKR[s]=f});
+    const DI=DD.dateIndex||[];// date index -> ISO string
+    const TI=DD.teacherIndex||[];// teacher index -> name
+
+    // Progress: [px, tg, {scores}, send, ehcp, fsm] → [px, name, tg, {scores}, send, ehcp, fsm]
     const prg2={};
     for(const[ik,periods] of Object.entries(DD.progress)){
       prg2[ik]={};
@@ -275,21 +279,48 @@ table.d tr:hover td{background:var(--sf2)}
         const fp=PKR[pk]||pk;
         prg2[ik][fp]=rows.map(r=>{
           const sc2={};
-          Object.entries(r[3]).forEach(([sk,v])=>{sc2[SKR[sk]||sk]=v});
-          return[r[0],r[1],r[2],sc2,r[4],r[5],r[6]];
+          Object.entries(r[2]).forEach(([sk,v])=>{sc2[SKR[sk]||sk]=v});
+          const px=r[0];
+          const name=DD.registry[String(px)]?DD.registry[String(px)].id:`#${px}`;
+          return[px,name,r[1],sc2,r[3],r[4],r[5]];
         });
       }
     }
     DD.progress=prg2;
-    for(const recs of Object.values(DD.enrolments)){
-      recs.forEach(r=>{if(r.s&&SKR[r.s])r.s=SKR[r.s]});
+
+    // Enrolments: arrays → objects
+    // cls: [0, x, subj_key, class_num, teacher_idx, from_date_idx, to_date_idx_or_null]
+    // subj: [1, x, subj_key, from_date_idx]
+    // tg: [2, x, tg_name, from_date_idx, to_date_idx_or_null]
+    const enr2={};
+    for(const[ik,recs] of Object.entries(DD.enrolments)){
+      enr2[ik]=recs.map(r=>{
+        if(r[0]===0) return{t:'cls',x:r[1],s:SKR[r[2]]||r[2],c:r[3],tc:TI[r[4]]||`T${r[4]}`,f:DI[r[5]]||'',u:r[6]!=null?DI[r[6]]:null};
+        if(r[0]===1) return{t:'subj',x:r[1],s:SKR[r[2]]||r[2],f:DI[r[3]]||'',u:null};
+        if(r[0]===2) return{t:'tg',x:r[1],v:r[2],f:DI[r[3]]||'',u:r[4]!=null?DI[r[4]]:null};
+        return r;
+      });
     }
+    DD.enrolments=enr2;
+
+    // Attendance: date indices → ISO strings
+    if(DD.attendance){
+      const att2={};
+      for(const[px,indices] of Object.entries(DD.attendance)){
+        att2[px]=indices.map(i=>DI[i]||String(i));
+      }
+      DD.attendance=att2;
+    }
+
+    // attByPeriod: decompress period keys
     const abp2={};
     for(const[pi,periods] of Object.entries(DD.attByPeriod)){
       abp2[pi]={};
       for(const[pk,v] of Object.entries(periods)) abp2[pi][PKR[pk]||pk]=v;
     }
     DD.attByPeriod=abp2;
+
+    // attByPeriodSubj: decompress period + subject keys
     const abps2={};
     for(const[pi,periods] of Object.entries(DD.attByPeriodSubj)){
       abps2[pi]={};
@@ -300,31 +331,34 @@ table.d tr:hover td{background:var(--sf2)}
       }
     }
     DD.attByPeriodSubj=abps2;
-    // Expand + flatten attAbsSubj
+
+    // attAbsSubj: decompress date indices + subject keys
     if(DD.attAbsSubj){
       const expanded={};
       for(const[pi,byDate] of Object.entries(DD.attAbsSubj)){
         const flat=[];
-        for(const[date,lessons] of Object.entries(byDate)){
-          for(const[sk,period] of lessons) flat.push([date,SKR[sk]||sk,period]);
+        for(const[dateKey,lessons] of Object.entries(byDate)){
+          const dateStr=DI[parseInt(dateKey)]||dateKey;
+          for(const[sk,period] of lessons) flat.push([dateStr,SKR[sk]||sk,period]);
         }
         flat.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:a[2]-b[2]);
         expanded[pi]=flat;
       }
       DD.attAbsSubj=expanded;
     }
-    // Decompress sanctions subject keys
+
+    // Sanctions: decompress date indices + subject keys
     if(DD.sanctions){
-      DD.sanctions=DD.sanctions.map(r=>[r[0],r[1],r[2],r[3]!=null?(SKR[r[3]]||r[3]):null,r[4]||null]);
+      DD.sanctions=DD.sanctions.map(r=>[r[0],r[1],DI[r[2]]||String(r[2]),r[3]!=null?(SKR[r[3]]||r[3]):null,r[4]||null]);
     }
-    // Decompress enrolment subject keys
-    if(DD.enrolments){
-      for(const[ik,recs] of Object.entries(DD.enrolments)){
-        DD.enrolments[ik]=recs.map(r=>{
-          if(r.s) return{...r, s:SKR[r.s]||r.s};
-          return r;
-        });
+
+    // Timetables: decompress subject keys
+    if(DD.timetables){
+      const tt2={};
+      for(const[px,grid] of Object.entries(DD.timetables)){
+        tt2[px]=grid.map(day=>day.map(c=>c?[SKR[c[0]]||c[0],c[1]]:null));
       }
+      DD.timetables=tt2;
     }
   })();
 
@@ -2147,6 +2181,8 @@ function rSEND(){
   // Collect flagged pupils — flagIdx: 4=SEND, 5=EHCP, 6=FSM
   function collectFlagged(flagIdx,flagName){
     const pupils=[];
+    const WLK=DD.weekLessons||{};
+
     for(const[ik,periods]of Object.entries(PRG)){
       const ink=parseInt(ik.slice(1));
       const yg=curYG(ink);
@@ -2160,13 +2196,69 @@ function rSEND(){
       const prevTermP=pp.length>=2?pp[pp.length-2]:null;
       const prevYearP=pp.length>=4?pp[pp.length-4]:null;
 
+      // Compute TG-level rankings for ability and effort
+      const tgAbRanks={};// tg -> [{px, avg}] sorted desc
+      const tgEfRanks={};
+      lr.forEach(r2=>{
+        const px2=r2[0],tg2=r2[2];
+        const sc2=SUBS.map(s=>r2[3][s]?AS[AM[r2[3][s][0]]]||0:0).filter(v=>v>0);
+        const ef2=SUBS.map(s=>r2[3][s]?r2[3][s][1]:null).filter(v=>v!=null&&v>0);
+        const ab2=sc2.length?sc2.reduce((a,b)=>a+b,0)/sc2.length:null;
+        const ef2a=ef2.length?ef2.reduce((a,b)=>a+b,0)/ef2.length:null;
+        if(!tgAbRanks[tg2])tgAbRanks[tg2]=[];
+        if(!tgEfRanks[tg2])tgEfRanks[tg2]=[];
+        if(ab2!=null) tgAbRanks[tg2].push({px:px2,avg:ab2});
+        if(ef2a!=null) tgEfRanks[tg2].push({px:px2,avg:ef2a});
+      });
+      for(const tg2 of Object.keys(tgAbRanks)) tgAbRanks[tg2].sort((a,b)=>b.avg-a.avg);
+      for(const tg2 of Object.keys(tgEfRanks)) tgEfRanks[tg2].sort((a,b)=>b.avg-a.avg);
+
+      // Compute class-level rankings per subject
+      const clsAbRanks={};// "subj|cls" -> [{px, score}] sorted desc
+      const clsEfRanks={};
+      const enrols=(ENR[ik]||[]);
+      lr.forEach(r2=>{
+        const px2=r2[0];
+        SUBS.forEach(s=>{
+          if(!r2[3][s]) return;
+          const clsRec=enrols.find(e=>e.t==='cls'&&e.x===px2&&e.s===s&&e.u===null);
+          if(!clsRec) return;
+          const key=`${s}|${clsRec.c}`;
+          const ab2=AS[AM[r2[3][s][0]]]||0;
+          const ef2=r2[3][s][1]||0;
+          if(!clsAbRanks[key])clsAbRanks[key]=[];
+          if(!clsEfRanks[key])clsEfRanks[key]=[];
+          if(ab2>0) clsAbRanks[key].push({px:px2,score:ab2});
+          if(ef2>0) clsEfRanks[key].push({px:px2,score:ef2});
+        });
+      });
+      for(const k of Object.keys(clsAbRanks)) clsAbRanks[k].sort((a,b)=>b.score-a.score);
+      for(const k of Object.keys(clsEfRanks)) clsEfRanks[k].sort((a,b)=>b.score-a.score);
+
+      // Current term date range for TTD attendance
+      const lpParts=lp.split(' ');
+      const lpTerm=lpParts[0],lpAY=parseInt(lpParts[1]);
+      let ttdStart,ttdEnd;
+      if(lpTerm==='T1'){ttdStart=`${lpAY}-09-01`;ttdEnd=`${lpAY}-12-31`}
+      else if(lpTerm==='T2'){ttdStart=`${lpAY+1}-01-01`;ttdEnd=`${lpAY+1}-03-31`}
+      else{ttdStart=`${lpAY+1}-04-01`;ttdEnd=`${lpAY+1}-07-31`}
+      const ttdEndCap=ttdEnd<_sTodayISO?ttdEnd:_sTodayISO;
+
       lr.forEach(r=>{
         if(!r[flagIdx]) return;
         const px=r[0],pid=r[1];
         const en=getEn(ink,px);
         const tg=curTG(en);
 
-        // Date range from progress periods where flag was set
+        // TG ranks
+        const tgAbList=tgAbRanks[tg]||[];
+        const tgEfList=tgEfRanks[tg]||[];
+        const tgAbRk=tgAbList.findIndex(e=>e.px===px)+1;
+        const tgEfRk=tgEfList.findIndex(e=>e.px===px)+1;
+        const tgAbRkStr=tgAbRk?`Ab ${tgAbRk}/${tgAbList.length}`:'—';
+        const tgEfRkStr=tgEfRk?`Ef ${tgEfRk}/${tgEfList.length}`:'—';
+
+        // Flag date range
         const flagPeriods=[];
         pp.forEach(p=>{
           const pRows=(PRG[ik]||{})[p]||[];
@@ -2180,6 +2272,19 @@ function rSEND(){
         const ytdCodes=pSanc.filter(s=>s[1]===0).length;
         const ytdOnCalls=pSanc.filter(s=>s[1]===1).length;
         const ytdDets=pSanc.filter(s=>s[1]===2).length;
+
+        // YTD Attendance (all subjects)
+        const pAbsAll=(DD.attendance||{})[String(px)]||[];
+        const ytdAbs=pAbsAll.filter(d=>d>=ayStart&&d<=_sTodayISO).length;
+        let ytdTotalLessons=0;
+        for(const[w,tl]of Object.entries(WLK)){if(w>=ayStart&&w<=_sTodayISO)ytdTotalLessons+=tl}
+        const ytdAttPct=ytdTotalLessons>0?((ytdTotalLessons-ytdAbs)/ytdTotalLessons*100).toFixed(1):'—';
+
+        // TTD Attendance (current term)
+        const ttdAbs=pAbsAll.filter(d=>d>=ttdStart&&d<=ttdEndCap).length;
+        let ttdTotalLessons=0;
+        for(const[w,tl]of Object.entries(WLK)){if(w>=ttdStart&&w<=ttdEndCap)ttdTotalLessons+=tl}
+        const ttdAttPct=ttdTotalLessons>0?((ttdTotalLessons-ttdAbs)/ttdTotalLessons*100).toFixed(1):'—';
 
         // Overall averages
         const curScores=SUBS.map(s=>r[3][s]?AS[AM[r[3][s][0]]]||0:0).filter(v=>v>0);
@@ -2211,11 +2316,39 @@ function rSEND(){
           }
         }
 
-        // Per-subject breakdown
+        // Per-subject breakdown with class rankings and attendance
+        const subjAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
         const subjRows=SUBS.map(s=>{
           const cur=r[3][s];
           const curA=cur?AS[AM[cur[0]]]||null:null;
           const curE=cur?cur[1]:null;
+
+          // Class ranking for this subject
+          const clsRec=enrols.find(e=>e.t==='cls'&&e.x===px&&e.s===s&&e.u===null);
+          let clsAbRk='',clsEfRk='';
+          if(clsRec){
+            const key=`${s}|${clsRec.c}`;
+            const abList=clsAbRanks[key]||[];
+            const efList=clsEfRanks[key]||[];
+            const abi=abList.findIndex(e=>e.px===px)+1;
+            const efi=efList.findIndex(e=>e.px===px)+1;
+            if(abi) clsAbRk=`${abi}/${abList.length}`;
+            if(efi) clsEfRk=`${efi}/${efList.length}`;
+          }
+
+          // Per-subject YTD attendance (from attByPeriodSubj)
+          const subjAbps=(ABPS[String(px)]||{});
+          // Average across AY periods for this subject
+          const ayPeriods=pp.filter(p=>parseInt(p.split(' ')[1])===CAY);
+          let sYtdAtt=null;
+          const sVals=ayPeriods.map(p=>subjAbps[p]?.[s]).filter(v=>v!=null);
+          if(sVals.length) sYtdAtt=(sVals.reduce((a,b)=>a+b,0)/sVals.length).toFixed(1);
+
+          // Per-subject TTD attendance (current term only)
+          let sTtdAtt=null;
+          const sTtdVal=subjAbps[lp]?.[s];
+          if(sTtdVal!=null) sTtdAtt=sTtdVal.toFixed?sTtdVal.toFixed(1):String(sTtdVal);
+
           let ltA=null,ltE2=null,lyA=null,lyE2=null;
           if(prevTermP){
             const ltRows2=(PRG[ik]||{})[prevTermP]||[];
@@ -2227,10 +2360,10 @@ function rSEND(){
             const lyR2=lyRows2.find(row=>row[0]===px);
             if(lyR2&&lyR2[3][s]){lyA=AS[AM[lyR2[3][s][0]]]||null;lyE2=lyR2[3][s][1]||null}
           }
-          return{s,curA,curE,ltA,ltE:ltE2,lyA,lyE:lyE2};
+          return{s,curA,curE,ltA,ltE:ltE2,lyA,lyE:lyE2,clsAbRk,clsEfRk,sYtdAtt,sTtdAtt};
         }).filter(s=>s.curA!=null||s.curE!=null);
 
-        pupils.push({px,pid,yg,tg,flagDateStr,ytdCodes,ytdOnCalls,ytdDets,avgAb,avgEf,avgAbLT,avgEfLT,avgAbLY,avgEfLY,subjRows});
+        pupils.push({px,pid,yg,tg,tgAbRkStr,tgEfRkStr,flagDateStr,ytdCodes,ytdOnCalls,ytdDets,ytdAttPct,ttdAttPct,avgAb,avgEf,avgAbLT,avgEfLT,avgAbLY,avgEfLY,subjRows});
       });
     }
     pupils.sort((a,b)=>a.yg-b.yg||a.pid.localeCompare(b.pid));
@@ -2250,26 +2383,37 @@ function rSEND(){
   function buildTable(pupils,flagName,flagColor,tablePrefix){
     if(!pupils.length) return`<div class="dw" style="margin-bottom:1rem"><div class="dwt">${flagName} Pupils</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No ${flagName} pupils found</div></div>`;
 
+    function attCol(v){if(v==='—')return'color:var(--mu)';const n=parseFloat(v);return n>=95?'color:#34d399':n>=90?'color:#eab308':'color:#ef4444;font-weight:600'}
+
     const rows=pupils.map((p,i)=>{
       const uid=`${tablePrefix}-${i}`;
-      const subjDetail=p.subjRows.map(s=>`<tr>
+      const subjDetail=p.subjRows.map(s=>{
+        const abRkHtml=s.clsAbRk?` <span style="font-size:.55rem;color:var(--mu)">(${s.clsAbRk})</span>`:'';
+        const efRkHtml=s.clsEfRk?` <span style="font-size:.55rem;color:var(--mu)">(${s.clsEfRk})</span>`:'';
+        const sYtd=s.sYtdAtt||'—';
+        const sTtd=s.sTtdAtt||'—';
+        return`<tr>
         <td style="font-size:.72rem;font-weight:500;padding-left:2rem">${s.s}</td>
-        <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;${efCol(s.curE)}">${vf(s.curE)}</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;${efCol(s.curE)}">${vf(s.curE)}${efRkHtml}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${vf(s.ltE)}${chgArrow(s.curE,s.ltE)}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${vf(s.lyE)}${chgArrow(s.curE,s.lyE)}</td>
-        <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;${abCol(s.curA)}">${vf(s.curA)}</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;${abCol(s.curA)}">${vf(s.curA)}${abRkHtml}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${vf(s.ltA)}${chgArrow(s.curA,s.ltA)}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${vf(s.lyA)}${chgArrow(s.curA,s.lyA)}</td>
-      </tr>`).join('');
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;${attCol(sYtd)}">${sYtd}</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;${attCol(sTtd)}">${sTtd}</td>
+      </tr>`}).join('');
 
       return`<tr style="cursor:pointer" onclick="const d=document.getElementById('${uid}');d.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')">
         <td style="font-weight:500">${pLink(p.px,p.pid)} <span class="tv-arrow" style="font-size:.5rem;transition:transform .2s;display:inline-block">▼</span></td>
         <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${p.yg}</td>
-        <td style="font-size:.72rem;color:var(--mu)">${p.tg}</td>
+        <td style="font-size:.68rem;color:var(--mu)">${p.tg} <span style="font-size:.55rem">(${p.tgAbRkStr} · ${p.tgEfRkStr})</span></td>
         <td style="font-size:.65rem;color:var(--mu)">${p.flagDateStr}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;${p.ytdCodes?'color:#f97316;font-weight:600':'color:var(--mu)'}">${p.ytdCodes||'—'}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;${p.ytdOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${p.ytdOnCalls||'—'}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;${p.ytdDets?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${p.ytdDets||'—'}</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;${attCol(p.ytdAttPct)}">${p.ytdAttPct}%</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;${attCol(p.ttdAttPct)}">${p.ttdAttPct}%</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;${efCol(p.avgEf)}">${vf(p.avgEf)}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:var(--mu)">${vf(p.avgEfLT)}${chgArrow(p.avgEf,p.avgEfLT)}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:var(--mu)">${vf(p.avgEfLY)}${chgArrow(p.avgEf,p.avgEfLY)}</td>
@@ -2277,9 +2421,9 @@ function rSEND(){
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:var(--mu)">${vf(p.avgAbLT)}${chgArrow(p.avgAb,p.avgAbLT)}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:var(--mu)">${vf(p.avgAbLY)}${chgArrow(p.avgAb,p.avgAbLY)}</td>
       </tr>
-      <tr id="${uid}" class="tt-hide"><td colspan="13" style="padding:0;border:none">
+      <tr id="${uid}" class="tt-hide"><td colspan="15" style="padding:0;border:none">
         <table class="d" style="margin:.3rem 0 .6rem 1rem;width:calc(100% - 1rem)"><thead><tr>
-          <th>Subject</th><th style="text-align:center">Effort</th><th style="text-align:center">Ef. LT</th><th style="text-align:center">Ef. LY</th><th style="text-align:center">Ability</th><th style="text-align:center">Ab. LT</th><th style="text-align:center">Ab. LY</th>
+          <th>Subject</th><th style="text-align:center">Effort (Rk)</th><th style="text-align:center">Ef. LT</th><th style="text-align:center">Ef. LY</th><th style="text-align:center">Ability (Rk)</th><th style="text-align:center">Ab. LT</th><th style="text-align:center">Ab. LY</th><th style="text-align:center">YTD Att.</th><th style="text-align:center">TTD Att.</th>
         </tr></thead><tbody>${subjDetail}</tbody></table>
       </td></tr>`;
     }).join('');
@@ -2288,12 +2432,13 @@ function rSEND(){
     const sinceLabel=flagName==='SEND'?'SEND Since':flagName==='EHCP'?'EHCP Since':'FSM Since';
     return`<div class="dw" style="margin-bottom:1rem"><div class="dwt"><span style="color:${flagColor}">${flagName}</span> Pupils <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${filterLabel} · ${pupils.length} pupil${pupils.length!==1?'s':''}</span></div>
       <div style="overflow-x:auto"><table class="d"><thead><tr>
-        <th>Name</th><th style="text-align:center">Year</th><th>TG</th><th>${sinceLabel}</th>
-        <th style="text-align:center;color:#f97316">YTD Codes</th><th style="text-align:center;color:#ef4444">YTD On-Calls</th><th style="text-align:center;color:#7c3aed">YTD Det.</th>
+        <th>Name</th><th style="text-align:center">Year</th><th>TG (Rankings)</th><th>${sinceLabel}</th>
+        <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center;color:#ef4444">On-Calls</th><th style="text-align:center;color:#7c3aed">Det.</th>
+        <th style="text-align:center">YTD Att.</th><th style="text-align:center">TTD Att.</th>
         <th style="text-align:center">Effort</th><th style="text-align:center">Ef. LT</th><th style="text-align:center">Ef. LY</th>
         <th style="text-align:center">Ability</th><th style="text-align:center">Ab. LT</th><th style="text-align:center">Ab. LY</th>
       </tr></thead><tbody>${rows}</tbody></table></div>
-      <div style="font-size:.6rem;color:var(--mu);margin-top:.4rem">LT = Last Term · LY = Last Year (same term, previous AY) · ▲ improved · ▼ declined · Click row to expand per-subject detail</div>
+      <div style="font-size:.6rem;color:var(--mu);margin-top:.4rem">Rankings in brackets: TG rank for overall, class rank for per-subject · LT = Last Term · LY = Last Year · YTD/TTD = Year/Term to Date attendance · ▲ improved · ▼ declined · Click row to expand</div>
     </div>`;
   }
 
