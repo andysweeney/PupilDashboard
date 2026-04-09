@@ -399,7 +399,9 @@ function allRowsForYG(yearGroup,period){
 }
 
 function bH(c){if(!c)return'<span style="color:var(--mu)">—</span>';const n=AM[c]||c;return`<span class="bg bg-${n.toLowerCase()}">${n}</span>`}
+function bHc(c){if(!c)return'<span style="color:var(--mu)">—</span>';const n=AM[c]||c;return`<span class="bg bg-${n.toLowerCase()}" style="padding:.08rem .18rem;font-size:.52rem;min-width:0;line-height:1">${n[0]}</span>`}
 function eH(e){if(e==null||e===0)return'<span style="color:var(--mu)">—</span>';return`<span class="ed e${e}">${e}</span>`}
+function eHc(e){if(e==null||e===0)return'<span style="color:var(--mu)">—</span>';return`<span class="ed e${e}" style="width:16px;height:16px;font-size:.52rem">${e}</span>`}
 function fV(v,d=1){return v!=null?v.toFixed(d):'—'}
 // Navigate to pupil view for a specific pupil
 function goP(idx){
@@ -918,9 +920,13 @@ function rP(){
   window._pNetCtx={px:x,puName:pNetPuName,ink,subjFilter:isA?null:sf};
   renderPupilNet();
 
-  // Subject table — collapsible, default collapsed
-  const rpp=[...pp],rl=rpp.map(p=>PL[PER.indexOf(p)]);
-  document.getElementById('p-tbl').innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Per-Subject Breakdown</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th>${rl.map(l=>`<th>${l} Ab</th><th>${l} Ef</th>`).join('')}</tr></thead><tbody>${SUBS.map(s=>{const dr=sDrop(en,s);const st=dr?'text-decoration:line-through;color:var(--mu)':'font-weight:500';return`<tr><td style="${st}">${s}${dr?' <span style="font-size:.55rem;color:var(--bel)">(dropped)</span>':''}</td>${rpp.map(p=>{const r=data[p];if(!r||!r.sc[s])return'<td style="color:var(--mu)">—</td><td style="color:var(--mu)">—</td>';const cl=clAt(en,s,p);const tl=cl?`<div style="font-size:.52rem;color:var(--mu);white-space:nowrap">${cl.tc} (C${cl.c})</div>`:'';return`<td>${bH(r.sc[s][0])}${tl}</td><td>${eH(r.sc[s][1])}</td>`}).join('')}</tr>`}).join('')}</tbody></table></div></div></div>`;
+  // Subject table — collapsible, default collapsed, compact with rotated headers
+  const rpp=[...pp],rl=rpp.map(p=>{const parts=PL[PER.indexOf(p)].split(' ');return parts[0]+'<br>'+parts[1]});
+  const thStyle='style="writing-mode:vertical-lr;transform:rotate(180deg);text-align:left;padding:.3rem .15rem;font-size:.55rem;white-space:nowrap;min-width:1.2rem;height:4.5rem"';
+  const abHdr=rl.map(l=>`<th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ab</span></th>`).join('');
+  const efHdr=rl.map(l=>`<th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ef</span></th>`).join('');
+  const pairHdr=rl.map(l=>`<th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ab</span></th><th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ef</span></th>`).join('');
+  document.getElementById('p-tbl').innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Per-Subject Breakdown</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 .5rem .75rem"><div style="overflow-x:auto"><table class="d" style="font-size:.65rem"><thead><tr><th style="text-align:left;font-size:.65rem;position:sticky;left:0;background:var(--sf);z-index:1">Subject</th>${pairHdr}</tr></thead><tbody>${SUBS.map(s=>{const dr=sDrop(en,s);const st=dr?'text-decoration:line-through;color:var(--mu)':'font-weight:500';return`<tr><td style="${st};font-size:.65rem;white-space:nowrap;position:sticky;left:0;background:var(--sf);z-index:1">${s}${dr?' <span style="font-size:.5rem;color:var(--bel)">✕</span>':''}</td>${rpp.map(p=>{const r=data[p];if(!r||!r.sc[s])return'<td style="color:var(--mu);text-align:center;padding:.15rem .1rem;font-size:.6rem">—</td><td style="color:var(--mu);text-align:center;padding:.15rem .1rem;font-size:.6rem">—</td>';return`<td style="text-align:center;padding:.15rem .1rem">${bHc(r.sc[s][0])}</td><td style="text-align:center;padding:.15rem .1rem">${eHc(r.sc[s][1])}</td>`}).join('')}</tr>`}).join('')}</tbody></table></div></div></div>`;
 }
 
 // ── SANCTIONS CHART ──
