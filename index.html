@@ -919,7 +919,7 @@ function rP(){
   renderPupilNet();
 
   // Subject table — collapsible, default collapsed
-  const rpp=[...pp].reverse(),rl=rpp.map(p=>PL[PER.indexOf(p)]);
+  const rpp=[...pp],rl=rpp.map(p=>PL[PER.indexOf(p)]);
   document.getElementById('p-tbl').innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Per-Subject Breakdown</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th>${rl.map(l=>`<th>${l} Ab</th><th>${l} Ef</th>`).join('')}</tr></thead><tbody>${SUBS.map(s=>{const dr=sDrop(en,s);const st=dr?'text-decoration:line-through;color:var(--mu)':'font-weight:500';return`<tr><td style="${st}">${s}${dr?' <span style="font-size:.55rem;color:var(--bel)">(dropped)</span>':''}</td>${rpp.map(p=>{const r=data[p];if(!r||!r.sc[s])return'<td style="color:var(--mu)">—</td><td style="color:var(--mu)">—</td>';const cl=clAt(en,s,p);const tl=cl?`<div style="font-size:.52rem;color:var(--mu);white-space:nowrap">${cl.tc} (C${cl.c})</div>`:'';return`<td>${bH(r.sc[s][0])}${tl}</td><td>${eH(r.sc[s][1])}</td>`}).join('')}</tr>`}).join('')}</tbody></table></div></div></div>`;
 }
 
