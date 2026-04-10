@@ -111,6 +111,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('behaviour',this)">⚠️ Behavioural Concerns</button>
 <button class="tb" onclick="sw('pairs',this)">👥 Problem Groups</button>
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
+<button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
   <button class="tb" onclick="showCTModal()" style="border:1px solid var(--bd)">⚙ Concern Thresholds</button>
@@ -242,6 +243,12 @@ table.d tr:hover td{background:var(--sf2)}
 <div class="cg"><label>Year Group</label><select id="send-yg" onchange="rSEND()"><option value="all">All Years</option><option value="7">Year 7</option><option value="8">Year 8</option><option value="9">Year 9</option><option value="10">Year 10</option><option value="11">Year 11</option></select></div>
 </div>
 <div id="send-out"><div style="color:var(--mu);padding:2rem">Loading...</div></div>
+</div>
+
+<div id="vw-peer" class="vw">
+<div id="peer-rows"></div>
+<div style="margin:.6rem 0"><button id="peer-add-btn" onclick="peerAddRow()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.72rem;padding:.35rem .8rem;border-radius:6px;cursor:pointer">+ Add Comparison Group</button></div>
+<div class="ch-g" id="peer-charts"></div>
 </div>
 
 <div id="vw-progression" class="vw">
@@ -3264,7 +3271,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -3979,6 +3986,235 @@ function rCC(){
 })();
 
   // Expose functions called from HTML attributes to global scope
+// ── PEER GROUP COMPARISON ──
+const PEER_COLORS=['#f97316','#38bdf8','#a78bfa','#34d399','#ef4444'];
+let peerGroups=[];
+let peerIdCounter=0;
+
+function peerBuildSelects(id){
+  const intOpts=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>`<option value="${ink}">Y${curYG(ink)} (${ink})</option>`).join('');
+  const subjOpts=`<option value="all">All Subjects</option>`+SUBS.map(s=>`<option value="${s}">${s}</option>`).join('');
+  const color=PEER_COLORS[(peerGroups.findIndex(g=>g.id===id))%PEER_COLORS.length];
+  const isFirst=peerGroups[0]&&peerGroups[0].id===id;
+  const delBtn=isFirst?'':`<button onclick="peerDelRow(${id})" style="background:none;border:1px solid var(--bd);color:#ef4444;font-size:.65rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer;white-space:nowrap">✕ Remove</button>`;
+
+  return`<div id="peer-row-${id}" style="display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;padding:.5rem .6rem;margin-bottom:.3rem;border-radius:8px;border:1px solid var(--bd);background:var(--sf)">
+    <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+    <select data-peer="${id}" data-f="intake" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${intOpts}</select>
+    <select data-peer="${id}" data-f="fsm" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">FSM: Any</option><option value="Y">FSM: Y</option><option value="N">FSM: N</option></select>
+    <select data-peer="${id}" data-f="ehcp" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">EHCP: Any</option><option value="Y">EHCP: Y</option><option value="N">EHCP: N</option></select>
+    <select data-peer="${id}" data-f="send" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">SEND: Any</option><option value="Y">SEND: Y</option><option value="N">SEND: N</option></select>
+    <select data-peer="${id}" data-f="gender" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">Gender: Both</option><option value="M">Male</option><option value="F">Female</option></select>
+    <select data-peer="${id}" data-f="subject" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${subjOpts}</select>
+    <select data-peer="${id}" data-f="attband" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">Att: Any</option><option value="100">100%</option><option value="97-99">97-99%</option><option value="95-97">95-97%</option><option value="90-95">90-95%</option><option value="85-90">85-90%</option><option value="lt85">&lt;85%</option></select>
+    <span id="peer-count-${id}" style="font-size:.6rem;color:var(--mu);min-width:3rem"></span>
+    ${delBtn}
+  </div>`;
+}
+
+function peerAddRow(){
+  if(peerGroups.length>=5) return;
+  const id=++peerIdCounter;
+  peerGroups.push({id});
+  const container=document.getElementById('peer-rows');
+  container.insertAdjacentHTML('beforeend',peerBuildSelects(id));
+  if(peerGroups.length>=5) document.getElementById('peer-add-btn').style.display='none';
+  rPeer();
+}
+
+function peerDelRow(id){
+  peerGroups=peerGroups.filter(g=>g.id!==id);
+  const row=document.getElementById('peer-row-'+id);
+  if(row) row.remove();
+  document.getElementById('peer-add-btn').style.display='';
+  rPeer();
+}
+
+function peerGetFilters(id){
+  const sel=(f)=>{const el=document.querySelector(`[data-peer="${id}"][data-f="${f}"]`);return el?el.value:'any'};
+  return{intake:parseInt(sel('intake')),fsm:sel('fsm'),ehcp:sel('ehcp'),send:sel('send'),gender:sel('gender'),subject:sel('subject'),attband:sel('attband')};
+}
+
+function peerFilterPupils(filters){
+  const {intake,fsm,ehcp,send,gender,subject,attband}=filters;
+  const ik=`I${intake}`;
+  const pp2=ygPeriods(curYG(intake));
+  if(!pp2.length) return{pupils:[],periods:pp2};
+  const lp=pp2[pp2.length-1];
+  const lr=ygRows(curYG(intake),lp);
+  const WLK=DD.weekLessons||{};
+  const ayStart=`${intake}-09-01`;
+  const _pToday=new Date();
+  const _pTodayISO=`${_pToday.getFullYear()}-${String(_pToday.getMonth()+1).padStart(2,'0')}-${String(_pToday.getDate()).padStart(2,'0')}`;
+
+  let filtered=lr.filter(r=>{
+    const px=r[0];
+    const pu=REG[String(px)];
+    if(!pu||pu.left) return false;
+
+    // Gender
+    if(gender!=='any'&&pu.gender!==gender) return false;
+    // SEND/EHCP/FSM flags from progress row
+    if(send==='Y'&&!r[4]) return false;
+    if(send==='N'&&r[4]) return false;
+    if(ehcp==='Y'&&!r[5]) return false;
+    if(ehcp==='N'&&r[5]) return false;
+    if(fsm==='Y'&&!r[6]) return false;
+    if(fsm==='N'&&r[6]) return false;
+
+    // Attendance band
+    if(attband!=='any'){
+      let attPct;
+      if(subject==='all'){
+        // Overall YTD attendance
+        const pAbs=(DD.attendance||{})[String(px)]||[];
+        const ytdAbs=pAbs.filter(d=>d>=ayStart&&d<=_pTodayISO).length;
+        let ytdTotal=0;
+        for(const[w,tl] of Object.entries(WLK)){if(w>=ayStart&&w<=_pTodayISO)ytdTotal+=tl}
+        attPct=ytdTotal>0?((ytdTotal-ytdAbs)/ytdTotal*100):100;
+      }else{
+        // Subject-specific YTD attendance
+        const subjAbps=(ABPS[String(px)]||{});
+        const ayPeriods2=pp2.filter(p=>parseInt(p.split(' ')[1])===intake);
+        const sVals=ayPeriods2.map(p=>subjAbps[p]?.[subject]).filter(v=>v!=null);
+        attPct=sVals.length?(sVals.reduce((a,b)=>a+b,0)/sVals.length):100;
+      }
+      if(attband==='100'&&attPct<100) return false;
+      if(attband==='97-99'&&(attPct<97||attPct>=100)) return false;
+      if(attband==='95-97'&&(attPct<95||attPct>=97)) return false;
+      if(attband==='90-95'&&(attPct<90||attPct>=95)) return false;
+      if(attband==='85-90'&&(attPct<85||attPct>=90)) return false;
+      if(attband==='lt85'&&attPct>=85) return false;
+    }
+    return true;
+  });
+
+  return{pupils:filtered,periods:pp2,intake,subject};
+}
+
+function peerComputeSeries(result){
+  const {pupils,periods,intake,subject}=result;
+  const ik=`I${intake}`;
+  const WLK=DD.weekLessons||{};
+
+  const abData=[],efData=[],attData=[];
+  const labs=[];
+
+  periods.forEach(p=>{
+    labs.push(PL[PER.indexOf(p)]||p);
+    const pRows=(PRG[ik]||{})[p]||[];
+    const pxSet=new Set(pupils.map(r=>r[0]));
+
+    // Ability & Effort averages
+    let abSum=0,abN=0,efSum=0,efN=0;
+    pRows.forEach(r=>{
+      if(!pxSet.has(r[0])) return;
+      if(subject==='all'){
+        SUBS.forEach(s=>{
+          if(r[3][s]){
+            const a=AS[AM[r[3][s][0]]]||0;if(a>0){abSum+=a;abN++}
+            const e=r[3][s][1];if(e>0){efSum+=e;efN++}
+          }
+        });
+      }else{
+        if(r[3][subject]){
+          const a=AS[AM[r[3][subject][0]]]||0;if(a>0){abSum+=a;abN++}
+          const e=r[3][subject][1];if(e>0){efSum+=e;efN++}
+        }
+      }
+    });
+    abData.push(abN?abSum/abN:null);
+    efData.push(efN?efSum/efN:null);
+
+    // Attendance for this period
+    const pa=p.split(' ');const t=pa[0];const ay=parseInt(pa[1]);
+    let ps2,pe;
+    if(t==='T1'){ps2=`${ay}-09-01`;pe=`${ay}-12-31`}
+    else if(t==='T2'){ps2=`${ay+1}-01-01`;pe=`${ay+1}-03-31`}
+    else{ps2=`${ay+1}-04-01`;pe=`${ay+1}-07-31`}
+    const _pt=new Date();const _ptISO=`${_pt.getFullYear()}-${String(_pt.getMonth()+1).padStart(2,'0')}-${String(_pt.getDate()).padStart(2,'0')}`;
+    const peCap=pe<_ptISO?pe:_ptISO;
+    if(ps2>_ptISO){attData.push(null);return}
+
+    let tl=0;for(const[w,v] of Object.entries(WLK)){if(w>=ps2&&w<=peCap)tl+=v}
+    if(!tl){attData.push(null);return}
+    let totalAbs=0;
+    pupils.forEach(r=>{
+      const abs2=(DD.attendance||{})[String(r[0])]||[];
+      totalAbs+=abs2.filter(d=>d>=ps2&&d<=peCap).length;
+    });
+    const totalL=tl*pupils.length;
+    attData.push(totalL>0?parseFloat(((totalL-totalAbs)/totalL*100).toFixed(1)):null);
+  });
+
+  return{labs,abData,efData,attData};
+}
+
+function peerLabel(filters,count){
+  const parts=[];
+  parts.push(`Y${curYG(filters.intake)}`);
+  if(filters.gender!=='any') parts.push(filters.gender==='M'?'Male':'Female');
+  if(filters.fsm!=='any') parts.push('FSM:'+filters.fsm);
+  if(filters.ehcp!=='any') parts.push('EHCP:'+filters.ehcp);
+  if(filters.send!=='any') parts.push('SEND:'+filters.send);
+  if(filters.subject!=='all') parts.push(filters.subject);
+  if(filters.attband!=='any') parts.push('Att:'+filters.attband);
+  return`${parts.join(' · ')} (n=${count})`;
+}
+
+function rPeer(){
+  dc('peerAb');dc('peerEf');dc('peerAtt');
+  if(!peerGroups.length){
+    document.getElementById('peer-charts').innerHTML='<div style="color:var(--mu);padding:1rem">Add a comparison group to begin</div>';
+    return;
+  }
+
+  const allSeries=[];
+  peerGroups.forEach((g,gi)=>{
+    const filters=peerGetFilters(g.id);
+    const result=peerFilterPupils(filters);
+    const label=peerLabel(filters,result.pupils.length);
+    const countEl=document.getElementById('peer-count-'+g.id);
+    if(countEl) countEl.textContent=`n=${result.pupils.length}`;
+    if(!result.pupils.length){
+      allSeries.push({label,abData:[],efData:[],attData:[],labs:[],color:PEER_COLORS[gi%PEER_COLORS.length]});
+      return;
+    }
+    const series=peerComputeSeries(result);
+    allSeries.push({...series,label,color:PEER_COLORS[gi%PEER_COLORS.length]});
+  });
+
+  // Use longest labels array
+  const maxLabs=allSeries.reduce((a,b)=>b.labs.length>a.length?b.labs:a,[]);
+  if(!maxLabs.length){
+    document.getElementById('peer-charts').innerHTML='<div style="color:var(--mu);padding:1rem">No data for selected filters</div>';
+    return;
+  }
+
+  const abNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span>';
+  const efNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span>';
+
+  document.getElementById('peer-charts').innerHTML=`
+    <div class="chc"><div class="cht">Ability Over Time ${abNote}</div><div class="chw"><canvas id="c-peerAb"></canvas></div></div>
+    <div class="chc"><div class="cht">Effort Over Time ${efNote}</div><div class="chw"><canvas id="c-peerEf"></canvas></div></div>
+    <div class="chc"><div class="cht">Attendance Over Time</div><div class="chw"><canvas id="c-peerAtt"></canvas></div></div>`;
+
+  const mkDS=(series,key)=>series.map(s=>({label:s.label,data:s[key],borderColor:s.color,backgroundColor:s.color+'18',borderWidth:2,pointRadius:3,pointBackgroundColor:s.color,tension:.3,fill:false,spanGaps:true}));
+
+  const chartOpts=(yMin,yMax,rev,pct)=>({responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:8},boxWidth:10,padding:8}}},scales:{y:{reverse:!!rev,min:yMin,max:yMax,ticks:{color:'#7a85a0',stepSize:rev?1:undefined,callback:pct?v=>v+'%':undefined},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:7}},grid:{display:false},border:{color:'#262d44'}}}});
+
+  // Ability chart
+  sc2('peerAb',new Chart(document.getElementById('c-peerAb'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'abData')},options:chartOpts(0.5,7.5,false,false)}));
+
+  // Effort chart (inverted)
+  sc2('peerEf',new Chart(document.getElementById('c-peerEf'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'efData')},options:chartOpts(0.5,4.5,true,false)}));
+
+  // Attendance chart
+  const allAttVals=allSeries.flatMap(s=>s.attData.filter(v=>v!=null));
+  const attMin=allAttVals.length?Math.max(0,Math.min(80,Math.min(...allAttVals)-3)):80;
+  sc2('peerAtt',new Chart(document.getElementById('c-peerAtt'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'attData')},options:chartOpts(attMin,100,false,true)}));
+}
+
   window.sw=sw;
   window.rP=rP;
   window.rSV=rSV;
@@ -3995,6 +4231,9 @@ function rCC(){
   window.renderPupilNet=renderPupilNet;
   window.renderAttTable=renderAttTable;
   window.renderDistCharts=renderDistCharts;
+  window.peerAddRow=peerAddRow;
+  window.peerDelRow=peerDelRow;
+  window.rPeer=rPeer;
   window.popBCTG=popBCTG;
   window.goP=goP;
   window.applyCT=applyCT;
