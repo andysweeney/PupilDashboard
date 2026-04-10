@@ -70,23 +70,26 @@ table.d tr:hover td{background:var(--sf2)}
   .dw, .crd, .chc { background: #fff !important; border-color: #ccc !important; box-shadow: none !important; }
   .crd-g, .ch-g { page-break-inside: avoid; }
   #p-acad-title, #p-behav-title, #p-dist-title, #p-hist-title { page-break-before: avoid; }
-  /* Sections between print breaks should shrink to fit one page */
   #p-hd, #p-acad-title, #p-crds, #p-ch { page-break-inside: avoid; }
   #p-tt, #p-sanc, #p-sanc-subj, #p-heatmaps { page-break-inside: avoid; }
   #p-dist { page-break-inside: avoid; }
   #p-pupil-net { page-break-inside: avoid; }
   #p-tbl { page-break-inside: avoid; }
-  /* Scale each print section to fit */
-  #vw-pupil > div[style*="page-break-before"] ~ *:not([style*="page-break-before"]) { max-height: 95vh; overflow: hidden; }
-  /* Hide tooltips */
+  /* Hide tooltips and scrollbars */
   #hm-tip, #dist-tip, #net-tip, #pnet-tip { display: none !important; }
-  /* Ensure SVGs print */
-  svg { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-  /* Charts scale down */
-  canvas { max-height: 250px !important; }
-  .chw { height: 200px !important; max-height: 200px !important; }
+  /* Remove scrollable overflow for print */
+  [style*="overflow-x:auto"], [style*="overflow-x: auto"] { overflow-x: visible !important; }
+  div[style*="overflow:hidden"] { overflow: visible !important; }
+  /* Ensure SVGs and colours print */
+  svg, .bg, .ed, .e1, .e2, .e3, .e4 { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  /* Charts fit on page */
+  canvas { max-height: 200px !important; }
+  .chw { height: 180px !important; max-height: 180px !important; }
+  /* Sanctions chart container */
+  #p-sanc .dw, #p-sanc-subj .dw { max-width: 100% !important; overflow: visible !important; }
+  #p-sanc [style*="height:clamp"], #p-sanc-subj [style*="height:clamp"] { height: 150px !important; }
   /* Network graphs scale down */
-  #p-pupil-net svg, #cl-network svg { max-height: 400px !important; }
+  #p-pupil-net svg, #cl-network svg { max-height: 350px !important; }
   /* Compact cards */
   .crd-g { gap: 0.5rem !important; }
   .ch-g { gap: 0.5rem !important; }
@@ -818,12 +821,12 @@ function rP(){
 
   if(isA){
     document.getElementById('p-crds').innerHTML=`
-    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]})</div>
+    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${fN(a6)}<span style="font-size:.8rem;color:var(--mu)">/7</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
     </div>
-    <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]})</div>
+    <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)}<span style="font-size:.8rem;color:var(--mu)">/4</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -864,7 +867,7 @@ function rP(){
   // Charts
   dc('pab');dc('pef');
   const labs=pp.map(p=>PL[PER.indexOf(p)]);
-  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time<button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time<button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
+  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
   const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:`hsl(${i*360/act.length},58%,56%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay: subject-specific when single subject, overall when all
@@ -958,7 +961,10 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   const wks=[],wm={};let cur=new Date(fm);
   while(cur<=lm){const k=localISO(cur);wks.push(k);wm[k]=[0,0,0];cur.setDate(cur.getDate()+7)}
   ps.forEach(r=>{const m=localISO(gm(new Date(r[2]+'T12:00:00')));if(wm[m])wm[m][r[1]]++});
-  const wl=wks.map(w=>{const d2=new Date(w+'T12:00:00');return d2.getDate()<=7?d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'}):''});
+  const wl=wks.map((w,i)=>{const d2=new Date(w+'T12:00:00');const day=d2.getDate();if(day<=7)return d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'});return''});
+  // Ensure at least one label per month by filling gaps
+  const monthSeen={};
+  wks.forEach((w,i)=>{const d2=new Date(w+'T12:00:00');const mk=d2.getFullYear()+'-'+d2.getMonth();if(!monthSeen[mk]&&!wl[i]){wl[i]=d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'})}monthSeen[mk]=true});
 
   // Attendance overlay
   const pAbsRaw=(DD.attendance||{})[String(x)]||[];
@@ -1515,7 +1521,7 @@ function rCmp(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Year ${targetYG} ${subLabel} \u2014 Cohort Comparison Over Time</div>
-    <table class="d"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution \u2014 Final Term</th><th style="color:#f97316">SEND</th><th style="color:#a78bfa">EHCP</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:#f97316">SEND</th><th style="color:#a78bfa">EHCP</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpef"></canvas></div></div></div>`;
 
@@ -1698,7 +1704,7 @@ function rPrg(){
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgef"></canvas></div></div></div>
     <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">${subLabel} Grade Distribution Over Time — Intake ${ink}</div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prggrade"></canvas></div></div>
-    <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">Effort Distribution Over Time — Intake ${ink}</div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prgefgrade"></canvas></div></div>`;
+    <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">Effort Distribution Over Time — Intake ${ink} <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prgefgrade"></canvas></div></div>`;
 
   dc('prgab');dc('prgef');
 
@@ -3267,13 +3273,13 @@ function rSV(){
   document.getElementById('sv-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} ${sub} Report Breakdown</div>`;
 
   document.getElementById('sv-cards').innerHTML=`
-    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]})</div>
+    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${fN(avg)}<span style="font-size:.8rem;color:var(--mu)">/7</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
     </div>
-    <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]})</div>
+    <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)}<span style="font-size:.8rem;color:var(--mu)">/4</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -3283,12 +3289,12 @@ function rSV(){
     <div class="crd"><div class="ct2">Effort Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${efRows}</div></div>`;
 
   dc('svab');dc('svef');dc('svst');dc('svefst');
-  document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup})</div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time</div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
+  document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
 
   // Distribution section title
   document.getElementById('sv-dist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Distribution Over Time</div>`;
 
-  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %)</div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %)</div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
+  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
 
   // Build per-period data points for all pupils and each sub-group
   function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
@@ -3651,7 +3657,7 @@ function rCL(){
     <div class="crd"><div class="ct2">Flags</div><div style="margin-top:.25rem"><span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM</div></div>`;
 
   dc('clab');dc('clef');dc('clst');dc('clefst');
-  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time</div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time</div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %)</div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %)</div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
+  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
 
   function ptAb(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
   function ptEf(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}
