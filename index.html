@@ -746,7 +746,7 @@ function rP(){
     const fmtOf=(subj,total,col)=>`<span style="color:${col}">${subj}</span><span style="color:var(--mu)"> of ${total}</span>`;
     sancHtml=`<span style="color:var(--mu)">Sanctions ${ayLabel} (${sf}): ${fmtOf(ssC,ayCodes,'#f97316')} Codes · ${fmtOf(ssO,ayOnCalls,'#ef4444')} On-Calls · ${fmtOf(ssD,ayDetentions,'#7c3aed')} Detentions</span>`;
   }
-  const summaryLine=`<div style="display:flex;flex-wrap:wrap;gap:.15rem .8rem;font-size:.75rem;margin-top:.3rem"><span style="color:var(--mu)">Attendance ${ayLabel}: <b style="color:${ayAttCol}">${ayAttPct}%</b></span>${subjAttHtml}${sancHtml}</div>`;
+  const summaryLine=`<div style="display:flex;flex-wrap:wrap;gap:.15rem .8rem;font-size:.85rem;margin-top:.3rem"><span style="color:var(--mu)">Attendance ${ayLabel}: <b style="color:${ayAttCol}">${ayAttPct}%</b></span>${subjAttHtml}${sancHtml}</div>`;
 
   // Build SEND/EHCP/FSM detail line with inferred dates from progress periods
   function flagDates(field){
@@ -896,7 +896,7 @@ function rP(){
     const attLabel=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     abDS.push({label:attLabel,data:attData,borderColor:'#34d399',backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:'#34d399',tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{min:.5,max:7.5,position:'left',ticks:{color:'#7a85a0',font:{size:8},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#34d39944'}},x:{ticks:{color:'#7a85a0',font:{size:8}},grid:{display:false},border:{color:'#262d44'}}}}}));
+  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,position:'left',ticks:{color:'#7a85a0',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#34d39944'}},x:{ticks:{color:'#7a85a0',font:{size:8}},grid:{display:false},border:{color:'#262d44'}}}}}));
   const efDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][1]||null:null),borderColor:`hsl(${i*360/act.length},58%,56%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay on effort chart
@@ -911,7 +911,7 @@ function rP(){
     const attLabelE=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     efDS.push({label:attLabelE,data:attDataE,borderColor:'#34d399',backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:'#34d399',tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pef',new Chart(document.getElementById('c-pef'),{type:'line',data:{labels:labs,datasets:efDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{reverse:true,min:.5,max:4.5,position:'left',ticks:{color:'#7a85a0',font:{size:8},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(efDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#34d39944'}},x:{ticks:{color:'#7a85a0',font:{size:8}},grid:{display:false},border:{color:'#262d44'}}}}}));
+  sc2('pef',new Chart(document.getElementById('c-pef'),{type:'line',data:{labels:labs,datasets:efDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{reverse:true,min:1,max:4,position:'left',ticks:{color:'#7a85a0',font:{size:11},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(efDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#34d39944'}},x:{ticks:{color:'#7a85a0',font:{size:8}},grid:{display:false},border:{color:'#262d44'}}}}}));
 
   // Sanctions charts — compute group attendance for overlay
   // For All Subjects: TG average attendance
@@ -1655,9 +1655,9 @@ function rCmp(){
   const efMin=Math.max(0.5,Math.floor((efMinV-0.1)*10)/10);
   const efMax=Math.min(4.5,Math.ceil((efMaxV+0.1)*10)/10);
 
-  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets)},scales:{y:{min:abMin,max:abMax,ticks:{color:'#7a85a0',font:{size:8},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}}}}}));
+  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets)},scales:{y:{min:abMin,max:abMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}}}}}));
 
-  sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,ticks:{color:'#7a85a0',stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}}}}}));
+  sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}}}}}));
 }
 
 // ── YEAR PROGRESSION VIEW ──
@@ -1871,7 +1871,7 @@ function rPrg(){
       tooltip:subgroupTip()
     },
     scales:{
-      y:{min:yMin,max:yMax,ticks:{color:'#7a85a0',font:{size:8},stepSize:1,
+      y:{min:yMin,max:yMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1,
         callback:isAb?v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}:undefined},
         grid:{color:'#262d4422'},border:{color:'#262d44'}},
       x:{ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}}
@@ -3089,8 +3089,8 @@ function renderPupilNet(){
 
   const satSvg=satNodes.map(n=>{
     return`<circle cx="${n.x}" cy="${n.y}" r="${n.r}" fill="#f9731622" stroke="#f97316" stroke-width="1.5" style="cursor:pointer" data-px="${n.px}" onclick="goP(${n.px})"/>
-    <text x="${n.x}" y="${n.y+n.r+11}" fill="var(--tx)" font-size="7.5" font-family="Outfit" text-anchor="middle" style="pointer-events:none">${n.name}</text>
-    <text x="${n.x}" y="${n.y+n.r+19}" fill="var(--mu)" font-size="6" font-family="Outfit" text-anchor="middle" style="pointer-events:none">${n.tg}</text>
+    <text x="${n.x}" y="${n.y+n.r+11}" fill="var(--tx)" font-size="9.5" font-family="Outfit" text-anchor="middle" style="pointer-events:none">${n.name}</text>
+    <text x="${n.x}" y="${n.y+n.r+21}" fill="var(--mu)" font-size="7" font-family="Outfit" text-anchor="middle" style="pointer-events:none">${n.tg}</text>
     <text x="${n.x}" y="${n.y+3}" fill="#f97316" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle" font-weight="600" style="pointer-events:none">${n.w}</text>`;
   }).join('');
 
@@ -3238,7 +3238,7 @@ function renderNet(){
   const nodeSvg=nodes.map(n=>{
     const col=n.sc===0?'var(--bd)':n.connected?'#f97316':'#6488ff';const tc=n.sc===0?'var(--mu)':'var(--tx)';
     return`<circle cx="${n.x}" cy="${n.y}" r="${n.r}" fill="${col}22" stroke="${col}" stroke-width="1.5" style="cursor:pointer" data-px="${n.px}" onclick="goP(${n.px})"/>
-    <text x="${n.x}" y="${n.y+n.r+12}" fill="${tc}" font-size="8" font-family="Outfit" text-anchor="middle" style="pointer-events:none">${n.name}</text>
+    <text x="${n.x}" y="${n.y+n.r+12}" fill="${tc}" font-size="10" font-family="Outfit" text-anchor="middle" style="pointer-events:none">${n.name}</text>
     ${n.sc>0?`<text x="${n.x}" y="${n.y+3.5}" fill="${col}" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle" font-weight="600" style="pointer-events:none">${n.sc}</text>`:''}`;
   }).join('');
 
@@ -3541,8 +3541,8 @@ function rSV(){
 
   const showLegend={labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:8,padding:8}};
 
-  sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#7a85a0',font:{size:8},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
-  sc2('svef',new Chart(document.getElementById('c-svef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#7a85a0',stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
+  sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
+  sc2('svef',new Chart(document.getElementById('c-svef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
   sc2('svst',new Chart(document.getElementById('c-svst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#7a85a0'},grid:{color:'#262d4422'},border:{color:'#262d44'}},y:{stacked:true,max:100,ticks:{color:'#7a85a0',callback:v=>v+'%'},grid:{color:'#262d4422'},border:{color:'#262d44'}}}}}));
 
   const effortColors2={'1':'#ef4444','2':'#f97316','3':'#38bdf8','4':'#34d399'};
@@ -3886,8 +3886,8 @@ function rCL(){
   const efYMin=allEfV.length?Math.max(0.5,Math.floor((Math.min(...allEfV)-0.3)*10)/10):0.5;
   const efYMax=allEfV.length?Math.min(4.5,Math.ceil((Math.max(...allEfV)+0.3)*10)/10):4.5;
   const showLegend={labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:8,padding:8}};
-  sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#7a85a0',font:{size:8},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
-  sc2('clef',new Chart(document.getElementById('c-clef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#7a85a0',stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
+  sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
+  sc2('clef',new Chart(document.getElementById('c-clef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
   sc2('clst',new Chart(document.getElementById('c-clst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#7a85a0'},grid:{color:'#262d4422'},border:{color:'#262d44'}},y:{stacked:true,max:100,ticks:{color:'#7a85a0',callback:v=>v+'%'},grid:{color:'#262d4422'},border:{color:'#262d44'}}}}}));
   const effortColors2={'1':'#ef4444','2':'#f97316','3':'#38bdf8','4':'#34d399'};
   const effortLabels2=['1 — Excellent','2 — Good','3 — Developing','4 — Low'];
@@ -4207,13 +4207,16 @@ function rPeer(){
 
   const mkDS=(series,key)=>series.map(s=>({label:s.label,data:s[key],borderColor:s.color,backgroundColor:s.color+'18',borderWidth:2,pointRadius:3,pointBackgroundColor:s.color,tension:.3,fill:false,spanGaps:true}));
 
-  const chartOpts=(yMin,yMax,rev,pct)=>({responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:8},boxWidth:10,padding:8}}},scales:{y:{reverse:!!rev,min:yMin,max:yMax,ticks:{color:'#7a85a0',stepSize:rev?1:undefined,callback:pct?v=>v+'%':undefined},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:7}},grid:{display:false},border:{color:'#262d44'}}}});
+  const chartOpts=(yMin,yMax,rev,pct)=>({responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:8},boxWidth:10,padding:8}}},scales:{y:{reverse:!!rev,min:yMin,max:yMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:rev?1:undefined,callback:pct?v=>v+'%':undefined},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:7}},grid:{display:false},border:{color:'#262d44'}}}});
 
-  // Ability chart
-  sc2('peerAb',new Chart(document.getElementById('c-peerAb'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'abData')},options:chartOpts(0.5,7.5,false,false)}));
+  // Ability chart - dynamic axis
+  const allAbVals=allSeries.flatMap(s=>s.abData.filter(v=>v!=null));
+  const abMinP=allAbVals.length?Math.max(1,Math.floor(Math.min(...allAbVals)-.5)):1;
+  const abMaxP=allAbVals.length?Math.min(7,Math.ceil(Math.max(...allAbVals)+.5)):7;
+  sc2('peerAb',new Chart(document.getElementById('c-peerAb'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'abData')},options:chartOpts(abMinP,abMaxP,false,false)}));
 
-  // Effort chart (inverted)
-  sc2('peerEf',new Chart(document.getElementById('c-peerEf'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'efData')},options:chartOpts(0.5,4.5,true,false)}));
+  // Effort chart (inverted) - 1 to 4
+  sc2('peerEf',new Chart(document.getElementById('c-peerEf'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'efData')},options:chartOpts(1,4,true,false)}));
 
   // Attendance chart
   const allAttVals=allSeries.flatMap(s=>s.attData.filter(v=>v!=null));
