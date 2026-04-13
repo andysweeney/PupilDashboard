@@ -561,7 +561,13 @@ function renderTimetable(x){
     for(let d=0;d<5;d++){
       const cell=grid[d][p];
       if(cell){
-        const subj=cell[0],tchr=cell[1];const col=TT_COLORS[subj]||'var(--ac)';
+        const subj=cell[0];
+        // Look up current teacher from enrolments (not static timetable)
+        const pu2=REG[String(x)];
+        const en2=pu2?getEn(pu2.intake,x):[];
+        const clsRec2=en2.find(r=>r.t==='cls'&&r.s===subj&&r.u===null);
+        const tchr=clsRec2?clsRec2.tc:cell[1];
+        const col=TT_COLORS[subj]||'var(--ac)';
         const sk=d+'|'+p;const sc=slotSanc[sk];const score=slotScores[sk]||0;
         const heat=heatBg(score);
         html+=`<div class="tt-cell" style="border-left:2px solid ${col};${heat}"><span class="tt-subj">${subj}</span><span class="tt-tchr">${tchr}</span>${(()=>{if(!sc)return"";const parts=[];if(sc.c)parts.push('<span style="color:#f97316">'+sc.c+' Code'+(sc.c!==1?'s':'')+'</span>');if(sc.o)parts.push('<span style="color:#ef4444">'+sc.o+' On-Call'+(sc.o!==1?'s':'')+'</span>');if(sc.d)parts.push('<span style="color:#7c3aed">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.55rem;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})()}</div>`;
