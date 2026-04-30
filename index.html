@@ -2460,12 +2460,14 @@ function rSEND(){
 
         // Flag date range
         const flagPeriods=[];
-        pp.forEach(p=>{
-          const pRows=(PRG[ik]||{})[p]||[];
-          const pRow=pRows.find(row=>row[0]===px);
-          if(pRow&&pRow[flagIdx]) flagPeriods.push(PL[PER.indexOf(p)]||p);
-        });
-        const flagDateStr=flagPeriods.length?`${flagPeriods[0]} → present`:'Current';
+        if(flagIdx!==null){
+          pp.forEach(p=>{
+            const pRows=(PRG[ik]||{})[p]||[];
+            const pRow=pRows.find(row=>row[0]===px);
+            if(pRow&&pRow[flagIdx]) flagPeriods.push(PL[PER.indexOf(p)]||p);
+          });
+        }
+        const flagDateStr=flagPeriods.length?`${flagPeriods[0]} → present`:'—';
 
         // YTD sanctions
         const pSanc=SAN.filter(s=>s[0]===px&&s[2]>=ayStart&&s[2]<=_sTodayISO);
@@ -2599,9 +2601,9 @@ function rSEND(){
 
     // Summary header rows
     const hdrStyle='font-size:.62rem;font-family:"JetBrains Mono",monospace;text-align:center;color:var(--mu);padding:.2rem .3rem';
-    const yearRow=yearAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">Year Average</td><td style="${hdrStyle}">${yearAvgs.codes}</td><td style="${hdrStyle}">${yearAvgs.oncalls}</td><td style="${hdrStyle}">${yearAvgs.dets}</td><td style="${hdrStyle};${attCol(yearAvgs.ytdAtt)}">${yearAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(yearAvgs.ttdAtt)}">${yearAvgs.ttdAtt}</td><td style="${hdrStyle}" colspan="6"></td></tr>`:'';
+    const yearRow=yearAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">Year Average</td><td style="${hdrStyle}">${yearAvgs.codes}</td><td style="${hdrStyle}">${yearAvgs.oncalls}</td><td style="${hdrStyle}">${yearAvgs.dets}</td><td style="${hdrStyle};${attCol(yearAvgs.ytdAtt)}">${yearAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(yearAvgs.ttdAtt)}">${yearAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(yearAvgs.avgEf))}">${yearAvgs.avgEf}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(yearAvgs.avgAb))}">${yearAvgs.avgAb}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
     const nonLabel=flagName==='SEND'?'Non-SEND':flagName==='EHCP'?'Non-EHCP':'Non-FSM';
-    const nonRow=nonFlagAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">${nonLabel} Average</td><td style="${hdrStyle}">${nonFlagAvgs.codes}</td><td style="${hdrStyle}">${nonFlagAvgs.oncalls}</td><td style="${hdrStyle}">${nonFlagAvgs.dets}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ytdAtt)}">${nonFlagAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ttdAtt)}">${nonFlagAvgs.ttdAtt}</td><td style="${hdrStyle}" colspan="6"></td></tr>`:'';
+    const nonRow=nonFlagAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">${nonLabel} Average</td><td style="${hdrStyle}">${nonFlagAvgs.codes}</td><td style="${hdrStyle}">${nonFlagAvgs.oncalls}</td><td style="${hdrStyle}">${nonFlagAvgs.dets}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ytdAtt)}">${nonFlagAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ttdAtt)}">${nonFlagAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(nonFlagAvgs.avgEf))}">${nonFlagAvgs.avgEf}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(nonFlagAvgs.avgAb))}">${nonFlagAvgs.avgAb}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
 
     const rows=pupils.map((p,i)=>{
       const uid=`${tablePrefix}-${i}`;
@@ -2676,7 +2678,11 @@ function rSEND(){
       const ttdAtts=list.map(p=>parseFloat(p.ttdAttPct)).filter(v=>!isNaN(v));
       const ytdAtt=ytdAtts.length?(ytdAtts.reduce((a,b)=>a+b,0)/ytdAtts.length).toFixed(1)+'%':'—';
       const ttdAtt=ttdAtts.length?(ttdAtts.reduce((a,b)=>a+b,0)/ttdAtts.length).toFixed(1)+'%':'—';
-      return{codes:codes.toFixed(1),oncalls:oncalls.toFixed(1),dets:dets.toFixed(1),ytdAtt,ttdAtt};
+      const efVals=list.map(p=>p.avgEf).filter(v=>v!=null);
+      const abVals=list.map(p=>p.avgAb).filter(v=>v!=null);
+      const avgEf=efVals.length?(efVals.reduce((a,b)=>a+b,0)/efVals.length).toFixed(1):'—';
+      const avgAb=abVals.length?(abVals.reduce((a,b)=>a+b,0)/abVals.length).toFixed(1):'—';
+      return{codes:codes.toFixed(1),oncalls:oncalls.toFixed(1),dets:dets.toFixed(1),ytdAtt,ttdAtt,avgEf,avgAb};
     };
     const year=calc(allPupilData);
     const nonFlag=calc(allPupilData.filter(p=>!flaggedPxSet.has(p.px)));
@@ -3495,6 +3501,7 @@ function rSV(){
   const efPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgEf(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
 
   // Sub-group averages at each point in time (current period) — only pupils taking this subject
+  const ink=CFG.intakes.find(i=>curYG(i)===yearGroup)||CAY;
   const subjPupilSet=new Set((ENR[inkKey(ink)]||[]).filter(r=>r.t==='cls'&&r.s===sub&&r.u===null).map(r=>r.x));
   const lrSubj=lr.filter(r=>r[3][sub]||subjPupilSet.has(r[0]));
   function sgAvgAb(flag){const rs=lrSubj.filter(r=>r[flag]);return avgAb(rs)}
