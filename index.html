@@ -2563,7 +2563,7 @@ function rSEND(){
           // Approximate subject lessons YTD: total lessons × (subject lpw / 25)
           const grid2=TT_DATA[String(px)];
           let sLPW=0;
-          if(grid2){for(let dd=0;dd<5;dd++)for(let pp2=0;pp2<5;pp2++){if(grid2[dd][pp2]&&grid2[dd][pp2][0]===s)sLPW++}}
+          if(grid2){for(let dd=0;dd<5;dd++)for(let pp2=0;pp2<5;pp2++){const gc=grid2[dd]?.[pp2];if(gc&&(gc[0]===s||(gc.length===4&&gc[2]===s)))sLPW++}}
           let sYtdTotalL=0,sTtdTotalL=0;
           for(const[w,tl]of Object.entries(WLK)){
             if(w>=ayStart&&w<=_sTodayISO) sYtdTotalL+=sLPW;
