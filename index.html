@@ -2586,7 +2586,7 @@ function rSEND(){
             if(lyR2&&lyR2[3][s]){lyA=AS[AM[lyR2[3][s][0]]]||null;lyE2=lyR2[3][s][1]||null}
           }
           return{s,curA,curE,ltA,ltE:ltE2,lyA,lyE:lyE2,clsAbRk,clsEfRk,sYtdAtt,sTtdAtt};
-        }).filter(s=>s.curA!=null||s.curE!=null);
+        }).filter(s=>s.curA!=null||s.curE!=null||s.sYtdAtt!=='—'||s.sTtdAtt!=='—');
 
         pupils.push({px,pid,yg,tg,tgAbRkStr,tgEfRkStr,flagDateStr,ytdCodes,ytdOnCalls,ytdDets,ytdAttPct,ttdAttPct,avgAb,avgEf,avgAbLT,avgEfLT,avgAbLY,avgEfLY,subjRows});
       });
