@@ -1679,7 +1679,7 @@ function rCmp(){
       // Sanctions for this cohort in this academic year — filtered to relevant subject
       const pupilIdxSet=new Set(rows.map(r=>r[0]));
       const ayStart=`${ay}-09-01`,ayEnd=`${ay+1}-07-31`;
-      const coSanc=(DD.sanctions||[]).filter(s=>pupilIdxSet.has(s[0])&&s[2]>=ayStart&&s[2]<=ayEnd&&(isAll||s[3]===sub));
+      const coSanc=(DD.sanctions||[]).filter(s=>pupilIdxSet.has(s[0])&&s[2]>=ayStart&&s[2]<=ayEnd&&(isAll||s[3]===sub||s[3]===null));
       const nCodes=coSanc.filter(s=>s[1]===0).length;
       const nOnCalls=coSanc.filter(s=>s[1]===1).length;
       const nDetentions=coSanc.filter(s=>s[1]===2).length;
