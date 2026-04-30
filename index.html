@@ -3759,7 +3759,7 @@ function rCL(){
   const yearGroup=parseInt(document.getElementById('cl-yg').value);
   const sub=document.getElementById('cl-sub').value;
   const cl=parseInt(document.getElementById('cl-cls').value);
-  if(!yearGroup||!sub||!cl)return;
+  if(!yearGroup||!sub||isNaN(cl))return;
   const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('cl-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('cl-charts').innerHTML='';document.getElementById('cl-alerts').innerHTML='';document.getElementById('cl-network').innerHTML='';document.getElementById('cl-title').innerHTML='';document.getElementById('cl-send-title').innerHTML='';document.getElementById('cl-send').innerHTML='';document.getElementById('cl-perf-title').innerHTML='';return}
   const nP=pp.length;
   const lp=pp[nP-1],labs=pp.map(p=>PL[PER.indexOf(p)]);
