@@ -363,11 +363,15 @@ table.d tr:hover td{background:var(--sf2)}
       DD.sanctions=DD.sanctions.map(r=>[r[0],r[1],DI[r[2]]||String(r[2]),r[3]!=null?(SKR[r[3]]||r[3]):null,r[4]||null]);
     }
 
-    // Timetables: decompress subject keys
+    // Timetables: decompress subject keys (handle split cells)
     if(DD.timetables){
       const tt2={};
       for(const[px,grid] of Object.entries(DD.timetables)){
-        tt2[px]=grid.map(day=>day.map(c=>c?[SKR[c[0]]||c[0],c[1]]:null));
+        tt2[px]=grid.map(day=>day.map(c=>{
+          if(!c) return null;
+          if(c.length===4) return[SKR[c[0]]||c[0],c[1],SKR[c[2]]||c[2],c[3]];// split
+          return[SKR[c[0]]||c[0],c[1]];// normal
+        }));
       }
       DD.timetables=tt2;
     }
@@ -584,16 +588,30 @@ function renderTimetable(x){
     for(let d=0;d<5;d++){
       const cell=grid[d][p];
       if(cell){
+        const isSplit=cell.length===4;
         const subj=cell[0];
-        // Look up current teacher from enrolments (not static timetable)
+        const subj2=isSplit?cell[2]:null;
+        const changeDate=isSplit?cell[3]:null;
+        // Look up current teacher from enrolments
         const pu2=REG[String(x)];
         const en2=pu2?getEn(pu2.intake,x):[];
-        const clsRec2=en2.find(r=>r.t==='cls'&&r.s===subj&&r.u===null);
-        const tchr=clsRec2?clsRec2.tc:cell[1];
+        const clsRec1=en2.find(r=>r.t==='cls'&&r.s===subj&&r.u!==null);
+        const clsRec2a=subj2?en2.find(r=>r.t==='cls'&&r.s===subj2&&r.u===null):null;
+        const clsRecCur=en2.find(r=>r.t==='cls'&&r.s===subj&&r.u===null);
+        const tchr=clsRecCur?clsRecCur.tc:(clsRec1?clsRec1.tc:'');
+        const tchr2=clsRec2a?clsRec2a.tc:'';
         const col=TT_COLORS[subj]||'var(--ac)';
-        const sk=d+'|'+p;const sc=slotSanc[sk];const score=slotScores[sk]||0;
+        const col2=subj2?(TT_COLORS[subj2]||'var(--ac)'):'';
+        const sk2=d+'|'+p;const sc=slotSanc[sk2];const score=slotScores[sk2]||0;
         const heat=heatBg(score);
-        html+=`<div class="tt-cell" style="border-left:2px solid ${col};${heat}"><span class="tt-subj">${subj}</span><span class="tt-tchr">${tchr}</span>${(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#f97316">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#7c3aed">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.55rem;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})()}</div>`;
+        const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#f97316">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#7c3aed">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.55rem;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})();
+
+        if(isSplit){
+          // Split cell: two halves stacked vertically
+          html+=`<div class="tt-cell" style="padding:0;${heat}"><div style="border-left:2px solid ${col};padding:.2rem .3rem;border-bottom:1px dashed var(--bd)"><span class="tt-subj" style="font-size:.55rem">${subj}</span><span class="tt-tchr" style="font-size:.45rem">${tchr}</span></div><div style="border-left:2px solid ${col2};padding:.2rem .3rem"><span class="tt-subj" style="font-size:.55rem">${subj2}</span><span class="tt-tchr" style="font-size:.45rem">${tchr2}</span></div>${sancHtml?`<div style="padding:0 .3rem .1rem">${sancHtml}</div>`:''}</div>`;
+        }else{
+          html+=`<div class="tt-cell" style="border-left:2px solid ${col};${heat}"><span class="tt-subj">${subj}</span><span class="tt-tchr">${tchr}</span>${sancHtml}</div>`;
+        }
       }else{
         html+=`<div class="tt-cell"><span style="color:var(--mu)">—</span></div>`;
       }
@@ -3646,13 +3664,11 @@ function rSV(){
   document.getElementById('sv-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} ${sub} Report Breakdown</div>`;
 
   if(!hasGradesSV){
-    document.getElementById('sv-cards').innerHTML='<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported.</div></div>';
-    document.getElementById('sv-alerts').innerHTML='';
+    document.getElementById('sv-cards').innerHTML='<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported.</div><div style="margin-top:.25rem"><span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils</div></div>';
     document.getElementById('sv-charts-top').innerHTML='';
     document.getElementById('sv-charts-bottom').innerHTML='';
     document.getElementById('sv-dist-title').innerHTML='';
-    return;
-  }
+  }else{
 
   document.getElementById('sv-cards').innerHTML=`
     <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div>
@@ -3721,6 +3737,7 @@ function rSV(){
   const effortColors2={'1':'#ef4444','2':'#f97316','3':'#38bdf8','4':'#34d399'};
   const effortLabels2=['1 — Excellent','2 — Good','3 — Developing','4 — Low'];
   sc2('svefst',new Chart(document.getElementById('c-svefst'),{type:'bar',data:{labels:labs,datasets:[1,2,3,4].map(e=>({label:effortLabels2[e-1],data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]&&r[3][sub][1]>=1&&r[3][sub][1]<=4).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:effortColors2[e]+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#7a85a0'},grid:{color:'#262d4422'},border:{color:'#262d44'}},y:{stacked:true,max:100,ticks:{color:'#7a85a0',callback:v=>v+'%'},grid:{color:'#262d4422'},border:{color:'#262d44'}}}}}));
+  } // end hasGradesSV else
 }
 
 // ── CLASS VIEW ──
