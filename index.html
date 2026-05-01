@@ -7,11 +7,11 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#eeeeee;--sf:#ffffff;--sf2:#f5f5f5;--bd:#d4d4d4;--ac:#642535;--ac2:#a03050;--ac3:#2d7a4f;--tx:#1a1a1a;--mu:#666666;--bel:#c62828;--dev:#e65100;--wrk:#f9a825;--met:#0277bd;--con:#642535;--skl:#6a1b9a;--exc:#2e7d32}
 body{background:var(--bg);color:var(--tx);font-family:'Outfit',sans-serif;font-size:15px}
-header{background:var(--sf);border-bottom:1px solid var(--bd);padding:.5rem 1.5rem;display:flex;align-items:center;gap:1.2rem;position:sticky;top:0;z-index:100;flex-wrap:wrap}
-.logo{font-size:1rem;font-weight:700}.logo span{color:var(--ac);font-weight:400}
+header{background:#642535;border-bottom:1px solid #4a1a28;padding:.5rem 1.5rem;display:flex;align-items:center;gap:1.2rem;position:sticky;top:0;z-index:100;flex-wrap:wrap}
+.logo{font-size:1rem;font-weight:700;color:#ffffff}.logo span{color:#e8c0c8;font-weight:400}
 .tabs{display:flex;gap:.2rem;flex-wrap:wrap}
-.tb{background:none;border:1px solid transparent;color:var(--mu);font-family:inherit;font-size:.75rem;font-weight:500;padding:.3rem .7rem;border-radius:7px;cursor:pointer;transition:all .15s;white-space:nowrap}
-.tb:hover{color:var(--tx);background:var(--sf2)}.tb.on{background:var(--ac);color:#fff}
+.tb{background:none;border:1px solid transparent;color:#d4a0aa;font-family:inherit;font-size:.75rem;font-weight:500;padding:.3rem .7rem;border-radius:7px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.tb:hover{color:#ffffff;background:rgba(255,255,255,.15)}.tb.on{background:#ffffff;color:#642535}
 .vw{display:none;padding:1.5rem;max-width:1500px;margin:0 auto}.vw.on{display:block}
 .ctl{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1.25rem}
 .cg label{display:block;font-size:.68rem;font-weight:500;color:var(--mu);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
@@ -104,6 +104,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb on" onclick="sw('pupil',this)">📊 Pupil</button>
 <button class="tb" onclick="sw('subject',this)">📚 Subject</button>
 <button class="tb" onclick="sw('class',this)">🏫 Class</button>
+<button class="tb" onclick="sw('tutor',this)">👥 Tutor Group</button>
 <button class="tb" onclick="sw('classcomp',this)">⚖️ Comparison</button>
 <button class="tb" onclick="sw('compare',this)">📈 Cross Year Comparison</button>
 <button class="tb" onclick="sw('progression',this)">📊 Year Progression Comparison</button>
@@ -114,9 +115,9 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
-  <button class="tb" onclick="showCTModal()" style="border:1px solid var(--bd)">⚙ Concern Thresholds</button>
+  <button class="tb" onclick="showCTModal()" style="border:1px solid rgba(255,255,255,.3)">⚙ Concern Thresholds</button>
   <span id="ct-display" style="font-size:.62rem;color:var(--mu)"></span>
-  <button class="tb" onclick="showSWModal()" style="border:1px solid var(--bd)">⚖ Sanction Weightings</button>
+  <button class="tb" onclick="showSWModal()" style="border:1px solid rgba(255,255,255,.3)">⚖ Sanction Weightings</button>
   <span id="sw-display" style="font-size:.62rem;color:var(--mu)"></span>
 </div>
 <div id="ct-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:1.5rem;z-index:200;min-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
@@ -211,6 +212,22 @@ table.d tr:hover td{background:var(--sf2)}
 <div id="cl-perf-title" style="margin-bottom:.5rem"></div>
 <div class="crd-g" id="cl-cards"></div>
 <div class="ch-g" id="cl-charts"></div>
+</div>
+
+<div id="vw-tutor" class="vw">
+<div class="ctl">
+<div class="cg"><label>Year Group</label><select id="tg-yg" onchange="popTG()"></select></div>
+<div class="cg"><label>Tutor Group</label><select id="tg-sel" onchange="rTG()"></select></div>
+</div>
+<div id="tg-title" style="margin-bottom:.5rem"></div>
+<div id="tg-summary" style="margin-bottom:1.25rem"></div>
+<div id="tg-alerts" style="margin-bottom:1.25rem"></div>
+<div id="tg-pupils" style="margin-bottom:1.25rem"></div>
+<div id="tg-network" style="margin-bottom:1.25rem"></div>
+<div style="page-break-before:always"></div>
+<div id="tg-perf-title" style="margin-bottom:.5rem"></div>
+<div class="crd-g" id="tg-cards"></div>
+<div class="ch-g" id="tg-charts"></div>
 </div>
 
 <div id="vw-classcomp" class="vw">
@@ -3590,7 +3607,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')rTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -4316,6 +4333,7 @@ function rCC(){
   const ygDropdowns={
     'sv-yg':{hasAll:false,onChange:'rSV()'},
     'cl-yg':{hasAll:false,onChange:'popCL()'},
+    'tg-yg':{hasAll:false,onChange:'popTG()'},
     'cc-yg':{hasAll:false,onChange:'rCC()'},
     'cmp-yg':{hasAll:false,onChange:'rCmp()'},
     'bc-yg':{hasAll:true,onChange:'popBCTG();rBC()'},
@@ -4592,7 +4610,265 @@ function rPeer(){
   window.popCL=popCL;
   window.rCmp=rCmp;
   window.rPrg=rPrg;
+// ── TUTOR GROUP VIEW ──
+function popTG(){
+  const yearGroup=parseInt(document.getElementById('tg-yg').value);
+  const sel=document.getElementById('tg-sel');
+  const prev=sel.value;
+  sel.innerHTML='';
+  const enrols=ygEnrol(yearGroup);
+  const tgs=new Set();
+  enrols.filter(r=>r.t==='tg'&&r.u===null).forEach(r=>tgs.add(r.v));
+  [...tgs].sort().forEach(tg=>{
+    const o=document.createElement('option');o.value=tg;o.textContent=tg;sel.appendChild(o);
+  });
+  if([...tgs].includes(prev))sel.value=prev;
+  rTG();
+}
+
+function rTG(){
+  const yearGroup=parseInt(document.getElementById('tg-yg').value);
+  const tgName=document.getElementById('tg-sel').value;
+  if(!yearGroup||!tgName) return;
+
+  const ink=CFG.intakes.find(i=>curYG(i)===yearGroup);
+  if(!ink) return;
+  const ik=`I${ink}`;
+  const pp=ygPeriods(yearGroup);
+  if(!pp.length) return;
+  const lp=pp[pp.length-1];
+  const lr=ygRows(yearGroup,lp);
+  const enrols=ENR[ik]||[];
+
+  // Get pupils in this TG
+  const tgPupilPx=new Set(enrols.filter(r=>r.t==='tg'&&r.v===tgName&&r.u===null).map(r=>r.x));
+  const tgRows=lr.filter(r=>tgPupilPx.has(r[0]));
+
+  if(!tgRows.length){
+    document.getElementById('tg-title').innerHTML=`<div style="color:var(--mu)">No pupils in ${tgName}</div>`;
+    ['tg-summary','tg-alerts','tg-pupils','tg-network','tg-perf-title','tg-cards','tg-charts'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
+    return;
+  }
+
+  const SAN=DD.sanctions||[];
+  const _tgToday=new Date();
+  const _tgTodayISO=`${_tgToday.getFullYear()}-${String(_tgToday.getMonth()+1).padStart(2,'0')}-${String(_tgToday.getDate()).padStart(2,'0')}`;
+  const ayStart=`${CAY}-09-01`;
+  const WLK=DD.weekLessons||{};
+
+  // ── TITLE ──
+  document.getElementById('tg-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} Tutor Group ${tgName} Overview</div>`;
+
+  // ── SUMMARY CARDS ──
+  const sendN=tgRows.filter(r=>r[4]).length;
+  const ehcpN=tgRows.filter(r=>r[5]).length;
+  const fsmN=tgRows.filter(r=>r[6]).length;
+
+  // Attendance
+  let tgYtdAtt='—',tgTtdAtt='—';
+  let totalLessons=0,totalAbs=0;
+  tgRows.forEach(r=>{
+    const pAbs=(DD.attendance||{})[String(r[0])]||[];
+    const ytdAbs=pAbs.filter(d=>d>=ayStart&&d<=_tgTodayISO).length;
+    totalAbs+=ytdAbs;
+  });
+  let ytdTotalL=0;
+  for(const[w,tl]of Object.entries(WLK)){if(w>=ayStart&&w<=_tgTodayISO)ytdTotalL+=tl}
+  if(ytdTotalL>0) tgYtdAtt=((ytdTotalL*tgRows.length-totalAbs)/(ytdTotalL*tgRows.length)*100).toFixed(1);
+
+  // Sanctions
+  const tgSanc=SAN.filter(s=>tgPupilPx.has(s[0])&&s[2]>=ayStart&&s[2]<=_tgTodayISO);
+  const tgCodes=tgSanc.filter(s=>s[1]===0).length;
+  const tgDets=tgSanc.filter(s=>s[1]===2).length;
+
+  // Ability/Effort averages
+  const avg=avgAb(tgRows),avgE=avgEf(tgRows);
+  const hasGradesTG=avg!=null||avgE!=null;
+
+  document.getElementById('tg-summary').innerHTML=`<div class="crd-g">
+    <div class="crd"><div class="ct2">Tutor Group ${tgName}</div>
+      <div style="font-size:1.5rem;font-weight:700;color:var(--ac)">${tgRows.length}</div>
+      <div style="font-size:.72rem;color:var(--mu)">pupils</div>
+      <div style="margin-top:.4rem"><span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM</div>
+      <div style="margin-top:.2rem;font-size:.65rem;color:var(--mu)">SEN: ${tgRows.map(r=>SEN_STATUS[String(r[0])]).filter(Boolean).reduce((m,c)=>{m[c]=(m[c]||0)+1;return m},{})||(s=>{const parts=[];for(const[k,v]of Object.entries(s))parts.push(k+':'+v);return parts.join(' · ')||'None'})(tgRows.map(r=>SEN_STATUS[String(r[0])]).filter(Boolean).reduce((m,c)=>{m[c]=(m[c]||0)+1;return m},{}))}</div>
+    </div>
+    <div class="crd"><div class="ct2">YTD Attendance</div>
+      <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?'#34d399':parseFloat(tgYtdAtt)>=90?'var(--tx)':'#ef4444'}">${tgYtdAtt}%</div>
+      <div style="font-size:.72rem;color:var(--mu)">Codes: <span style="color:#f97316;font-weight:600">${tgCodes}</span> · Detentions: <span style="color:#7c3aed;font-weight:600">${tgDets}</span></div>
+    </div>
+    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(7 = Excellent)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${fN(avg)}</div></div>
+    <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)}</div></div>`:''}
+  </div>`;
+
+  // ── PUPIL TABLE ──
+  const pupilRows=tgRows.map(r=>{
+    const px=r[0],pid=r[1];
+    const pAbs=(DD.attendance||{})[String(px)]||[];
+    const ytdAbs=pAbs.filter(d=>d>=ayStart&&d<=_tgTodayISO).length;
+    const pAttPct=ytdTotalL>0?((ytdTotalL-ytdAbs)/ytdTotalL*100).toFixed(1):'—';
+    const pSanc=SAN.filter(s=>s[0]===px&&s[2]>=ayStart&&s[2]<=_tgTodayISO);
+    const pCodes=pSanc.filter(s=>s[1]===0).length;
+    const pDets=pSanc.filter(s=>s[1]===2).length;
+    const senCode=SEN_STATUS[String(px)];
+    const senLabel=senCode?SEN_LABELS[senCode]||senCode:'';
+    const senCol=senCode?SEN_COLORS[senCode]||'var(--mu)':'';
+    const gender=REG[String(px)]?.gender||'U';
+    const attCol=pAttPct==='—'?'color:var(--mu)':parseFloat(pAttPct)>=95?'color:#34d399':parseFloat(pAttPct)>=90?'':'color:#ef4444;font-weight:600';
+
+    // Ability/Effort
+    const curScores=SUBS.map(s=>r[3][s]?AS[AM[r[3][s][0]]]||0:0).filter(v=>v>0);
+    const curEffort=SUBS.map(s=>r[3][s]?r[3][s][1]:null).filter(v=>v!=null&&v>0);
+    const pAvgAb=curScores.length?(curScores.reduce((a,b)=>a+b,0)/curScores.length).toFixed(1):'—';
+    const pAvgEf=curEffort.length?(curEffort.reduce((a,b)=>a+b,0)/curEffort.length).toFixed(1):'—';
+
+    return`<tr>
+      <td style="font-weight:500">${pLink(px,pid)}${senCode?senPillShort(px):''}</td>
+      <td style="text-align:center;font-size:.72rem;color:var(--mu)">${gender}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;${attCol}">${pAttPct}%</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;${pCodes?'color:#f97316;font-weight:600':'color:var(--mu)'}">${pCodes||'—'}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;${pDets?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${pDets||'—'}</td>
+      ${hasGradesTG?`<td style="text-align:center;font-family:'JetBrains Mono',monospace;color:${aC(parseFloat(pAvgAb))}">${pAvgAb}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:${eC(parseFloat(pAvgEf))}">${pAvgEf}</td>`:''}
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tg-pupils').innerHTML=`<div class="dw"><div class="dwt">Pupil Overview</div>
+    <div style="overflow-x:auto"><table class="d"><thead><tr>
+      <th>Name</th><th style="text-align:center">Gender</th><th style="text-align:center">YTD Att.</th>
+      <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center;color:#7c3aed">Det.</th>
+      ${hasGradesTG?'<th style="text-align:center">Ability</th><th style="text-align:center">Effort</th>':''}
+    </tr></thead><tbody>${pupilRows}</tbody></table></div></div>`;
+
+  // ── DISCIPLINE ISSUES ──
+  const tgSancAY=SAN.filter(s=>tgPupilPx.has(s[0])&&s[2]>=ayStart&&s[2]<=_tgTodayISO);
+  const pupilSancCounts={};
+  tgSancAY.forEach(s=>{
+    if(!pupilSancCounts[s[0]]) pupilSancCounts[s[0]]={codes:0,dets:0,total:0};
+    if(s[1]===0) pupilSancCounts[s[0]].codes++;
+    else if(s[1]===2) pupilSancCounts[s[0]].dets++;
+    pupilSancCounts[s[0]].total++;
+  });
+
+  const topOffenders=Object.entries(pupilSancCounts).sort((a,b)=>b[1].total-a[1].total).slice(0,10);
+  const alertRows=topOffenders.map(([px,sc])=>{
+    const pu=REG[String(px)];
+    return`<tr>
+      <td>${pLink(parseInt(px),pu?.id||px)}${senPillShort(parseInt(px))}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600">${sc.codes}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:#7c3aed;font-weight:600">${sc.dets}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-weight:600">${sc.total}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tg-alerts').innerHTML=topOffenders.length?`<div class="dw"><div class="dwt">Academic Year Discipline Issues — Top 10</div>
+    <div style="overflow-x:auto"><table class="d"><thead><tr>
+      <th>Name</th><th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center;color:#7c3aed">Detentions</th><th style="text-align:center">Total</th>
+    </tr></thead><tbody>${alertRows}</tbody></table></div></div>`:'';
+
+  // ── NETWORK GRAPH ──
+  const tgNetDiv=document.getElementById('tg-network');
+  if(typeof renderNet==='function'){
+    // Find co-occurring sanctions within TG
+    const tgLessonSanc=tgSancAY.filter(s=>s[3]!=null&&s[4]!=null);
+    // Group by date+period
+    const slotMap={};
+    tgLessonSanc.forEach(s=>{
+      const key=s[2]+'|'+s[4];
+      if(!slotMap[key]) slotMap[key]=[];
+      slotMap[key].push(s[0]);
+    });
+    // Find pairs
+    const pairCounts={};
+    Object.values(slotMap).forEach(pupils=>{
+      if(pupils.length<2) return;
+      const unique=[...new Set(pupils)];
+      for(let i=0;i<unique.length;i++){
+        for(let j=i+1;j<unique.length;j++){
+          const k=[unique[i],unique[j]].sort().join('-');
+          pairCounts[k]=(pairCounts[k]||0)+1;
+        }
+      }
+    });
+
+    const pairs=Object.entries(pairCounts).filter(([k,v])=>v>=2).sort((a,b)=>b[1]-a[1]);
+    if(pairs.length){
+      const nodes=new Set();
+      pairs.forEach(([k])=>{k.split('-').forEach(px=>nodes.add(parseInt(px)))});
+      const nodeData=[...nodes].map(px=>({px,name:(REG[String(px)]?.id||String(px)).replace(/\s*\(P?\d+\)\s*$/,'').replace(/\s*\(\d+ \w+\)\s*$/,''),tg:tgName}));
+      const links=pairs.map(([k,v])=>{const[a,b]=k.split('-').map(Number);return{source:a,target:b,weight:v}});
+
+      // Render SVG network
+      const W=Math.min(700,tgNetDiv.clientWidth||700),H=350;
+      const R=14,pad=40;
+      // Position nodes in a circle
+      const cx=W/2,cy=H/2,radius=Math.min(W,H)/2-pad-R;
+      nodeData.forEach((n,i)=>{
+        const angle=(2*Math.PI*i/nodeData.length)-Math.PI/2;
+        n.x=cx+radius*Math.cos(angle);
+        n.y=cy+radius*Math.sin(angle);
+        n.r=R;
+      });
+      const maxW=Math.max(...links.map(l=>l.weight));
+      let svg=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:350px">`;
+      links.forEach(l=>{
+        const s=nodeData.find(n=>n.px===l.source),t=nodeData.find(n=>n.px===l.target);
+        if(!s||!t)return;
+        const w=Math.max(1,l.weight/maxW*6);
+        const op=Math.min(0.8,0.2+l.weight/maxW*0.6);
+        svg+=`<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="#ef4444" stroke-width="${w}" stroke-opacity="${op}"/>`;
+        const mx=(s.x+t.x)/2,my=(s.y+t.y)/2;
+        svg+=`<text x="${mx}" y="${my-4}" fill="var(--mu)" font-size="7" font-family="JetBrains Mono" text-anchor="middle">${l.weight}</text>`;
+      });
+      nodeData.forEach(n=>{
+        svg+=`<circle cx="${n.x}" cy="${n.y}" r="${n.r}" fill="var(--sf)" stroke="var(--ac)" stroke-width="1.5"/>`;
+        svg+=`<text x="${n.x}" y="${n.y+3}" fill="var(--tx)" font-size="10" font-family="Outfit" text-anchor="middle" style="pointer-events:none">${n.name.split(' ')[0]}</text>`;
+        svg+=`<text x="${n.x}" y="${n.y+n.r+14}" fill="var(--mu)" font-size="7" font-family="Outfit" text-anchor="middle">${n.name.split(' ').slice(1).join(' ')}</text>`;
+      });
+      svg+=`</svg>`;
+      tgNetDiv.innerHTML=`<div class="dw"><div class="dwt">Sanction Pair Network — ${tgName}</div><div style="font-size:.6rem;color:var(--mu);margin-bottom:.5rem">Showing pupils sanctioned together in the same lesson ≥2 times this academic year</div>${svg}</div>`;
+    }else{
+      tgNetDiv.innerHTML=`<div class="dw"><div class="dwt">Sanction Pair Network — ${tgName}</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No significant sanction pairs found</div></div>`;
+    }
+  }
+
+  // ── EFFORT & ABILITY (guarded) ──
+  if(hasGradesTG){
+    const p3=pp.length>=4?pp[pp.length-4]:null;
+    const lr3=p3?ygRows(yearGroup,p3).filter(r=>tgPupilPx.has(r[0])):null;
+    const avg3=lr3?avgAb(lr3):null;
+    const avgE3=lr3?avgEf(lr3):null;
+    const aY=avg!=null&&avg3!=null?avg-avg3:null;
+    const eY=avgE!=null&&avgE3!=null?avgE-avgE3:null;
+
+    document.getElementById('tg-perf-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Effort and Ability Summary</div>`;
+
+    const labs=pp.map(p=>PL[PER.indexOf(p)]);
+    const abDatasets=[{label:`${tgName} Avg Ability`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgAb(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
+    const efDatasets=[{label:`${tgName} Avg Effort`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgEf(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
+
+    const allAbVals=abDatasets.flatMap(d=>d.data.filter(v=>v!=null));
+    const allEfVals=efDatasets.flatMap(d=>d.data.filter(v=>v!=null));
+    const abYMin=allAbVals.length?Math.max(1,Math.floor(Math.min(...allAbVals)-.5)):1;
+    const abYMax=allAbVals.length?Math.min(7,Math.ceil(Math.max(...allAbVals)+.5)):7;
+    const efYMin=allEfVals.length?Math.max(1,Math.floor(Math.min(...allEfVals)-.5)):1;
+    const efYMax=allEfVals.length?Math.min(4,Math.ceil(Math.max(...allEfVals)+.5)):4;
+
+    document.getElementById('tg-charts').innerHTML=`<div class="chc"><div class="cht">${tgName} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(7 = Excellent)</span></div><div class="chw"><canvas id="c-tgab"></canvas></div></div><div class="chc"><div class="cht">${tgName} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-tgef"></canvas></div></div>`;
+
+    dc('tgab');dc('tgef');
+    const showLegend={labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:8,padding:6}};
+    sc2('tgab',new Chart(document.getElementById('c-tgab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666'},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
+    sc2('tgef',new Chart(document.getElementById('c-tgef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#666666',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666'},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
+  }else{
+    document.getElementById('tg-perf-title').innerHTML='';
+    document.getElementById('tg-cards').innerHTML='';
+    document.getElementById('tg-charts').innerHTML='';
+  }
+}
+
   window.rCC=rCC;
+  window.popTG=popTG;
+  window.rTG=rTG;
   window.rTV=rTV;
   window.rBC=rBC;
   window.rPP=rPP;
