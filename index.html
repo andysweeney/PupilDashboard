@@ -5,7 +5,7 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0b0d14;--sf:#141722;--sf2:#1c2030;--bd:#262d44;--ac:#6488ff;--ac2:#f472b6;--ac3:#34d399;--tx:#e2e8f0;--mu:#7a85a0;--bel:#ef4444;--dev:#f97316;--wrk:#eab308;--met:#38bdf8;--con:#6488ff;--skl:#a78bfa;--exc:#34d399}
+:root{--bg:#eeeeee;--sf:#ffffff;--sf2:#f5f5f5;--bd:#d4d4d4;--ac:#642535;--ac2:#a03050;--ac3:#2d7a4f;--tx:#1a1a1a;--mu:#666666;--bel:#c62828;--dev:#e65100;--wrk:#f9a825;--met:#0277bd;--con:#642535;--skl:#6a1b9a;--exc:#2e7d32}
 body{background:var(--bg);color:var(--tx);font-family:'Outfit',sans-serif;font-size:15px}
 header{background:var(--sf);border-bottom:1px solid var(--bd);padding:.5rem 1.5rem;display:flex;align-items:center;gap:1.2rem;position:sticky;top:0;z-index:100;flex-wrap:wrap}
 .logo{font-size:1rem;font-weight:700}.logo span{color:var(--ac);font-weight:400}
@@ -1057,7 +1057,7 @@ function rP(){
     const attLabel=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     abDS.push({label:attLabel,data:attData,borderColor:'#34d399',backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:'#34d399',tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,position:'left',ticks:{color:'#7a85a0',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#34d39944'}},x:{ticks:{color:'#7a85a0',font:{size:8}},grid:{display:false},border:{color:'#262d44'}}}}}));
+  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,position:'left',ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#666666',font:{size:8}},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
   const efDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][1]||null:null),borderColor:`hsl(${i*360/act.length},58%,56%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay on effort chart
@@ -1072,7 +1072,7 @@ function rP(){
     const attLabelE=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     efDS.push({label:attLabelE,data:attDataE,borderColor:'#34d399',backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:'#34d399',tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pef',new Chart(document.getElementById('c-pef'),{type:'line',data:{labels:labs,datasets:efDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{reverse:true,min:1,max:4,position:'left',ticks:{color:'#7a85a0',font:{size:11},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(efDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#34d39944'}},x:{ticks:{color:'#7a85a0',font:{size:8}},grid:{display:false},border:{color:'#262d44'}}}}}));
+  sc2('pef',new Chart(document.getElementById('c-pef'),{type:'line',data:{labels:labs,datasets:efDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{reverse:true,min:1,max:4,position:'left',ticks:{color:'#666666',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(efDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#666666',font:{size:8}},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
   }else{
     // No grades — clear chart area
     document.getElementById('p-ch').innerHTML='';
@@ -1269,7 +1269,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   }
   const allAttVals=[...(attP||[]).filter(v=>v!=null),...(grpAttP||[]).filter(v=>v!=null),...(unauthP||[]).filter(v=>v!=null)];
   const y1Min=allAttVals.length?Math.max(0,Math.min(80,Math.min(...allAttVals)-5)):80;
-  sc2(sancKey,new Chart(document.getElementById(cSancId),{type:'bar',data:{labels:wl,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:8},boxWidth:7,padding:6}},tooltip:{callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',label:c=>c.dataset.yAxisID==='y1'?` ${c.dataset.label}: ${c.parsed.y}%`:` ${c.dataset.label}: ${c.parsed.y}`}}},scales:{x:{stacked:true,offset:true,ticks:{color:'#7a85a0',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#262d44'}},y:{stacked:true,position:'left',beginAtZero:true,ticks:{color:'#7a85a0',stepSize:1,font:{size:7}},grid:{color:'#262d4422'},border:{color:'#262d44'},afterFit:a=>{a.width=35}},y1:{position:'right',min:y1Min,max:100,ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#34d39944'},afterFit:a=>{a.width=35}}}}}));
+  sc2(sancKey,new Chart(document.getElementById(cSancId),{type:'bar',data:{labels:wl,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:7,padding:6}},tooltip:{callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',label:c=>c.dataset.yAxisID==='y1'?` ${c.dataset.label}: ${c.parsed.y}%`:` ${c.dataset.label}: ${c.parsed.y}`}}},scales:{x:{stacked:true,offset:true,ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},y:{stacked:true,position:'left',beginAtZero:true,ticks:{color:'#666666',stepSize:1,font:{size:7}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}},y1:{position:'right',min:y1Min,max:100,ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'},afterFit:a=>{a.width=35}}}}}));
 
   // Flag bars (only on overall chart)
   if(!subjFilter){
@@ -1295,7 +1295,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
     const fD=[];if(fd.send.some(v=>v))fD.push({label:'SEND',data:fd.send,color:'#f97316'});if(fd.ehcp.some(v=>v))fD.push({label:'EHCP',data:fd.ehcp,color:'#a78bfa'});if(fd.fsm.some(v=>v))fD.push({label:'FSM',data:fd.fsm,color:'#6488ff'});
     const fw=document.getElementById(flgWId);
     if(fD.length){fw.style.height=(fD.length*18+6)+'px';fw.style.display='';
-    sc2(flgKey,new Chart(document.getElementById(cFlgId),{type:'bar',data:{labels:wl,datasets:fD.map((f,i)=>({label:f.label,data:f.data.map(v=>v?i+1:null),backgroundColor:f.data.map(v=>v?f.color+'cc':'transparent'),borderRadius:1,borderSkipped:false,barPercentage:0.9,categoryPercentage:0.9,base:i}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{filter:c=>c.parsed.y!==null,callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'})}`:'',label:c=>` ${c.dataset.label}`}}},scales:{x:{display:false,stacked:true,offset:true},y:{position:'left',min:0,max:fD.length,ticks:{color:'#7a85a0',font:{size:7},stepSize:1,callback:v=>Number.isInteger(v)&&v>=0&&v<fD.length?fD[v].label:''},afterBuildTicks:a=>{a.ticks=fD.map((_,i)=>({value:i}))},grid:{display:false},border:{color:'#262d44'},afterFit:a=>{a.width=35}},y1:{position:'right',display:true,ticks:{display:false},grid:{display:false},border:{display:false},afterFit:a=>{a.width=35}}}}}))
+    sc2(flgKey,new Chart(document.getElementById(cFlgId),{type:'bar',data:{labels:wl,datasets:fD.map((f,i)=>({label:f.label,data:f.data.map(v=>v?i+1:null),backgroundColor:f.data.map(v=>v?f.color+'cc':'transparent'),borderRadius:1,borderSkipped:false,barPercentage:0.9,categoryPercentage:0.9,base:i}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{filter:c=>c.parsed.y!==null,callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'})}`:'',label:c=>` ${c.dataset.label}`}}},scales:{x:{display:false,stacked:true,offset:true},y:{position:'left',min:0,max:fD.length,ticks:{color:'#666666',font:{size:7},stepSize:1,callback:v=>Number.isInteger(v)&&v>=0&&v<fD.length?fD[v].label:''},afterBuildTicks:a=>{a.ticks=fD.map((_,i)=>({value:i}))},grid:{display:false},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}},y1:{position:'right',display:true,ticks:{display:false},grid:{display:false},border:{display:false},afterFit:a=>{a.width=35}}}}}))
     }else fw.style.display='none';
   }else{
     document.getElementById(flgWId).style.display='none';
@@ -1338,9 +1338,9 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
           label:c=>{const d=tchrData[c.dataIndex];return d?` ${d.tc}`:''}
         }}},
         scales:{x:{display:false,stacked:true,offset:true},
-          y:{position:'left',min:0,max:1,ticks:{color:'#7a85a0',font:{size:7},stepSize:1,
+          y:{position:'left',min:0,max:1,ticks:{color:'#666666',font:{size:7},stepSize:1,
             callback:v=>v===0?teacherSubj:''},afterBuildTicks:a=>{a.ticks=[{value:0}]},
-            grid:{display:false},border:{color:'#262d44'},afterFit:a=>{a.width=35}},
+            grid:{display:false},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}},
           y1:{position:'right',display:true,ticks:{display:false},grid:{display:false},border:{display:false},afterFit:a=>{a.width=35}}
         }
       }}));
@@ -1860,9 +1860,9 @@ function rCmp(){
   const efMin=Math.max(0.5,Math.floor((efMinV-0.1)*10)/10);
   const efMax=Math.min(4.5,Math.ceil((efMaxV+0.1)*10)/10);
 
-  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets)},scales:{y:{min:abMin,max:abMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}}}}}));
+  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets)},scales:{y:{min:abMin,max:abMax,ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'}}}}}));
 
-  sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}}}}}));
+  sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,ticks:{color:'#666666',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'}}}}}));
 }
 
 // ── YEAR PROGRESSION VIEW ──
@@ -2072,14 +2072,14 @@ function rPrg(){
 
   const chartOpts2=(yMin,yMax,isAb)=>({responsive:true,maintainAspectRatio:false,
     plugins:{
-      legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},
+      legend:{labels:{color:'#666666',font:{family:'Outfit',size:10},boxWidth:10,padding:10}},
       tooltip:subgroupTip()
     },
     scales:{
-      y:{min:yMin,max:yMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1,
+      y:{min:yMin,max:yMax,ticks:{color:'#666666',font:{size:11},stepSize:1,
         callback:isAb?v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}:undefined},
-        grid:{color:'#262d4422'},border:{color:'#262d44'}},
-      x:{ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}}
+        grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
+      x:{ticks:{color:'#666666',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'}}
     }
   });
 
@@ -2128,7 +2128,7 @@ function rPrg(){
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
-        legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:10,padding:8}},
+        legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:10,padding:8}},
         tooltip:{callbacks:{
           title:ctx=>ctx[0]?.label||'',
           label:ctx=>{
@@ -2139,8 +2139,8 @@ function rPrg(){
         }}
       },
       scales:{
-        x:{stacked:true,ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}},
-        y:{stacked:true,beginAtZero:true,ticks:{color:'#7a85a0',font:{size:8},stepSize:isAll?SUBS.length:1},grid:{color:'#262d4422'},border:{color:'#262d44'}}
+        x:{stacked:true,ticks:{color:'#666666',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'}},
+        y:{stacked:true,beginAtZero:true,ticks:{color:'#666666',font:{size:8},stepSize:isAll?SUBS.length:1},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
       }
     },
     plugins:[bandPlugin]
@@ -2182,7 +2182,7 @@ function rPrg(){
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
-        legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:10,padding:8}},
+        legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:10,padding:8}},
         tooltip:{callbacks:{
           title:ctx=>ctx[0]?.label||'',
           label:ctx=>{
@@ -2193,8 +2193,8 @@ function rPrg(){
         }}
       },
       scales:{
-        x:{stacked:true,ticks:{color:'#7a85a0',font:{size:8},maxRotation:45},grid:{color:'#262d4411'},border:{color:'#262d44'}},
-        y:{stacked:true,beginAtZero:true,ticks:{color:'#7a85a0',font:{size:8},stepSize:isAll?SUBS.length:1},grid:{color:'#262d4422'},border:{color:'#262d44'}}
+        x:{stacked:true,ticks:{color:'#666666',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'}},
+        y:{stacked:true,beginAtZero:true,ticks:{color:'#666666',font:{size:8},stepSize:isAll?SUBS.length:1},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
       }
     },
     plugins:[bandPlugin]
@@ -3863,15 +3863,15 @@ function rSV(){
   const efYMin=allEfV.length?Math.max(0.5,Math.floor((Math.min(...allEfV)-0.3)*10)/10):0.5;
   const efYMax=allEfV.length?Math.min(4.5,Math.ceil((Math.max(...allEfV)+0.3)*10)/10):4.5;
 
-  const showLegend={labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:8,padding:8}};
+  const showLegend={labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:8,padding:8}};
 
-  sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
-  sc2('svef',new Chart(document.getElementById('c-svef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
-  sc2('svst',new Chart(document.getElementById('c-svst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#7a85a0'},grid:{color:'#262d4422'},border:{color:'#262d44'}},y:{stacked:true,max:100,ticks:{color:'#7a85a0',callback:v=>v+'%'},grid:{color:'#262d4422'},border:{color:'#262d44'}}}}}));
+  sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666'},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
+  sc2('svef',new Chart(document.getElementById('c-svef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#666666',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666'},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
+  sc2('svst',new Chart(document.getElementById('c-svst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{stacked:true,max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
 
   const effortColors2={'1':'#ef4444','2':'#f97316','3':'#38bdf8','4':'#34d399'};
   const effortLabels2=['1 — Excellent','2 — Good','3 — Developing','4 — Low'];
-  sc2('svefst',new Chart(document.getElementById('c-svefst'),{type:'bar',data:{labels:labs,datasets:[1,2,3,4].map(e=>({label:effortLabels2[e-1],data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]&&r[3][sub][1]>=1&&r[3][sub][1]<=4).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:effortColors2[e]+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#7a85a0'},grid:{color:'#262d4422'},border:{color:'#262d44'}},y:{stacked:true,max:100,ticks:{color:'#7a85a0',callback:v=>v+'%'},grid:{color:'#262d4422'},border:{color:'#262d44'}}}}}));
+  sc2('svefst',new Chart(document.getElementById('c-svefst'),{type:'bar',data:{labels:labs,datasets:[1,2,3,4].map(e=>({label:effortLabels2[e-1],data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]&&r[3][sub][1]>=1&&r[3][sub][1]<=4).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:effortColors2[e]+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{stacked:true,max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
   } // end hasGradesSV else
 }
 
@@ -4217,13 +4217,13 @@ function rCL(){
   const allEfV=[...efAll,...efSend,...efEhcp,...efFsm].filter(v=>v!=null);
   const efYMin=allEfV.length?Math.max(0.5,Math.floor((Math.min(...allEfV)-0.3)*10)/10):0.5;
   const efYMax=allEfV.length?Math.min(4.5,Math.ceil((Math.max(...allEfV)+0.3)*10)/10):4.5;
-  const showLegend={labels:{color:'#7a85a0',font:{family:'Outfit',size:9},boxWidth:8,padding:8}};
-  sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
-  sc2('clef',new Chart(document.getElementById('c-clef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:1},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0'},grid:{display:false},border:{color:'#262d44'}}}}}));
-  sc2('clst',new Chart(document.getElementById('c-clst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#7a85a0'},grid:{color:'#262d4422'},border:{color:'#262d44'}},y:{stacked:true,max:100,ticks:{color:'#7a85a0',callback:v=>v+'%'},grid:{color:'#262d4422'},border:{color:'#262d44'}}}}}));
+  const showLegend={labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:8,padding:8}};
+  sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666'},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
+  sc2('clef',new Chart(document.getElementById('c-clef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#666666',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666'},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
+  sc2('clst',new Chart(document.getElementById('c-clst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{stacked:true,max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
   const effortColors2={'1':'#ef4444','2':'#f97316','3':'#38bdf8','4':'#34d399'};
   const effortLabels2=['1 — Excellent','2 — Good','3 — Developing','4 — Low'];
-  sc2('clefst',new Chart(document.getElementById('c-clefst'),{type:'bar',data:{labels:labs,datasets:[1,2,3,4].map(e=>({label:effortLabels2[e-1],data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]&&r[3][sub][1]>=1&&r[3][sub][1]<=4).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:effortColors2[e]+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#7a85a0'},grid:{color:'#262d4422'},border:{color:'#262d44'}},y:{stacked:true,max:100,ticks:{color:'#7a85a0',callback:v=>v+'%'},grid:{color:'#262d4422'},border:{color:'#262d44'}}}}}));
+  sc2('clefst',new Chart(document.getElementById('c-clefst'),{type:'bar',data:{labels:labs,datasets:[1,2,3,4].map(e=>({label:effortLabels2[e-1],data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]&&r[3][sub][1]>=1&&r[3][sub][1]<=4).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:effortColors2[e]+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{stacked:true,max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
   }else{
     document.getElementById('cl-charts').innerHTML='';
     document.getElementById('cl-perf-title').innerHTML='';
@@ -4568,7 +4568,7 @@ function rPeer(){
 
   const mkDS=(series,key)=>series.map(s=>({label:s.label,data:s[key],borderColor:s.color,backgroundColor:s.color+'18',borderWidth:2,pointRadius:3,pointBackgroundColor:s.color,tension:.3,fill:false,spanGaps:true}));
 
-  const chartOpts=(yMin,yMax,rev,pct)=>({responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:8},boxWidth:10,padding:8}}},scales:{y:{reverse:!!rev,min:yMin,max:yMax,ticks:{color:'#7a85a0',font:{size:11},stepSize:rev?1:undefined,callback:pct?v=>v+'%':undefined},grid:{color:'#262d4422'},border:{color:'#262d44'}},x:{ticks:{color:'#7a85a0',font:{size:7}},grid:{display:false},border:{color:'#262d44'}}}});
+  const chartOpts=(yMin,yMax,rev,pct)=>({responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:10,padding:8}}},scales:{y:{reverse:!!rev,min:yMin,max:yMax,ticks:{color:'#666666',font:{size:11},stepSize:rev?1:undefined,callback:pct?v=>v+'%':undefined},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},x:{ticks:{color:'#666666',font:{size:7}},grid:{display:false},border:{color:'#d4d4d4'}}}});
 
   // Ability chart - dynamic axis
   const allAbVals=allSeries.flatMap(s=>s.abData.filter(v=>v!=null));
