@@ -681,7 +681,7 @@ function renderAbsencePattern(px,containerId){
       if(count){
         html+=`<div class="tt-cell" style="${border}${heat}" data-tip="1" onmouseenter="this._tip=document.createElement('div');this._tip.className='abs-tip';this._tip.innerHTML='<b>${DAYS[d]} P${p+1}</b><br>${count} absence${count!==1?'s':''} (${rate}% of weeks)${unauth?'<br><span style=color:#c62828>'+unauth+' unauthorised</span>':''}${subj?'<br>Subject: '+subj:''}';this._tip.style.cssText='position:absolute;z-index:50;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.7rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);pointer-events:none;white-space:nowrap;left:'+(this.offsetLeft+this.offsetWidth/2)+'px;top:'+(this.offsetTop-4)+'px;transform:translate(-50%,-100%)';this.parentElement.style.position='relative';this.parentElement.appendChild(this._tip)" onmouseleave="if(this._tip)this._tip.remove()">`;
         html+=`<span style="font-size:.8rem;font-weight:700;color:var(--tx)">${count}</span>`;
-        html+=`<span style="font-size:.6rem;font-weight:500;color:#1a1a1a">${rate}%</span>`;
+        html+=`<span style="font-size:.6rem;font-weight:500;color:#1a1a1a">${rate}% missed</span>`;
         if(unauth) html+=`<span style="font-size:.6rem;font-weight:600;color:#c62828">${unauth}u</span>`;
         html+=`</div>`;
       }else{
@@ -820,8 +820,9 @@ function renderTGAbsencePattern(tgPupilPxSet,containerId){
       const tipEntries=Object.entries(tipData).sort((a,b)=>b[1].count-a[1].count);
 
       if(count){
-        const tipHtml=tipEntries.slice(0,10).map(([px2,data])=>{const nm=((DD.registry||{})[String(px2)]?.id||px2).replace(/\s*\([^)]+\)\s*$/,'');return`<div style="display:flex;justify-content:space-between;gap:1rem;padding:.1rem 0;border-bottom:1px solid var(--bd)"><span>${nm}</span><span style="font-family:JetBrains Mono,monospace">${data.count}${data.unauth?' <span style=color:#c62828>('+data.unauth+'u)</span>':''}</span></div>`}).join('')+(tipEntries.length>10?`<div style="color:var(--mu);font-size:.6rem">+${tipEntries.length-10} more</div>`:'');
-        html+=`<div class="tt-cell" style="${border}${heat};cursor:help;position:relative" onmouseenter="const t=document.createElement('div');t.className='abs-tip';t.innerHTML='<div style=font-weight:600;margin-bottom:.3rem>${DAYS[d]} P${p+1} — ${count} abs (${nPupils}p)</div>${tipHtml.replace(/'/g,"\\'")}';t.style.cssText='position:absolute;z-index:50;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.6rem .8rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 16px rgba(0,0,0,.2);pointer-events:none;white-space:nowrap;left:50%;top:-4px;transform:translate(-50%,-100%)';this.appendChild(t);this._t=t" onmouseleave="if(this._t)this._t.remove()">`;
+        // Store tooltip data as JSON in a data attribute to avoid quote escaping
+        const tipJson=JSON.stringify({title:`${DAYS[d]} P${p+1} — ${count} abs (${nPupils}p)`,entries:tipEntries.slice(0,10).map(([px2,data])=>({name:((DD.registry||{})[String(px2)]?.id||px2).replace(/\s*\([^)]+\)\s*$/,''),count:data.count,unauth:data.unauth})),more:tipEntries.length>10?tipEntries.length-10:0}).replace(/"/g,'&quot;');
+        html+=`<div class="tt-cell" style="${border}${heat};cursor:help;position:relative" data-tipjson="${tipJson}" onmouseenter="const d2=JSON.parse(this.dataset.tipjson);const t=document.createElement('div');let h2='<div style=font-weight:600;margin-bottom:.3rem>'+d2.title+'</div>';d2.entries.forEach(e=>{h2+='<div style=display:flex;justify-content:space-between;gap:1rem;padding:.1rem_0;border-bottom:1px_solid_var(--bd)><span>'+e.name+'</span><span style=font-family:JetBrains_Mono,monospace>'+e.count+(e.unauth?' <span style=color:#c62828>('+e.unauth+'u)</span>':'')+'</span></div>'});if(d2.more)h2+='<div style=color:var(--mu);font-size:.6rem>+'+d2.more+' more</div>';t.innerHTML=h2;t.style.cssText='position:absolute;z-index:50;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.6rem .8rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 16px rgba(0,0,0,.2);pointer-events:none;white-space:nowrap;left:50%;top:-4px;transform:translate(-50%,-100%)';this.appendChild(t);this._t=t" onmouseleave="if(this._t)this._t.remove()">`;
         html+=`<span style="font-size:.8rem;font-weight:700;color:var(--tx)">${count}</span>`;
         html+=`<span style="font-size:.6rem;font-weight:500;color:#1a1a1a">${nPupils}p</span>`;
         if(unauth) html+=`<span style="font-size:.6rem;font-weight:600;color:#c62828">${unauth}u</span>`;
@@ -1030,11 +1031,11 @@ function renderTimetable(x){
           if(!ss) return'';
           const ct=(ss.b||0)+(ss.u||0)+(ss.e||0)+(ss.a||0);
           const parts=[];
-          if(ct){const cats=[];if(ss.b)cats.push(ss.b+'B');if(ss.u)cats.push(ss.u+'U');if(ss.e)cats.push(ss.e+'E');if(ss.a)cats.push(ss.a+'A');parts.push('<span style="color:#f97316">'+ct+'C ('+cats.join(' ')+')</span>')}
-          if(ss.d)parts.push('<span style="color:#7c3aed">'+ss.d+'D</span>');
+          if(ct){const cats=[];if(ss.b)cats.push(ss.b+'B');if(ss.u)cats.push(ss.u+'U');if(ss.e)cats.push(ss.e+'E');if(ss.a)cats.push(ss.a+'A');parts.push('<span style="color:#1a1a1a;text-shadow:0 0 2px rgba(255,255,255,.6)">'+ct+'C ('+cats.join(' ')+')</span>')}
+          if(ss.d)parts.push('<span style="color:#1a1a1a;text-shadow:0 0 2px rgba(255,255,255,.6)">'+ss.d+'D</span>');
           return parts.length?'<span style="font-size:.6rem;font-weight:500;font-family:JetBrains Mono,monospace">'+parts.join(' ')+'</span>':'';
         }
-        const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#f97316">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#7c3aed">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.65rem;font-weight:500;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})();
+        const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#1a1a1a;text-shadow:0 0 2px rgba(255,255,255,.6)">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#1a1a1a;text-shadow:0 0 2px rgba(255,255,255,.6)">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.65rem;font-weight:500;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})();
 
         if(isSplit){
           // Split cell: two halves with per-subject sanctions
@@ -1336,9 +1337,11 @@ function rP(){
     return`<span style="display:inline-flex;align-items:center;gap:.35rem;padding:.18rem .5rem;border-radius:5px;background:${bg};border:1px solid ${border}"><span style="font-weight:600;font-size:.72rem;color:${color}">${label}</span>${dateStr}</span>`;
   }
   const sendRuns=flagDates('send'),ehcpRuns=flagDates('ehcp'),fsmRuns=flagDates('fsm');
+  const _senCode=SEN_STATUS[String(x)];
+  const _senLabel=_senCode?SEN_LABELS[_senCode]||'SEND':'SEND';
+  const _senCol=_senCode?SEN_COLORS[_senCode]||'#f97316':'#f97316';
   const flagBadges=[
-    flagBadge('SEND','#f97316','#f9731612','#f9731640',sendRuns),
-    flagBadge('EHCP','#a78bfa','#a78bfa12','#a78bfa40',ehcpRuns),
+    flagBadge(_senLabel,_senCol,_senCol+'12',_senCol+'40',sendRuns),
     flagBadge('FSM','#6488ff','#6488ff12','#6488ff40',fsmRuns),
   ].filter(Boolean).join('');
   const flagsLine=flagBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${flagBadges}</div>`:'';
@@ -1660,7 +1663,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
       const totalLessons=tl*n;
       return Math.max(0,Math.min(100,parseFloat(((totalLessons-totalAbs)/totalLessons*100).toFixed(1))));
     });
-    let lv4=null;grpAttP=grpAttP.map(v=>{if(v!==null)lv4=v;return lv4});
+    // No carry-forward — spanGaps:false handles holidays
   }
 
   const grpLabel=groupLabel||'Group Avg Att';
@@ -4278,13 +4281,12 @@ function rSV(){
 
   function sancRow(item){
     const flags=item.flags?flagBadge2(item.flags):'';
-    const tipC=item.catStr||'';
-    const tipD=item.cats&&item.cats.d?item.cats.d+' Det':'';
-    const tipTxt=[tipC,tipD].filter(Boolean).join(' · ')||item.n+' sanctions';
+    const c=item.cats||{b:0,u:0,e:0,a:0,d:0};
+    const tipHtml=`<div style='font-weight:600;margin-bottom:.3rem'>${item.n} Sanctions</div><table style='font-size:.65rem;border-collapse:collapse'><tr><td style='padding:.1rem .4rem;color:#1a1a1a'>Behaviour</td><td style='padding:.1rem .4rem;font-weight:600'>${c.b||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1a1a1a'>Uniform</td><td style='padding:.1rem .4rem;font-weight:600'>${c.u||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1a1a1a'>Equipment</td><td style='padding:.1rem .4rem;font-weight:600'>${c.e||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1a1a1a'>Attendance</td><td style='padding:.1rem .4rem;font-weight:600'>${c.a||0}</td></tr><tr style='border-top:1px solid var(--bd)'><td style='padding:.1rem .4rem;color:#7c3aed'>Detentions</td><td style='padding:.1rem .4rem;font-weight:600;color:#7c3aed'>${c.d||0}</td></tr></table>`;
     return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(38,45,68,.3)">
       <div style="min-width:6rem"><span style="font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span>${clsInfo(item.idx)}</div>
       ${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}
-      <span style="margin-left:auto;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600;cursor:help" title="${tipTxt}">${item.n} sanction${item.n!==1?'s':''}</span>
+      <span style="margin-left:auto;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600;cursor:help;position:relative" onmouseenter="const t=document.createElement('div');t.innerHTML=this.dataset.tip;t.style.cssText='position:absolute;z-index:50;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;right:0;bottom:100%;pointer-events:none';this.appendChild(t);this._t=t" onmouseleave="if(this._t)this._t.remove()" data-tip="${tipHtml.replace(/"/g,'&quot;')}">${item.n} sanction${item.n!==1?'s':''}</span>
     </div>`;
   }
 
@@ -4500,7 +4502,7 @@ function rCL(){
   const top5Sanc=Object.entries(sancCounts).filter(([idx])=>(sancRawCounts2[idx]||0)>=CT_MN).map(([idx,n])=>{
     const r=lr.find(r=>r[0]===parseInt(idx));
     const pid=r?r[1]:(REG[idx]?REG[idx].id:`#${idx}`);
-    const pS=aySancAll2.filter(s=>s[0]===parseInt(idx));
+    const pS=termSancs.filter(s=>s[0]===parseInt(idx));
     const cats={b:0,u:0,e:0,a:0,d:0};
     pS.forEach(s=>{if(s[1]===2){cats.d++}else{const si=_clSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';cats[t]++}});
     const catStr=[cats.b?cats.b+'B':'',cats.u?cats.u+'U':'',cats.e?cats.e+'E':'',cats.a?cats.a+'A':''].filter(Boolean).join(' ');
@@ -4524,7 +4526,7 @@ function rCL(){
       <div style="overflow-y:auto;flex:1;min-height:0;padding-right:.4rem">${content}</div>
     </div>`;
   }
-  function sancRow(item){const flags=item.flags?flagBadge2(item.flags):'';const tg=pupilTG(item.idx);const tipC=item.catStr||'';const tipD=item.cats&&item.cats.d?item.cats.d+' Det':'';const tipTxt=[tipC,tipD].filter(Boolean).join(' · ')||item.n+' sanctions';return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(38,45,68,.3)"><div style="min-width:6rem"><span style="font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span><div style="font-size:.58rem;color:var(--mu)">${tg}</div></div>${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}<span style="margin-left:auto;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600;cursor:help" title="${tipTxt}">${item.n} sanction${item.n!==1?'s':''}</span></div>`;}
+  function sancRow(item){const flags=item.flags?flagBadge2(item.flags):'';const tg=pupilTG(item.idx);const c=item.cats||{b:0,u:0,e:0,a:0,d:0};const tipHtml=`<div style='font-weight:600;margin-bottom:.3rem'>${item.n} Sanctions</div><table style='font-size:.65rem;border-collapse:collapse'><tr><td style='padding:.1rem .4rem'>Behaviour</td><td style='padding:.1rem .4rem;font-weight:600'>${c.b||0}</td></tr><tr><td style='padding:.1rem .4rem'>Uniform</td><td style='padding:.1rem .4rem;font-weight:600'>${c.u||0}</td></tr><tr><td style='padding:.1rem .4rem'>Equipment</td><td style='padding:.1rem .4rem;font-weight:600'>${c.e||0}</td></tr><tr><td style='padding:.1rem .4rem'>Attendance</td><td style='padding:.1rem .4rem;font-weight:600'>${c.a||0}</td></tr><tr style='border-top:1px solid var(--bd)'><td style='padding:.1rem .4rem;color:#7c3aed'>Detentions</td><td style='padding:.1rem .4rem;font-weight:600;color:#7c3aed'>${c.d||0}</td></tr></table>`;return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(38,45,68,.3)"><div style="min-width:6rem"><span style="font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span><div style="font-size:.58rem;color:var(--mu)">${tg}</div></div>${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}<span style="margin-left:auto;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600;cursor:help;position:relative" onmouseenter="const t=document.createElement('div');t.innerHTML=this.dataset.tip;t.style.cssText='position:absolute;z-index:50;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;right:0;bottom:100%;pointer-events:none';this.appendChild(t);this._t=t" onmouseleave="if(this._t)this._t.remove()" data-tip="${tipHtml.replace(/"/g,'&quot;')}">${item.n} sanction${item.n!==1?'s':''}</span></div>`;}
 
   // ── Pupil Discipline History table ──
   // Academic year only, up to today
