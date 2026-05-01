@@ -112,7 +112,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('behaviour',this)">⚠️ Behavioural Concerns</button>
 <button class="tb" onclick="sw('pairs',this)">👥 Problem Groups</button>
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
-<button class="tb" onclick="sw('analytics',this);document.getElementById('an-subj-scatter').innerHTML='<div style=color:red>BUTTON CLICKED</div>'">📊 Analytics</button>
+<button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
@@ -5352,8 +5352,6 @@ function rPeer(){
     // ── SUBJECT RISK MATRIX ──
     // For each subject: avg attendance %, avg sanctions per pupil
     const subjData=[];
-    const _debugEl=document.getElementById('an-subj-scatter');
-    _debugEl.innerHTML=`<div style="color:var(--mu);padding:1rem">Building data for Y${yearGroup}... ink=${ink}, enrols=${enrols.length}, SUBS=${SUBS.length}, totalWeeks=${totalWeeks}</div>`;
     SUBS.forEach(sub=>{
       // Pupils taking this subject
       const pupils=new Set(enrols.filter(r=>r.t==='cls'&&r.s===sub&&r.u===null).map(r=>r.x));
@@ -5425,50 +5423,9 @@ function rPeer(){
 
     const avgAtt=subjData.reduce((s,d)=>s+d.attPct,0)/subjData.length;
     const avgCodes=subjData.reduce((s,d)=>s+d.codesPerPupil,0)/subjData.length;
+    const colors=['#ef4444','#f97316','#eab308','#34d399','#38bdf8','#6488ff','#a78bfa','#f472b6','#94a3b8','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#6366f1','#d946ef','#0ea5e9','#84cc16','#fb923c','#e11d48','#2dd4bf','#7c3aed','#059669','#dc2626'];
 
-      dc('anSubjChart');
-      subjEl.innerHTML=`<div class="dw"><div class="dwt">Subject Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Bubble size = pupil count · Dashed lines = year averages</span></div><div style="position:relative;height:400px"><canvas id="c-anSubjChart"></canvas></div></div>`;
-
-      const colors=['#ef4444','#f97316','#eab308','#34d399','#38bdf8','#6488ff','#a78bfa','#f472b6','#94a3b8','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#6366f1','#d946ef','#0ea5e9','#84cc16','#fb923c','#e11d48','#2dd4bf','#7c3aed','#059669','#dc2626'];
-
-      sc2('anSubjChart',new Chart(document.getElementById('c-anSubjChart'),{
-        type:'bubble',
-        data:{datasets:subjData.map((d,i)=>({
-          label:d.sub,
-          data:[{x:d.attPct,y:d.codesPerPupil,r:Math.max(5,Math.min(25,d.pupils/3))}],
-          backgroundColor:colors[i%colors.length]+'88',
-          borderColor:colors[i%colors.length],
-          borderWidth:1.5
-        }))},
-        options:{
-          responsive:true,maintainAspectRatio:false,
-          plugins:{
-            legend:{display:false},
-            tooltip:{callbacks:{
-              label:c=>{const d=subjData[c.datasetIndex];return`${d.sub}: Att ${d.attPct}%, ${d.codesPerPupil.toFixed(1)} codes/pupil, ${d.pupils} pupils, ${d.sendPct}% SEND`}
-            }}
-          },
-          scales:{
-            x:{title:{display:true,text:'Attendance %',color:'#666666'},min:subjData.length?Math.max(75,Math.floor(Math.min(...subjData.map(d=>d.attPct))-2)):80,max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
-            y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...subjData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
-          }
-        }
-      }));
-
-      // Draw average lines after chart renders
-      setTimeout(()=>{
-        const ch=_c['anSubjChart'];
-        if(ch&&ch.chartArea){
-          const{ctx,chartArea:{left,right,top,bottom},scales:{x,y}}=ch;
-          ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#94a3b866';ctx.lineWidth=1;
-          const xPx=x.getPixelForValue(avgAtt);ctx.beginPath();ctx.moveTo(xPx,top);ctx.lineTo(xPx,bottom);ctx.stroke();
-          const yPx=y.getPixelForValue(avgCodes);ctx.beginPath();ctx.moveTo(left,yPx);ctx.lineTo(right,yPx);ctx.stroke();
-          ctx.restore();
-        }
-      },200);
-
-      // Add a legend table below
-      const legendHtml=subjData.sort((a,b)=>b.codesPerPupil-a.codesPerPupil).map((d,i)=>`<tr>
+    const legendHtml=subjData.sort((a,b)=>b.codesPerPupil-a.codesPerPupil).map((d,i)=>`<tr>
         <td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colors[subjData.indexOf(d)%colors.length]};margin-right:.3rem"></span>${d.sub}</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.attPct<avgAtt?'color:#ef4444;font-weight:600':''}">${d.attPct}%</td>
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.codesPerPupil>avgCodes?'color:#ef4444;font-weight:600':''}">${d.codesPerPupil.toFixed(1)}</td>
@@ -5477,7 +5434,10 @@ function rPeer(){
         <td style="text-align:center">${d.totalCodes}</td>
       </tr>`).join('');
 
-      subjEl.innerHTML+=`<div class="dw" style="margin-top:.5rem"><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th style="text-align:center">Att %</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Pupils</th><th style="text-align:center;color:#f97316">SEND %</th><th style="text-align:center">Total Codes</th></tr></thead><tbody>${legendHtml}</tbody></table></div></div>`;
+    dc('anSubjChart');
+    subjEl.innerHTML=`<div class="dw"><div class="dwt">Subject Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Bubble size = pupil count</span></div><div style="position:relative;height:400px"><canvas id="c-anSubjChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Subject Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${subjData.length} subjects · Avg Att: ${avgAtt.toFixed(1)}% · Avg Codes/Pupil: ${avgCodes.toFixed(1)}</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th style="text-align:center">Att %</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Pupils</th><th style="text-align:center;color:#f97316">SEND %</th><th style="text-align:center">Total Codes</th></tr></thead><tbody>${legendHtml}</tbody></table></div></div>`;
+
+    sc2('anSubjChart',new Chart(document.getElementById('c-anSubjChart'),{type:'bubble',data:{datasets:subjData.map((d,i)=>({label:d.sub,data:[{x:d.attPct,y:d.codesPerPupil,r:Math.max(5,Math.min(25,d.pupils/3))}],backgroundColor:colors[subjData.indexOf(d)%colors.length]+'88',borderColor:colors[subjData.indexOf(d)%colors.length],borderWidth:1.5}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const d=subjData.find(dd=>dd.sub===c.dataset.label);return d?`${d.sub}: Att ${d.attPct}%, ${d.codesPerPupil.toFixed(1)} codes/pupil, ${d.pupils}p, ${d.sendPct}% SEND`:''}}}},scales:{x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.floor(Math.min(...subjData.map(d=>d.attPct))-2)),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...subjData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
 
     // ── RENDER CLASS SCATTER ──
     const classEl=document.getElementById('an-class-scatter');
