@@ -5446,8 +5446,8 @@ function rPeer(){
             }}
           },
           scales:{
-            x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(80,Math.min(...subjData.map(d=>d.attPct))-2),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
-            y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
+            x:{title:{display:true,text:'Attendance %',color:'#666666'},min:subjData.length?Math.max(75,Math.floor(Math.min(...subjData.map(d=>d.attPct))-2)):80,max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
+            y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...subjData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
           }
         },
         plugins:[{id:'avgLines',afterDraw(chart){
@@ -5505,7 +5505,7 @@ function rPeer(){
           },
           scales:{
             x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.min(...classData.map(d=>d.attPct))-2),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
-            y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
+            y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...classData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
           }
         }
       }));
