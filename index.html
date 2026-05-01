@@ -113,6 +113,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('pairs',this)">👥 Problem Groups</button>
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
 <button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
+<button class="tb" onclick="sw('admin',this)">🔧 Admin</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
@@ -277,6 +278,10 @@ table.d tr:hover td{background:var(--sf2)}
 </div>
 <div id="an-subj-scatter" style="margin-bottom:1.25rem"></div>
 <div id="an-class-scatter" style="margin-bottom:1.25rem"></div>
+</div>
+
+<div id="vw-admin" class="vw">
+<div id="admin-out"></div>
 </div>
 
 <div id="vw-peer" class="vw">
@@ -564,6 +569,7 @@ const SEN_STATUS=DD.senStatus||{};
 const SEN_LABELS={'K':'SEN Support','E':'EHCP','Add':'Additional Help','add':'Additional Help','Strat':'Strategies Applied','strat':'Strategies Applied','N':'SEN Monitoring'};
 const SEN_COLORS={'K':'#f97316','E':'#a78bfa','Add':'#38bdf8','add':'#38bdf8','Strat':'#34d399','strat':'#34d399','N':'#94a3b8'};
 const UNAUTH_MARKS=new Set(DD.config?.att_codes?.unauthorised_absent||['G','N','O','U','-','?']);
+const NOT_COUNTED_MARKS=new Set(DD.config?.att_codes?.not_counted||['Y1','Y2','Y3','Y4','Y5','Y6','Y7']);
 function isUnauth(mark){return UNAUTH_MARKS.has(mark)}
 
 // Global sortable table helper
@@ -4103,7 +4109,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='admin')rAdmin();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -5537,7 +5543,139 @@ function rPeer(){
 
   window.popTG=popTG;
   window.rTG=rTG;
+  // ── ADMIN TAB ──
+  function rAdmin(){
+    const out=document.getElementById('admin-out');
+    const attCodes=DD.config.att_codes||{};
+    const senCodes=DD.config.sen_codes||{};
+    const incidentCodes=DD.config.incident_codes||{};
+
+    // Collect all codes actually found in data
+    const foundAttCodes=new Set();
+    Object.values(DD.attendanceMarks||{}).forEach(byDate=>{
+      Object.values(byDate).forEach(marks=>{marks.forEach(m=>foundAttCodes.add(m))});
+    });
+    const foundSenCodes=new Set(Object.values(DD.senStatus||{}));
+    const foundIncidentCodes=new Set();
+    (DD.sanctionDetails||[]).forEach(d=>{if(d&&d[0])foundIncidentCodes.add(d[0])});
+
+    // Classify attendance codes
+    const allAttCategories=['present','authorised_absent','unauthorised_absent','not_counted'];
+    const attCatLabels={'present':'Present','authorised_absent':'Auth. Absent','unauthorised_absent':'Unauth. Absent','not_counted':'Not Counted'};
+    const attCatColors={'present':'#34d399','authorised_absent':'#f97316','unauthorised_absent':'#ef4444','not_counted':'#94a3b8'};
+    const classifiedAtt={};
+    allAttCategories.forEach(cat=>{(attCodes[cat]||[]).forEach(c=>{classifiedAtt[c]=cat})});
+    const unclassifiedAtt=[...foundAttCodes].filter(c=>!classifiedAtt[c]).sort();
+
+    // Build attendance table
+    let attHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Attendance Codes</div>`;
+    if(unclassifiedAtt.length){
+      attHtml+=`<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:#ef4444;font-weight:600">⚠ ${unclassifiedAtt.length} unclassified code${unclassifiedAtt.length!==1?'s':''}: </span>${unclassifiedAtt.map(c=>`<b>${c}</b>`).join(', ')}</div>`;
+    }
+    attHtml+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Code</th><th>Category</th><th style="text-align:center">In Data</th><th>Change</th></tr></thead><tbody>`;
+    // Show unclassified first
+    unclassifiedAtt.forEach(c=>{
+      attHtml+=`<tr style="background:rgba(239,68,68,.08)"><td style="font-weight:600">${c}</td><td style="color:#ef4444;font-weight:600">UNCLASSIFIED</td><td style="text-align:center">✓</td><td><select onchange="window._adminSetAtt('${c}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px"><option value="">— Select —</option>${allAttCategories.map(cat=>`<option value="${cat}">${attCatLabels[cat]}</option>`).join('')}</select></td></tr>`;
+    });
+    // Then classified
+    const allClassified=Object.entries(classifiedAtt).sort((a,b)=>a[1].localeCompare(b[1])||a[0].localeCompare(b[0]));
+    allClassified.forEach(([c,cat])=>{
+      const inData=foundAttCodes.has(c);
+      attHtml+=`<tr><td style="font-weight:600">${c}</td><td style="color:${attCatColors[cat]};font-weight:500">${attCatLabels[cat]}</td><td style="text-align:center;color:${inData?'var(--tx)':'var(--mu)'}">${inData?'✓':'—'}</td><td><select onchange="window._adminSetAtt('${c}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px">${allAttCategories.map(ct=>`<option value="${ct}"${ct===cat?' selected':''}>${attCatLabels[ct]}</option>`).join('')}</select></td></tr>`;
+    });
+    attHtml+=`</tbody></table></div></div>`;
+
+    // Build SEN codes table
+    let senHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">SEN Codes</div>`;
+    const unclassifiedSen=[...foundSenCodes].filter(c=>!senCodes[c]).sort();
+    if(unclassifiedSen.length){
+      senHtml+=`<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:#ef4444;font-weight:600">⚠ ${unclassifiedSen.length} unclassified SEN code${unclassifiedSen.length!==1?'s':''}: </span>${unclassifiedSen.map(c=>`<b>${c}</b>`).join(', ')}</div>`;
+    }
+    senHtml+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Code</th><th>Label</th><th>Colour</th><th style="text-align:center">Pupils</th><th>Edit Label</th></tr></thead><tbody>`;
+    const senEntries={...senCodes};
+    unclassifiedSen.forEach(c=>{senEntries[c]='UNCLASSIFIED'});
+    const senCounts={};
+    Object.values(DD.senStatus||{}).forEach(c=>{senCounts[c]=(senCounts[c]||0)+1});
+    Object.entries(senEntries).forEach(([code,label])=>{
+      const col=SEN_COLORS[code]||'#94a3b8';
+      const count=senCounts[code]||0;
+      const isUnc=label==='UNCLASSIFIED';
+      senHtml+=`<tr${isUnc?' style="background:rgba(239,68,68,.08)"':''}><td style="font-weight:600">${code}</td><td style="${isUnc?'color:#ef4444;font-weight:600':''}">${label}</td><td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${col};vertical-align:middle"></span> ${col}</td><td style="text-align:center">${count||'—'}</td><td><input value="${isUnc?'':label}" placeholder="Enter label" onchange="window._adminSetSen('${code}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .4rem;border-radius:4px;width:120px"></td></tr>`;
+    });
+    senHtml+=`</tbody></table></div></div>`;
+
+    // Build incident codes table
+    let incHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Incident Codes (Behaviour Categories)</div>`;
+    const incCategories=['Behaviour','Uniform','Equipment','Attendance','Detention','Other'];
+    const incCatColors={'Behaviour':'#ef4444','Uniform':'#f97316','Equipment':'#eab308','Attendance':'#38bdf8','Detention':'#7c3aed','Other':'#94a3b8'};
+    const unclassifiedInc=[...foundIncidentCodes].filter(c=>!incidentCodes[c]).sort();
+    if(unclassifiedInc.length){
+      incHtml+=`<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:#ef4444;font-weight:600">⚠ ${unclassifiedInc.length} unclassified incident code${unclassifiedInc.length!==1?'s':''}: </span>${unclassifiedInc.map(c=>`<b>${c}</b>`).join(', ')}</div>`;
+    }
+    // Count occurrences per incident code
+    const incCounts={};
+    (DD.sanctionDetails||[]).forEach(d=>{if(d&&d[0])incCounts[d[0]]=(incCounts[d[0]]||0)+1});
+    incHtml+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Incident Code</th><th>Category</th><th style="text-align:center">Count</th><th>Change</th></tr></thead><tbody>`;
+    // Unclassified first
+    unclassifiedInc.forEach(c=>{
+      incHtml+=`<tr style="background:rgba(239,68,68,.08)"><td style="font-weight:500;font-size:.72rem">${c}</td><td style="color:#ef4444;font-weight:600">UNCLASSIFIED</td><td style="text-align:center">${incCounts[c]||0}</td><td><select onchange="window._adminSetInc('${c.replace(/'/g,"\\'")}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px"><option value="">— Select —</option>${incCategories.map(cat=>`<option value="${cat}">${cat}</option>`).join('')}</select></td></tr>`;
+    });
+    // Classified, grouped by category
+    incCategories.forEach(cat=>{
+      const codes=Object.entries(incidentCodes).filter(([c,ct])=>ct===cat).sort((a,b)=>a[0].localeCompare(b[0]));
+      codes.forEach(([c,ct])=>{
+        incHtml+=`<tr><td style="font-weight:500;font-size:.72rem">${c}</td><td style="color:${incCatColors[cat]||'var(--mu)'};font-weight:500">${cat}</td><td style="text-align:center">${incCounts[c]||'—'}</td><td><select onchange="window._adminSetInc('${c.replace(/'/g,"\\'")}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px">${incCategories.map(ct2=>`<option value="${ct2}"${ct2===cat?' selected':''}>${ct2}</option>`).join('')}</select></td></tr>`;
+      });
+    });
+    incHtml+=`</tbody></table></div></div>`;
+
+    // Summary
+    const summaryHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Data Key Summary</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.8rem;padding:.5rem 0">
+        <div style="font-size:.75rem"><span style="color:#34d399;font-weight:600">${(attCodes.present||[]).length}</span> Present codes · <span style="color:#f97316;font-weight:600">${(attCodes.authorised_absent||[]).length}</span> Auth Absent · <span style="color:#ef4444;font-weight:600">${(attCodes.unauthorised_absent||[]).length}</span> Unauth · <span style="color:#94a3b8;font-weight:600">${(attCodes.not_counted||[]).length}</span> Not Counted${unclassifiedAtt.length?` · <span style="color:#ef4444;font-weight:700">${unclassifiedAtt.length} UNCLASSIFIED</span>`:''}</div>
+        <div style="font-size:.75rem"><span style="color:#f97316;font-weight:600">${Object.keys(senCodes).length}</span> SEN codes${unclassifiedSen.length?` · <span style="color:#ef4444;font-weight:700">${unclassifiedSen.length} UNCLASSIFIED</span>`:''}</div>
+        <div style="font-size:.75rem"><span style="color:#7c3aed;font-weight:600">${Object.keys(incidentCodes).length}</span> Incident codes${unclassifiedInc.length?` · <span style="color:#ef4444;font-weight:700">${unclassifiedInc.length} UNCLASSIFIED</span>`:''}</div>
+      </div>
+      <div style="font-size:.65rem;color:var(--mu);margin-top:.3rem">Changes take effect immediately in the current session. To persist changes across reloads, export the updated config and re-import your data.</div>
+    </div>`;
+
+    out.innerHTML=summaryHtml+attHtml+senHtml+incHtml;
+  }
+
+  // Admin change handlers
+  window._adminSetAtt=function(code,cat){
+    const ac=DD.config.att_codes;
+    // Remove from all categories
+    ['present','authorised_absent','unauthorised_absent','not_counted'].forEach(c=>{
+      ac[c]=(ac[c]||[]).filter(x=>x!==code);
+    });
+    // Add to new category
+    if(cat&&ac[cat]) ac[cat].push(code);
+    ac[cat]=(ac[cat]||[]).sort();
+    // Update runtime sets
+    UNAUTH_MARKS.clear();(ac.unauthorised_absent||[]).forEach(c=>UNAUTH_MARKS.add(c));
+    NOT_COUNTED_MARKS.clear();(ac.not_counted||[]).forEach(c=>NOT_COUNTED_MARKS.add(c));
+    rAdmin();
+  };
+  window._adminSetSen=function(code,label){
+    if(label){
+      DD.config.sen_codes[code]=label;
+      SEN_LABELS[code]=label;
+    }
+    rAdmin();
+  };
+  window._adminSetInc=function(code,cat){
+    DD.config.incident_codes[code]=cat;
+    // Update sanctionDetails in place
+    const SAN2=DD.sanctions||[];
+    (DD.sanctionDetails||[]).forEach((d,i)=>{
+      if(d&&d[0]===code) d[1]=cat;
+    });
+    rAdmin();
+  };
+
   window.rAnalytics=rAnalytics;
+  window.rAdmin=rAdmin;
   window.rTV=rTV;
   window.rBC=rBC;
   window.rPP=rPP;
