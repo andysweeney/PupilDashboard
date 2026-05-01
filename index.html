@@ -5448,12 +5448,15 @@ function rPeer(){
           scales:{
             x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(80,Math.min(...subjData.map(d=>d.attPct))-2),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
             y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
-          },
-          annotation:{annotations:{
-            avgAttLine:{type:'line',xMin:avgAtt,xMax:avgAtt,borderColor:'#94a3b866',borderWidth:1,borderDash:[4,4]},
-            avgCodesLine:{type:'line',yMin:avgCodes,yMax:avgCodes,borderColor:'#94a3b866',borderWidth:1,borderDash:[4,4]}
-          }}
-        }
+          }
+        },
+        plugins:[{id:'avgLines',afterDraw(chart){
+          const{ctx,chartArea:{left,right,top,bottom},scales:{x,y}}=chart;
+          ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#94a3b866';ctx.lineWidth=1;
+          const xPx=x.getPixelForValue(avgAtt);ctx.beginPath();ctx.moveTo(xPx,top);ctx.lineTo(xPx,bottom);ctx.stroke();
+          const yPx=y.getPixelForValue(avgCodes);ctx.beginPath();ctx.moveTo(left,yPx);ctx.lineTo(right,yPx);ctx.stroke();
+          ctx.restore();
+        }}]
       }));
 
       // Add a legend table below
