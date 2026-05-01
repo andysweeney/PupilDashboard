@@ -1861,7 +1861,7 @@ function rPrg(){
 
     const pupilIdxSet=new Set(rows.map(r=>r[0]));
     const ayStart=`${ay}-09-01`,ayEnd=`${ay+1}-07-31`;
-    const coSanc=(DD.sanctions||[]).filter(s=>pupilIdxSet.has(s[0])&&s[2]>=ayStart&&s[2]<=ayEnd&&(isAll||s[3]===sub));
+    const coSanc=(DD.sanctions||[]).filter(s=>pupilIdxSet.has(s[0])&&s[2]>=ayStart&&s[2]<=ayEnd&&(isAll||s[3]===sub||s[3]===null));
     const nCodes=coSanc.filter(s=>s[1]===0).length;
     const nOnCalls=coSanc.filter(s=>s[1]===1).length;
     const nDetentions=coSanc.filter(s=>s[1]===2).length;
@@ -3961,7 +3961,7 @@ function rCL(){
   const last3pp=pp.slice(-3).reverse();
   const last3labels=last3pp.map(p=>PL[PER.indexOf(p)]);
   const aySancStart=`${CAY}-09-01`,aySancEnd=`${CAY+1}-07-31`;
-  const aySancAll=(DD.sanctions||[]).filter(s=>lrIdxSet.has(s[0])&&s[2]>=aySancStart&&s[2]<=aySancEnd&&s[3]===sub);
+  const aySancAll=(DD.sanctions||[]).filter(s=>lrIdxSet.has(s[0])&&s[2]>=aySancStart&&s[2]<=aySancEnd&&(s[3]===sub||s[3]===null));
 
   let sendTableHtml='';
   if(sendPupils.length){
@@ -4122,7 +4122,7 @@ function rCC(){
     const _ccToday=new Date();
     const _ccTodayISO=`${_ccToday.getFullYear()}-${String(_ccToday.getMonth()+1).padStart(2,'0')}-${String(_ccToday.getDate()).padStart(2,'0')}`;
     const ayStartC=`${CAY}-09-01`;
-    const clsSanc=SAN_ALL.filter(s=>pupSetC.has(s[0])&&s[2]>=ayStartC&&s[2]<=_ccTodayISO&&s[3]===sub);
+    const clsSanc=SAN_ALL.filter(s=>pupSetC.has(s[0])&&s[2]>=ayStartC&&s[2]<=_ccTodayISO&&(s[3]===sub||s[3]===null));
     const clsCodes=clsSanc.filter(s=>s[1]===0).length;
     const clsOnCalls=clsSanc.filter(s=>s[1]===1).length;
     const clsDetentions=clsSanc.filter(s=>s[1]===2).length;
