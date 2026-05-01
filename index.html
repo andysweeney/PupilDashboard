@@ -4637,7 +4637,6 @@ function rCL(){
     const sendRows=sendPupils.sort((a,b)=>a[1].localeCompare(b[1])).map(r=>{
       const flags=[
         r[4]?senPillShort(r[0]):'',
-        r[5]?'<span style="font-size:.6rem;font-weight:600;color:#a78bfa;padding:.1rem .3rem;border-radius:3px;background:#a78bfa18">EHC</span>':'',
         r[6]?'<span style="font-size:.6rem;font-weight:600;color:#6488ff;padding:.1rem .3rem;border-radius:3px;background:#6488ff18">FSM</span>':'',
       ].filter(Boolean).join(' ');
       const efCells=last3pp.map(p=>{
