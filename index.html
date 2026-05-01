@@ -1395,6 +1395,9 @@ function rHeatmaps(x,ink,subjFilter){
   const _hmToday=new Date();
   const _hmTodayISO=`${_hmToday.getFullYear()}-${String(_hmToday.getMonth()+1).padStart(2,'0')}-${String(_hmToday.getDate()).padStart(2,'0')}`;
   const ps=SAN.filter(r=>r[0]===x&&r[2]<=_hmTodayISO);
+  // Build index map to get categories
+  const psWithCat=[];
+  SAN.forEach((r,i)=>{if(r[0]===x&&r[2]<=_hmTodayISO)psWithCat.push({r,cat:SANC_DET[i]?SANC_DET[i][1]:'Other',incident:SANC_DET[i]?SANC_DET[i][0]:''})});
   const wrap=document.getElementById('p-heatmaps');
   if(!ps.length){wrap.innerHTML='';return}
 
@@ -1409,15 +1412,17 @@ function rHeatmaps(x,ink,subjFilter){
   const dayCounts={};
   const dayTypes={};// {date: [codeCount, onCallCount, detentionCount]}
   const daySubjCounts={};// {date: count for selected subject}
-  const dayDetails={};// {date: [{type, subj},...]}
+  const dayDetails={};// {date: [{type, subj, cat},...]}
   const TN2=['Code','On-Call','Detention'];
-  ps.forEach(r=>{
+  const CAT_SHORT={'Behaviour':'B','Uniform':'U','Equipment':'E','Attendance':'A','Detention':'D','Other':'?'};
+  psWithCat.forEach(s=>{
+    const r=s.r;
     dayCounts[r[2]]=(dayCounts[r[2]]||0)+1;
     if(!dayTypes[r[2]])dayTypes[r[2]]=[0,0,0];
     dayTypes[r[2]][r[1]]++;
     if(selSubj&&r[3]===selSubj) daySubjCounts[r[2]]=(daySubjCounts[r[2]]||0)+1;
     if(!dayDetails[r[2]])dayDetails[r[2]]=[];
-    dayDetails[r[2]].push({type:r[1],subj:r[3]||'Non-Lesson'});
+    dayDetails[r[2]].push({type:r[1],subj:r[3]||'Non-Lesson',cat:s.cat});
   });
   const maxCount=Math.max(...Object.values(dayCounts),1);
 
@@ -1664,7 +1669,8 @@ function rHeatmaps(x,ink,subjFilter){
         h+=`<div style="color:var(--mu);margin-bottom:.3rem">${details.length} sanction${details.length!==1?'s':''}</div>`;
         details.forEach(d=>{
           const col=d.type===2?'#7c3aed':d.type===1?'#ef4444':'#f97316';
-          h+=`<div style="display:flex;gap:.5rem;padding:.1rem 0;border-bottom:1px solid rgba(38,45,68,.2)"><span style="color:${col};font-weight:600;min-width:4rem">${TN2[d.type]}</span><span style="color:var(--tx)">${d.subj||'Non-Lesson'}</span></div>`;
+          const catLabel=d.type===2?'':'<span style="color:var(--mu);font-size:.65rem;margin-left:.3rem">['+( CAT_SHORT[d.cat]||'?')+']</span>';
+          h+=`<div style="display:flex;gap:.5rem;padding:.1rem 0;border-bottom:1px solid rgba(38,45,68,.2)"><span style="color:${col};font-weight:600;min-width:4rem">${TN2[d.type]}${catLabel}</span><span style="color:var(--tx)">${d.subj||'Non-Lesson'}</span></div>`;
         });
       }
       hmTip.innerHTML=h;hmTip.style.display='block';
@@ -2398,13 +2404,35 @@ function rBC(){
     const sanCount10=pSan.filter(r=>r[2]>=bcSD[Math.max(0,bcSD.length-10)]&&r[2]<=bcEndDate).length;
     const imm=s10>s20*CT_SC&&s20>0&&sanCount10>=CT_MN;
     const grad=s10>s100*CT_SC&&s100>0&&sanCount10>=CT_MN;
-    if(imm||grad) allSubjConcerns.push({px,pid,yg,imm,grad,tg:getTG(px),s10,s20,s100});
+    if(imm||grad){
+      const pct10v20=s20>0?((s10-s20)/s20*100):0;
+      const pct10v100=s100>0?((s10-s100)/s100*100):0;
+      allSubjConcerns.push({px,pid,yg,imm,grad,tg:getTG(px),s10,s20,s100,pct10v20,pct10v100});
+    }
   });
   allSubjConcerns.sort((a,b)=>{if(a.imm!==b.imm)return a.imm?-1:1;return b.s10-a.s10});
 
+  // Sortable table helper
+  function bcSortTable(tableId,data,renderRow,defaultSort){
+    let sortCol=defaultSort||0,sortDir='desc';
+    function render(){
+      const sorted=[...data].sort((a,b)=>{
+        const va=typeof sortCol==='function'?sortCol(a):Object.values(a)[sortCol];
+        const vb=typeof sortCol==='function'?sortCol(b):Object.values(b)[sortCol];
+        if(va==null&&vb==null)return 0;
+        if(va==null)return 1;if(vb==null)return-1;
+        const cmp=typeof va==='string'?va.localeCompare(vb):va-vb;
+        return sortDir==='asc'?cmp:-cmp;
+      });
+      const tbody=document.getElementById(tableId);
+      if(tbody)tbody.innerHTML=sorted.map(renderRow).join('');
+    }
+    return{render,setSort:(col)=>{if(sortCol===col)sortDir=sortDir==='asc'?'desc':'asc';else{sortCol=col;sortDir='desc'}render()}};
+  }
+
   let allSubjHtml='';
   if(allSubjConcerns.length){
-    const rows=allSubjConcerns.map(c=>`<tr>
+    const renderAllRow=c=>`<tr>
       <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(c.px,c.pid)}${senPillShort(c.px)}</td>
       <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${c.yg}</td>
       <td style="text-align:center">${c.imm?tick:blank}</td>
@@ -2413,18 +2441,28 @@ function rBC(){
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem">${c.s10.toFixed(1)}</td>
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${c.s20.toFixed(1)}</td>
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${c.s100.toFixed(1)}</td>
-    </tr>`).join('');
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:${c.pct10v20>0?'#ef4444':'#34d399'}">${c.pct10v20>0?'+':''}${c.pct10v20.toFixed(0)}%</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:${c.pct10v100>0?'#ef4444':'#34d399'}">${c.pct10v100>0?'+':''}${c.pct10v100.toFixed(0)}%</td>
+    </tr>`;
+    const thSort=(label,sortFn,idx)=>`<th style="text-align:center;cursor:pointer;user-select:none" onclick="window._bcSort1.setSort(${typeof sortFn==='string'?sortFn:'c=>c.'+sortFn})">${label} ↕</th>`;
     allSubjHtml=`<div class="dw"><div class="dwt">All-Subject Behavioural Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${headerNote} · ${allSubjConcerns.length} pupil${allSubjConcerns.length!==1?'s':''}</span></div>
       <table class="d"><thead><tr>
-        <th>Pupil</th>
-        <th style="text-align:center">Year</th>
-        <th style="text-align:center;color:#ef4444">Immediate</th>
-        <th style="text-align:center;color:#f97316">Graduated</th>
-        <th>Tutor Group</th>
-        <th style="text-align:center">10sd</th>
-        <th style="text-align:center">20sd</th>
-        <th style="text-align:center">100sd</th>
-      </tr></thead><tbody>${rows}</tbody></table></div>`;
+        <th style="cursor:pointer" onclick="window._bcSort1.setSort(c=>c.pid)">Pupil ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.yg)">Year ↕</th>
+        <th style="text-align:center;color:#ef4444;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.imm?0:1)">Immediate ↕</th>
+        <th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.grad?0:1)">Graduated ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort1.setSort(c=>c.tg)">TG ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.s10)">10sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.s20)">20sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.s100)">100sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.pct10v20)">% 10v20 ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.pct10v100)">% 10v100 ↕</th>
+      </tr></thead><tbody id="bc-all-tbody"></tbody></table></div>`;
+    // Deferred sort init
+    setTimeout(()=>{
+      window._bcSort1=bcSortTable('bc-all-tbody',allSubjConcerns,renderAllRow,c=>c.s10);
+      window._bcSort1.render();
+    },0);
   }else{
     allSubjHtml=`<div class="dw"><div class="dwt">All-Subject Behavioural Concerns</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No all-subject behavioural concerns for ${headerNote}</div></div>`;
   }
@@ -2443,7 +2481,9 @@ function rBC(){
       const grad=s10>s100*CT_SC&&s100>0&&sSanCount10>=CT_MN;
       if(imm||grad){
         const ci=getClsInfo(px,subj);
-        subjConcerns.push({px,pid,yg,subj,imm,grad,tg:getTG(px),tc:ci.tc,c:ci.c,s10,s20,s100});
+        const pct10v20=s20>0?((s10-s20)/s20*100):0;
+        const pct10v100=s100>0?((s10-s100)/s100*100):0;
+        subjConcerns.push({px,pid,yg,subj,imm,grad,tg:getTG(px),tc:ci.tc,c:ci.c,s10,s20,s100,pct10v20,pct10v100});
       }
     });
   });
@@ -2451,7 +2491,7 @@ function rBC(){
 
   let subjHtml='';
   if(subjConcerns.length){
-    const rows=subjConcerns.map(c=>`<tr>
+    const renderSubjRow=c=>`<tr>
       <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(c.px,c.pid)}${senPillShort(c.px)}</td>
       <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${c.yg}</td>
       <td style="text-align:center">${c.imm?tick:blank}</td>
@@ -2463,21 +2503,29 @@ function rBC(){
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem">${c.s10.toFixed(1)}</td>
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${c.s20.toFixed(1)}</td>
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${c.s100.toFixed(1)}</td>
-    </tr>`).join('');
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:${c.pct10v20>0?'#ef4444':'#34d399'}">${c.pct10v20>0?'+':''}${c.pct10v20.toFixed(0)}%</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:${c.pct10v100>0?'#ef4444':'#34d399'}">${c.pct10v100>0?'+':''}${c.pct10v100.toFixed(0)}%</td>
+    </tr>`;
     subjHtml=`<div class="dw" style="margin-top:1rem"><div class="dwt">Subject-Specific Behavioural Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${headerNote} · ${subjConcerns.length} concern${subjConcerns.length!==1?'s':''} across ${new Set(subjConcerns.map(c=>c.px)).size} pupil${new Set(subjConcerns.map(c=>c.px)).size!==1?'s':''}</span></div>
       <table class="d"><thead><tr>
-        <th>Pupil</th>
-        <th style="text-align:center">Year</th>
-        <th style="text-align:center;color:#ef4444">Immediate</th>
-        <th style="text-align:center;color:#f97316">Graduated</th>
-        <th>Tutor Group</th>
-        <th>Subject</th>
-        <th>Teacher</th>
-        <th style="text-align:center">Class</th>
-        <th style="text-align:center">10sd</th>
-        <th style="text-align:center">20sd</th>
-        <th style="text-align:center">100sd</th>
-      </tr></thead><tbody>${rows}</tbody></table></div>`;
+        <th style="cursor:pointer" onclick="window._bcSort2.setSort(c=>c.pid)">Pupil ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.yg)">Year ↕</th>
+        <th style="text-align:center;color:#ef4444;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.imm?0:1)">Immediate ↕</th>
+        <th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.grad?0:1)">Graduated ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort2.setSort(c=>c.tg)">TG ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort2.setSort(c=>c.subj)">Subject ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort2.setSort(c=>c.tc)">Teacher ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.c)">Class ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.s10)">10sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.s20)">20sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.s100)">100sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.pct10v20)">% 10v20 ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.pct10v100)">% 10v100 ↕</th>
+      </tr></thead><tbody id="bc-subj-tbody"></tbody></table></div>`;
+    setTimeout(()=>{
+      window._bcSort2=bcSortTable('bc-subj-tbody',subjConcerns,renderSubjRow,c=>c.s10);
+      window._bcSort2.render();
+    },0);
   }else{
     subjHtml=`<div class="dw" style="margin-top:1rem"><div class="dwt">Subject-Specific Behavioural Concerns</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No subject-specific behavioural concerns for ${headerNote}</div></div>`;
   }
@@ -2716,7 +2764,7 @@ function rSEND(){
     return d<0?`<span style="color:#34d399;font-size:.55rem;margin-left:.15rem">▲</span>`:`<span style="color:#ef4444;font-size:.55rem;margin-left:.15rem">▼</span>`;
   }
 
-  function buildTable(pupils,flagName,flagColor,tablePrefix,yearAvgs,nonFlagAvgs){
+  function buildTable(pupils,flagName,flagColor,tablePrefix,yearAvgs,nonFlagAvgs,extraRows){
     if(!pupils.length) return`<div class="dw" style="margin-bottom:1rem"><div class="dwt">${flagName} Pupils</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No ${flagName} pupils found</div></div>`;
 
     function attCol(v){if(v==='—')return'color:var(--mu)';const n=parseFloat(v);return n>=95?'color:#34d399':n>=90?'color:#eab308':'color:#ef4444;font-weight:600'}
@@ -2724,8 +2772,13 @@ function rSEND(){
     // Summary header rows
     const hdrStyle='font-size:.62rem;font-family:"JetBrains Mono",monospace;text-align:center;color:var(--mu);padding:.2rem .3rem';
     const yearRow=yearAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">Year Average</td><td style="${hdrStyle}">${yearAvgs.codes}</td><td style="${hdrStyle}">${yearAvgs.oncalls}</td><td style="${hdrStyle}">${yearAvgs.dets}</td><td style="${hdrStyle};${attCol(yearAvgs.ytdAtt)}">${yearAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(yearAvgs.ttdAtt)}">${yearAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(yearAvgs.avgEf))}">${yearAvgs.avgEf}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(yearAvgs.avgAb))}">${yearAvgs.avgAb}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
-    const nonLabel=flagName==='SEND'?'Non-SEND':flagName==='EHCP'?'Non-EHCP':'Non-FSM';
+    const nonLabel=`Non-${flagName}`;
     const nonRow=nonFlagAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">${nonLabel} Average</td><td style="${hdrStyle}">${nonFlagAvgs.codes}</td><td style="${hdrStyle}">${nonFlagAvgs.oncalls}</td><td style="${hdrStyle}">${nonFlagAvgs.dets}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ytdAtt)}">${nonFlagAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ttdAtt)}">${nonFlagAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(nonFlagAvgs.avgEf))}">${nonFlagAvgs.avgEf}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(nonFlagAvgs.avgAb))}">${nonFlagAvgs.avgAb}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
+    const extraHtml=(extraRows||[]).map(er=>{
+      const a=er.avgs;
+      if(!a) return'';
+      return`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:${er.color||'var(--mu)'}" colspan="4">${er.label} Average</td><td style="${hdrStyle}">${a.codes}</td><td style="${hdrStyle}">${a.oncalls}</td><td style="${hdrStyle}">${a.dets}</td><td style="${hdrStyle};${attCol(a.ytdAtt)}">${a.ytdAtt}</td><td style="${hdrStyle};${attCol(a.ttdAtt)}">${a.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(a.avgEf))}">${a.avgEf}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(a.avgAb))}">${a.avgAb}</td><td style="${hdrStyle}" colspan="2"></td></tr>`;
+    }).join('');
 
     const rows=pupils.map((p,i)=>{
       const uid=`${tablePrefix}-${i}`;
@@ -2780,7 +2833,7 @@ function rSEND(){
         <th style="text-align:center">YTD Att.</th><th style="text-align:center">TTD Att.</th>
         <th style="text-align:center">Effort</th><th style="text-align:center">Ef. LT</th><th style="text-align:center">Ef. LY</th>
         <th style="text-align:center">Ability</th><th style="text-align:center">Ab. LT</th><th style="text-align:center">Ab. LY</th>
-      </tr></thead><tbody>${yearRow}${nonRow}${rows}</tbody></table></div>
+      </tr></thead><tbody>${yearRow}${nonRow}${extraHtml}${rows}</tbody></table></div>
       <div style="font-size:.6rem;color:var(--mu);margin-top:.4rem">Rankings in brackets: TG rank for overall, class rank for per-subject · LT = Last Term · LY = Last Year · YTD/TTD = Year/Term to Date attendance · ▲ improved · ▼ declined · Click row to expand</div>
       </div></div>`;
   }
@@ -2862,16 +2915,45 @@ function rSEND(){
   const stratAvgs=computeAvgs(allPupilData,new Set(senStratPupils.map(p=>p.px)));
   const nAvgs=computeAvgs(allPupilData,new Set(senNPupils.map(p=>p.px)));
 
+  // Compute average OF a flagged group (not all pupils, just the group members)
+  function groupAvg(pupils){
+    if(!pupils.length) return null;
+    const calc=(list)=>{
+      if(!list.length) return null;
+      const codes=list.reduce((s,p)=>s+p.ytdCodes,0)/list.length;
+      const oncalls=list.reduce((s,p)=>s+p.ytdOnCalls,0)/list.length;
+      const dets=list.reduce((s,p)=>s+p.ytdDets,0)/list.length;
+      const ytdAtts=list.map(p=>parseFloat(p.ytdAttPct)).filter(v=>!isNaN(v));
+      const ttdAtts=list.map(p=>parseFloat(p.ttdAttPct)).filter(v=>!isNaN(v));
+      const ytdAtt=ytdAtts.length?(ytdAtts.reduce((a,b)=>a+b,0)/ytdAtts.length).toFixed(1)+'%':'—';
+      const ttdAtt=ttdAtts.length?(ttdAtts.reduce((a,b)=>a+b,0)/ttdAtts.length).toFixed(1)+'%':'—';
+      const efVals=list.map(p=>p.avgEf).filter(v=>v!=null);
+      const abVals=list.map(p=>p.avgAb).filter(v=>v!=null);
+      const avgEf=efVals.length?(efVals.reduce((a,b)=>a+b,0)/efVals.length).toFixed(1):'—';
+      const avgAb=abVals.length?(abVals.reduce((a,b)=>a+b,0)/abVals.length).toFixed(1):'—';
+      return{codes:codes.toFixed(1),oncalls:oncalls.toFixed(1),dets:dets.toFixed(1),ytdAtt,ttdAtt,avgEf,avgAb};
+    };
+    return calc(pupils);
+  }
+
+  const sendGrpAvg=groupAvg(sendPupils);
+  const ehcpGrpAvg=groupAvg(ehcpPupils);
+  const fsmGrpAvg=groupAvg(fsmPupils);
+  const kGrpAvg=groupAvg(senKPupils);
+  const addGrpAvg=groupAvg(senAddPupils);
+  const stratGrpAvg=groupAvg(senStratPupils);
+  const nGrpAvg=groupAvg(senNPupils);
+
+  // Common extra rows - each table gets its own group average
   let html='';
-  html+=buildTable(sendPupils,'All SEND','#f97316','send-exp',sendAvgs.year,sendAvgs.nonFlag);
-  html+=buildTable(ehcpPupils,'EHCP','#a78bfa','ehcp-exp',ehcpAvgs.year,ehcpAvgs.nonFlag);
-  html+=buildTable(fsmPupils,'FSM','#6488ff','fsm-exp',fsmAvgs.year,fsmAvgs.nonFlag);
+  html+=buildTable(sendPupils,'All SEND','#f97316','send-exp',sendAvgs.year,sendAvgs.nonFlag,[{label:'SEND',color:'#f97316',avgs:sendGrpAvg}]);
+  html+=buildTable(ehcpPupils,'EHCP','#a78bfa','ehcp-exp',ehcpAvgs.year,ehcpAvgs.nonFlag,[{label:'EHCP',color:'#a78bfa',avgs:ehcpGrpAvg}]);
+  html+=buildTable(fsmPupils,'FSM','#6488ff','fsm-exp',fsmAvgs.year,fsmAvgs.nonFlag,[{label:'FSM',color:'#6488ff',avgs:fsmGrpAvg}]);
   html+=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:1rem;margin-top:1rem;border-top:1px solid var(--bd)">SEN Sub-Categories</div>`;
-  html+=buildTable(senKPupils,'SEN Support (K)','#f97316','senk-exp',kAvgs.year,kAvgs.nonFlag);
-  html+=buildTable(senEPupils,'EHCP (E)','#a78bfa','sene-exp',ehcpAvgs.year,ehcpAvgs.nonFlag);
-  html+=buildTable(senAddPupils,'Additional Help','#38bdf8','senadd-exp',addAvgs.year,addAvgs.nonFlag);
-  html+=buildTable(senStratPupils,'Strategies Applied','#34d399','senstrat-exp',stratAvgs.year,stratAvgs.nonFlag);
-  html+=buildTable(senNPupils,'SEN Monitoring (N)','#94a3b8','senn-exp',nAvgs.year,nAvgs.nonFlag);
+  html+=buildTable(senKPupils,'SEN Support (K)','#f97316','senk-exp',kAvgs.year,kAvgs.nonFlag,[{label:'SEN Support (K)',color:'#f97316',avgs:kGrpAvg}]);
+  html+=buildTable(senAddPupils,'Additional Help','#38bdf8','senadd-exp',addAvgs.year,addAvgs.nonFlag,[{label:'Additional Help',color:'#38bdf8',avgs:addGrpAvg}]);
+  html+=buildTable(senStratPupils,'Strategies Applied','#34d399','senstrat-exp',stratAvgs.year,stratAvgs.nonFlag,[{label:'Strategies Applied',color:'#34d399',avgs:stratGrpAvg}]);
+  html+=buildTable(senNPupils,'SEN Monitoring (N)','#94a3b8','senn-exp',nAvgs.year,nAvgs.nonFlag,[{label:'SEN Monitoring (N)',color:'#94a3b8',avgs:nGrpAvg}]);
   out.innerHTML=html;
 }
 
@@ -3620,7 +3702,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')rTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -4703,7 +4785,7 @@ function rTG(){
       <div style="font-size:1.5rem;font-weight:700;color:var(--ac)">${tgRows.length}</div>
       <div style="font-size:.72rem;color:var(--mu)">pupils</div>
       <div style="margin-top:.4rem"><span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM</div>
-      <div style="margin-top:.2rem;font-size:.65rem;color:var(--mu)">SEN: ${tgRows.map(r=>SEN_STATUS[String(r[0])]).filter(Boolean).reduce((m,c)=>{m[c]=(m[c]||0)+1;return m},{})||(s=>{const parts=[];for(const[k,v]of Object.entries(s))parts.push(k+':'+v);return parts.join(' · ')||'None'})(tgRows.map(r=>SEN_STATUS[String(r[0])]).filter(Boolean).reduce((m,c)=>{m[c]=(m[c]||0)+1;return m},{}))}</div>
+      <div style="margin-top:.2rem;font-size:.65rem;color:var(--mu)">SEN: ${(()=>{const counts=tgRows.map(r=>SEN_STATUS[String(r[0])]).filter(Boolean).reduce((m,c)=>{m[c]=(m[c]||0)+1;return m},{});const parts=[];for(const[k,v]of Object.entries(counts))parts.push(k+':'+v);return parts.join(' · ')||'None'})()}</div>
     </div>
     <div class="crd"><div class="ct2">YTD Attendance</div>
       <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?'#34d399':parseFloat(tgYtdAtt)>=90?'var(--tx)':'#ef4444'}">${tgYtdAtt}%</div>
