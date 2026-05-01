@@ -4736,6 +4736,21 @@ function rPeer(){
   const lr=ygRows(yearGroup,lp);
   const enrols=ENR[ik]||[];
 
+  // Local helpers for ability/effort averaging across ALL subjects
+  const AS2=CFG.ability_map||{};
+  const AM2={};Object.entries(AS2).forEach(([k,v],i)=>{AM2[k]=i+1});
+  function avgAb(rs){
+    const vals=rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?AM2[r[3][s][0]]||0:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null);
+    return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+  }
+  function avgEf(rs){
+    const vals=rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?r[3][s][1]:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null);
+    return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+  }
+  function fN(v){return v!=null?v.toFixed(1):'—'}
+  function aC(v){if(v==null)return'var(--mu)';if(v>=6)return'var(--exc)';if(v>=5)return'var(--skl)';if(v>=4)return'var(--con)';if(v>=3)return'var(--met)';if(v>=2)return'var(--wrk)';return'var(--bel)'}
+  function eC(v){if(v==null)return'var(--mu)';if(v<=1.5)return'var(--exc)';if(v<=2)return'var(--con)';if(v<=3)return'var(--wrk)';return'var(--bel)'}
+
   // Get pupils in this TG
   const tgPupilPx=new Set(enrols.filter(r=>r.t==='tg'&&r.v===tgName&&r.u===null).map(r=>r.x));
   const tgRows=lr.filter(r=>tgPupilPx.has(r[0]));
