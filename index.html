@@ -5447,44 +5447,41 @@ function rPeer(){
       const avgCodesC=classData.reduce((s,d)=>s+d.codesPerPupil,0)/classData.length;
 
       dc('anClassChart');
-      classEl.innerHTML=`<div class="dw"><div class="dwt">Class Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Hover for details</span></div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div>`;
+      classEl.innerHTML=`<div class="dw"><div class="dwt">Class Risk Matrix — Y${yearGroup}</div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div>`;
 
-      // Color by subject — group classes into one dataset per subject
       const subjColorMap={};
       const colors2=['#ef4444','#f97316','#eab308','#34d399','#38bdf8','#6488ff','#a78bfa','#f472b6','#94a3b8','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#6366f1','#d946ef','#0ea5e9','#84cc16','#fb923c','#e11d48','#2dd4bf','#7c3aed','#059669','#dc2626'];
       SUBS.forEach((s,i)=>{subjColorMap[s]=colors2[i%colors2.length]});
 
+      // Group classes by subject
       const subjGroups={};
       classData.forEach(d=>{
         if(!subjGroups[d.sub]) subjGroups[d.sub]=[];
-        subjGroups[d.sub].push(d);
+        subjGroups[d.sub].push({x:d.attPct,y:d.codesPerPupil});
       });
 
-      const scatterDS=Object.entries(subjGroups).map(([sub,classes])=>({
+      const scatterDS=Object.entries(subjGroups).map(([sub,pts])=>({
         label:sub,
-        data:classes.map(d=>({x:d.attPct,y:d.codesPerPupil,cls:d.cls,teacher:d.teacher,pupils:d.pupils,sendPct:d.sendPct})),
+        data:pts,
         backgroundColor:subjColorMap[sub]||'#94a3b8',
-        borderColor:subjColorMap[sub]||'#94a3b8',
         pointRadius:6,pointHoverRadius:9
       }));
 
-      sc2('anClassChart',new Chart(document.getElementById('c-anClassChart'),{
-        type:'scatter',
-        data:{datasets:scatterDS},
-        options:{
-          responsive:true,maintainAspectRatio:false,
-          plugins:{
-            legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:8,padding:6,usePointStyle:true}},
-            tooltip:{callbacks:{
-              label:c=>{const pt=c.raw;return`${c.dataset.label} Cls${pt.cls} (${pt.teacher}): Att ${pt.x}%, ${pt.y.toFixed(1)} c/p, ${pt.pupils}p, ${pt.sendPct}% SEND`}
-            }}
-          },
-          scales:{
-            x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.floor(Math.min(...classData.map(d=>d.attPct))-2)),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
-            y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...classData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
+      try{
+        sc2('anClassChart',new Chart(document.getElementById('c-anClassChart'),{
+          type:'scatter',
+          data:{datasets:scatterDS},
+          options:{responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:8,padding:4,usePointStyle:true}}},
+            scales:{
+              x:{min:75,max:100,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
+              y:{min:0,suggestedMax:15,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
+            }
           }
-        }
-      }));
+        }));
+      }catch(e){
+        classEl.innerHTML+=`<div style="color:red;padding:1rem">Chart error: ${e.message}</div>`;
+      }
 
       // Class table sorted by codes/pupil
       const classTableHtml=[...classData].sort((a,b)=>b.codesPerPupil-a.codesPerPupil).map(d=>`<tr>
