@@ -1133,13 +1133,20 @@ function rP(){
   }
   const lp=pp[nP-1],p3=nP>=3?pp[nP-3]:null,p5=nP>=2?pp[nP-2]:null;
   const lt=data[lp],r3=p3?data[p3]:null,r5=p5?data[p5]:null;
-  const sf=document.getElementById('p-sf').value;
-  const isA=sf==='all';
   // Get active subjects from timetable if no grades
   const ttGrid=TT_DATA[String(x)]||[];
   const ttSubjs=[];
-  if(ttGrid.length){for(let dd=0;dd<5;dd++)for(let pp2=0;pp2<5;pp2++){const c=ttGrid[dd]?.[pp2];if(c&&c[0])ttSubjs.push(c[0])}}
-  const uniqueTTSubjs=[...new Set(ttSubjs)];
+  if(ttGrid.length){for(let dd=0;dd<5;dd++)for(let pp2=0;pp2<5;pp2++){const c=ttGrid[dd]?.[pp2];if(c){if(c[0])ttSubjs.push(c[0]);if(c.length===4&&c[2])ttSubjs.push(c[2])}}}
+  const uniqueTTSubjs=[...new Set(ttSubjs)].sort();
+
+  // Populate subject dropdown with only this pupil's subjects
+  const psfSel=document.getElementById('p-sf');
+  const psfPrev=psfSel.value;
+  psfSel.innerHTML='<option value="all">All Subjects</option>';
+  uniqueTTSubjs.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;psfSel.appendChild(o)});
+  if(psfPrev==='all'||uniqueTTSubjs.includes(psfPrev))psfSel.value=psfPrev;else psfSel.value='all';
+  const sf=psfSel.value;
+  const isA=sf==='all';
   const act=hasGrades?(isA?SUBS.filter(s=>lt.sc[s]):[sf].filter(s=>lt.sc[s])):(isA?uniqueTTSubjs:[sf].filter(s=>uniqueTTSubjs.includes(s)));
   if(!act.length&&hasGrades)return;
 
@@ -1584,10 +1591,10 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   if(!subjFilter){
     // Overall: weekly from absence counts vs total lessons
     const attR=wks.map(w=>{const tl=WLK[w];if(!tl)return null;const abs=abw[w]||0;return Math.max(0,Math.min(100,parseFloat(((tl-abs)/tl*100).toFixed(1))))});
-    attP=[];let lv2=null;for(const v of attR){if(v!==null)lv2=v;attP.push(lv2)}
+    attP=attR;
     // Unauthorised line: 100% minus unauth absence rate
     const uR=wks.map(w=>{const tl=WLK[w];if(!tl)return null;const uabs=uAbw[w]||0;return Math.max(0,Math.min(100,parseFloat(((tl-uabs)/tl*100).toFixed(1))))});
-    unauthP=[];let lv2u=null;for(const v of uR){if(v!==null)lv2u=v;unauthP.push(lv2u)}
+    unauthP=uR;
   }else{
     // Subject-specific: use pre-computed termly data mapped onto weeks
     const pAS=(DD.attByPeriodSubj||{})[String(x)]||{};
@@ -1607,9 +1614,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
       }
       return null;
     });
-    // Fill nulls with carry-forward
-    let lv3=null;
-    attP=attP.map(v=>{if(v!==null)lv3=v;return lv3});
+    // No carry-forward — let spanGaps handle holidays
 
     // Subject-specific unauthorised: count unauth absences for this subject per week
     const pAbsSubjAll=(DD.attAbsSubj||{})[String(x)]||[];
@@ -1624,8 +1629,8 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
     const grid3=TT_DATA[String(x)];
     let sLPW2=0;
     if(grid3){for(let dd=0;dd<5;dd++)for(let pp3=0;pp3<5;pp3++){const gc=grid3[dd]?.[pp3];if(gc&&(gc[0]===subjFilter||(gc.length===4&&gc[2]===subjFilter)))sLPW2++}}
-    const uSubjR=wks.map(w=>{if(!sLPW2)return null;const uabs=uSubjAbw[w]||0;return Math.max(0,Math.min(100,parseFloat(((sLPW2-uabs)/sLPW2*100).toFixed(1))))});
-    unauthP=[];let lv3u=null;for(const v of uSubjR){if(v!==null)lv3u=v;unauthP.push(lv3u)}
+    const uSubjR=wks.map(w=>{if(!WLK[w]||!sLPW2)return null;const uabs=uSubjAbw[w]||0;return Math.max(0,Math.min(100,parseFloat(((sLPW2-uabs)/sLPW2*100).toFixed(1))))});
+    unauthP=uSubjR;
   }
 
   const tc=ps.filter(r=>r[1]===0).length,to=ps.filter(r=>r[1]===1).length,td=ps.filter(r=>r[1]===2).length;
@@ -3601,8 +3606,12 @@ function renderAttTable(){
   let totalLPW=0;
   for(let d=0;d<5;d++) for(let p=0;p<5;p++){
     const c=grid[d][p];
-    if(c){subjLPW[c[0]]=(subjLPW[c[0]]||0)+1;totalLPW++}
+    if(c){
+      subjLPW[c[0]]=(subjLPW[c[0]]||0)+1;totalLPW++;
+      if(c.length===4&&c[2]){subjLPW[c[2]]=(subjLPW[c[2]]||0)}// register split subject
+    }
   }
+  const pupilSubjects=Object.keys(subjLPW).sort();
 
   // Count absences per subject in range (split by auth/unauth)
   const subjAbsCount={};
@@ -3621,7 +3630,7 @@ function renderAttTable(){
 
   // Build per-subject class lookup
   const pupilClasses={};
-  SUBS.forEach(s=>{
+  pupilSubjects.forEach(s=>{
     const clsRec=(ENR[ik]||[]).find(r=>r.t==='cls'&&r.x===px&&r.s===s&&r.u===null);
     if(clsRec) pupilClasses[s]=clsRec.c;
   });
@@ -3630,7 +3639,7 @@ function renderAttTable(){
   const clsAvgAtt={};
   const tgAvgAtt={};
 
-  SUBS.forEach(s=>{
+  pupilSubjects.forEach(s=>{
     const lpw=subjLPW[s]||0;
     if(!lpw) return;
     const totalLessons=totalSchoolWeeks*lpw;
@@ -3665,7 +3674,7 @@ function renderAttTable(){
   });
 
   // Build rows
-  const rows=SUBS.map(s=>{
+  const rows=pupilSubjects.map(s=>{
     const lpw=subjLPW[s]||0;
     const totalLessons=totalSchoolWeeks*lpw;
     const abs=subjAbsCount[s]||0;
