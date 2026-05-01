@@ -1660,12 +1660,12 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   wrap.innerHTML=`<div class="dw"><div class="dwt">${title}<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:#f97316">●</span>${tc} <span style="color:#ef4444;margin-left:.3rem">●</span>${to} <span style="color:#7c3aed;margin-left:.3rem">●</span>${td} <span style="color:#34d399;margin-left:.3rem">━</span>Att% <span style="color:#ef4444;margin-left:.3rem">┈</span>Excl.Auth ${grpAttP?`<span style="color:#38bdf8;margin-left:.3rem">┈</span>${grpLabel}`:''}</span></div><div style="position:relative;height:clamp(170px,14vw,260px)"><canvas id="${cSancId}"></canvas></div><div id="${flgWId}" style="position:relative;margin-top:2px"><canvas id="${cFlgId}"></canvas></div><div id="${tchrWId}" style="position:relative;margin-top:2px"><canvas id="${cTchrId}"></canvas></div></div>`;
 
   const ds=TN.map((n,i)=>({label:n,data:wks.map(w=>wm[w][i]),backgroundColor:TC[i],borderRadius:i===2?2:0,borderSkipped:false,barPercentage:0.9,categoryPercentage:0.9,yAxisID:'y',order:2}));
-  ds.push({label:'Attendance',data:attP,type:'line',borderColor:'#34d399',borderWidth:1.5,pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:true});
+  ds.push({label:'Attendance',data:attP,type:'line',borderColor:'#34d399',borderWidth:1.5,pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:false});
   if(unauthP){
-    ds.push({label:'Excl. Authorised',data:unauthP,type:'line',borderColor:'#ef4444',borderWidth:1.2,borderDash:[4,3],pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:true});
+    ds.push({label:'Excl. Authorised',data:unauthP,type:'line',borderColor:'#ef4444',borderWidth:1.2,borderDash:[4,3],pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:false});
   }
   if(grpAttP){
-    ds.push({label:grpLabel,data:grpAttP,type:'line',borderColor:'#38bdf8',borderWidth:1.5,borderDash:[4,3],pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:true});
+    ds.push({label:grpLabel,data:grpAttP,type:'line',borderColor:'#38bdf8',borderWidth:1.5,borderDash:[4,3],pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:false});
   }
   const allAttVals=[...(attP||[]).filter(v=>v!=null),...(grpAttP||[]).filter(v=>v!=null),...(unauthP||[]).filter(v=>v!=null)];
   const y1Min=allAttVals.length?Math.max(0,Math.min(80,Math.min(...allAttVals)-5)):80;
