@@ -113,7 +113,6 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('pairs',this)">👥 Problem Groups</button>
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
 <button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
-<button class="tb" onclick="sw('admin',this)">🔧 Admin</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
@@ -208,7 +207,7 @@ table.d tr:hover td{background:var(--sf2)}
 <div class="cg"><label>Year Group</label><select id="cl-yg" onchange="popCL()"></select></div>
 <div class="cg"><label>Subject</label><select id="cl-sub" onchange="popCL()"></select></div>
 <div class="cg"><label>Class</label><select id="cl-cls" onchange="rCL()"></select></div>
-<div id="cl-flags" style="font-size:.72rem;display:flex;align-items:center;margin-left:auto"></div>
+<div id="cl-flags" style="font-size:.72rem;display:flex;align-items:center"></div>
 </div>
 <div id="cl-title" style="margin-bottom:.5rem"></div>
 <div id="cl-alerts" style="margin-bottom:1.25rem"></div>
@@ -551,16 +550,9 @@ function toggleAll(chartKey,show){const ch=_c[chartKey];if(!ch)return;ch.data.da
 // ── TIMETABLE ──
 const TT_DAYS=['Mon','Tue','Wed','Thu','Fri'];
 const TT_PERIODS=5;
-const TT_COLORS={
-  'Geography':'#38bdf8','Science':'#6488ff','PE':'#34d399','Art':'#f472b6',
-  'History':'#fb923c','Music':'#a78bfa','Maths':'#eab308','Drama':'#ef4444',
-  'English':'#38bdf8','Food Technology':'#fb923c','Technology':'#7a85a0',
-  'Computing':'#6488ff','Religious Studies':'#a78bfa','Spanish':'#f472b6',
-  'French':'#f472b6','German':'#f472b6',
-  'English Language':'#38bdf8','English Literature':'#818cf8',
-  'Media Studies':'#f97316','Sculpture':'#ec4899','Photography':'#14b8a6',
-  'Non-Lesson':'#94a3b8'
-};
+const _ttColorPalette=['#38bdf8','#6488ff','#34d399','#f472b6','#fb923c','#a78bfa','#eab308','#ef4444','#14b8a6','#f97316','#ec4899','#8b5cf6','#0ea5e9','#84cc16','#d946ef','#10b981','#e11d48','#2dd4bf','#7c3aed','#059669','#dc2626','#6366f1','#f59e0b','#0891b2'];
+const TT_COLORS={'Non-Lesson':'#94a3b8'};
+(DD.config?.subjects||[]).forEach((s,i)=>{TT_COLORS[s]=_ttColorPalette[i%_ttColorPalette.length]});
 
 // Read timetables from data.json (generated with school-wide teacher clash prevention)
 const TT_DATA=DD.timetables||{};
@@ -2211,7 +2203,7 @@ function rCmp(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Year ${targetYG} ${subLabel} \u2014 Cohort Comparison Over Time</div>
-    <table class="d"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpef"></canvas></div></div></div>`;
 
@@ -2396,7 +2388,7 @@ function rPrg(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Intake ${ink} — ${subLabel} Progression</div>
-    <table class="d"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgef"></canvas></div></div></div>
     <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">${subLabel} Grade Distribution Over Time — Intake ${ink}</div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prggrade"></canvas></div></div>
@@ -3769,7 +3761,7 @@ function renderAttTable(){
     <td style="text-align:center;color:var(--mu)">—</td>
     <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:#ef4444">${allUnauthPct}</td>
   </tr></tbody></table></div>
-  <div style="font-size:.6rem;color:var(--mu);margin-top:.4rem">Row shading: <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.10);border-radius:2px;vertical-align:middle"></span> 5%+ below class avg <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.18);border-radius:2px;vertical-align:middle;margin-left:.4rem"></span> 10%+ below <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.25);border-radius:2px;vertical-align:middle;margin-left:.4rem"></span> 15%+ below</div>`;
+  <div style="font-size:.6rem;color:var(--mu);margin-top:.4rem">Row shading: <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.10);border-radius:2px;vertical-align:middle"></span> 2%+ below class avg <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.18);border-radius:2px;vertical-align:middle;margin-left:.4rem"></span> 4%+ below <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.25);border-radius:2px;vertical-align:middle;margin-left:.4rem"></span> 6%+ below</div>`;
 }
 
 function renderPupilNet(){
@@ -4837,7 +4829,7 @@ function rCC(){
 
     return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}</td><td style="font-weight:600;color:${aC(avg)}">${fV(avg,2)}</td><td style="font-weight:600;color:${eC(avgE)}">${fV(avgE,2)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:#f97316;font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:#f97316;font-weight:600':'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
 
-  document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">Codes</th><th style="color:#f97316">Exp.</th><th style="color:#ef4444">On-Calls</th><th style="color:#ef4444">Exp.</th><th style="color:#7c3aed">Det.</th><th style="color:#7c3aed">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">Codes</th><th style="color:#f97316">Exp.</th><th style="color:#ef4444">On-Calls</th><th style="color:#ef4444">Exp.</th><th style="color:#7c3aed">Det.</th><th style="color:#7c3aed">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 (function(){
@@ -5533,7 +5525,7 @@ function rPeer(){
         classData.forEach(d=>{if(!subjGroups[d.sub])subjGroups[d.sub]=[];subjGroups[d.sub].push({x:d.attPct,y:d.codesPerPupil,cls:d.cls,teacher:d.teacher,pupils:d.pupils,sendPct:d.sendPct})});
         const scatterDS=Object.entries(subjGroups).map(([sub,pts])=>({label:sub,data:pts,backgroundColor:subjColorMap[sub]||'#94a3b8',pointRadius:6,pointHoverRadius:9}));
         const renderCR=d=>`<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${subjColorMap[d.sub]||'#94a3b8'};margin-right:.3rem"></span>${d.sub}</td><td style="text-align:center">${d.cls}</td><td style="font-size:.72rem;color:var(--mu)">${d.teacher}</td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.attPct<avgAttC?'color:#ef4444;font-weight:600':''}">${d.attPct}%</td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.codesPerPupil>avgCodesC?'color:#ef4444;font-weight:600':''}">${d.codesPerPupil.toFixed(1)}</td><td style="text-align:center">${d.pupils}</td><td style="text-align:center;color:#f97316">${d.sendPct}%</td><td style="text-align:center">${d.totalCodes}</td></tr>`;
-        classEl.innerHTML=`<div class="dw"><div class="dwt">Class Risk Matrix — Y${yearGroup}</div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Class Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${classData.length} classes</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th style="cursor:pointer" onclick="window._anCS.setSort('sub')">Subject ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('cls')">Class ↕</th><th style="cursor:pointer" onclick="window._anCS.setSort('teacher')">Teacher ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('attPct')">Att % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('codesPerPupil')">Codes/Pupil ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('pupils')">Pupils ↕</th><th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._anCS.setSort('sendPct')">SEND % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('totalCodes')">Total Codes ↕</th></tr></thead><tbody id="an-class-tbody"></tbody></table></div></div>`;
+        classEl.innerHTML=`<div class="dw"><div class="dwt" style="display:flex;align-items:center;gap:.6rem">Class Risk Matrix — Y${yearGroup}<span style="margin-left:auto;display:flex;gap:.3rem"><button onclick="const c=_c['anClassChart'];c.data.datasets.forEach(d=>{d.hidden=false});c.update()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.6rem;padding:.2rem .4rem;border-radius:4px;cursor:pointer">Select All</button><button onclick="const c=_c['anClassChart'];c.data.datasets.forEach(d=>{d.hidden=true});c.update()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.6rem;padding:.2rem .4rem;border-radius:4px;cursor:pointer">Deselect All</button></span></div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Class Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${classData.length} classes</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th style="cursor:pointer" onclick="window._anCS.setSort('sub')">Subject ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('cls')">Class ↕</th><th style="cursor:pointer" onclick="window._anCS.setSort('teacher')">Teacher ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('attPct')">Att % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('codesPerPupil')">Codes/Pupil ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('pupils')">Pupils ↕</th><th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._anCS.setSort('sendPct')">SEND % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('totalCodes')">Total Codes ↕</th></tr></thead><tbody id="an-class-tbody"></tbody></table></div></div>`;
         window._anCS=sortableTable('an-class-tbody',classData,renderCR,d=>d.codesPerPupil);
         window._anCS.render();
         sc2('anClassChart',new Chart(document.getElementById('c-anClassChart'),{type:'scatter',data:{datasets:scatterDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:8,padding:4,usePointStyle:true}},tooltip:{callbacks:{label:c=>{const pt=c.raw;return c.dataset.label+' Cls'+pt.cls+' ('+pt.teacher+'): Att '+pt.x+'%, '+pt.y.toFixed(1)+' c/p, '+pt.pupils+'p, '+pt.sendPct+'% SEND'}}}},scales:{x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.floor(Math.min(...classData.map(d=>d.attPct))-2)),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...classData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
@@ -5636,7 +5628,7 @@ function rPeer(){
         <div style="font-size:.75rem"><span style="color:#f97316;font-weight:600">${Object.keys(senCodes).length}</span> SEN codes${unclassifiedSen.length?` · <span style="color:#ef4444;font-weight:700">${unclassifiedSen.length} UNCLASSIFIED</span>`:''}</div>
         <div style="font-size:.75rem"><span style="color:#7c3aed;font-weight:600">${Object.keys(incidentCodes).length}</span> Incident codes${unclassifiedInc.length?` · <span style="color:#ef4444;font-weight:700">${unclassifiedInc.length} UNCLASSIFIED</span>`:''}</div>
       </div>
-      <div style="font-size:.65rem;color:var(--mu);margin-top:.3rem">Changes take effect immediately in the current session. To persist changes across reloads, export the updated config and re-import your data.</div>
+      <div style="display:flex;align-items:center;gap:.8rem;margin-top:.5rem"><button onclick="window._adminExport()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;cursor:pointer">Save</button><span style="font-size:.65rem;color:var(--mu)">Changes take effect immediately. Save downloads the current config for use in future imports.</span></div>
     </div>`;
 
     out.innerHTML=summaryHtml+attHtml+senHtml+incHtml;
@@ -5672,6 +5664,19 @@ function rPeer(){
       if(d&&d[0]===code) d[1]=cat;
     });
     rAdmin();
+  };
+
+  window._adminExport=function(){
+    const cfg={
+      att_codes:DD.config.att_codes,
+      sen_codes:DD.config.sen_codes,
+      incident_codes:DD.config.incident_codes
+    };
+    const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='data_key_config.json';
+    a.click();
   };
 
   window.rAnalytics=rAnalytics;
