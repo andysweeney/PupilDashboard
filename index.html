@@ -117,9 +117,9 @@ table.d tr:hover td{background:var(--sf2)}
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
   <button class="tb" onclick="showCTModal()" style="border:1px solid rgba(255,255,255,.3)">⚙ Concern Thresholds</button>
-  <span id="ct-display" style="font-size:.62rem;color:var(--mu)"></span>
+  <span id="ct-display" style="font-size:.72rem;color:#ffffff"></span>
   <button class="tb" onclick="showSWModal()" style="border:1px solid rgba(255,255,255,.3)">⚖ Sanction Weightings</button>
-  <span id="sw-display" style="font-size:.62rem;color:var(--mu)"></span>
+  <span id="sw-display" style="font-size:.72rem;color:#ffffff"></span>
 </div>
 <div id="ct-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:1.5rem;z-index:200;min-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
   <div style="font-size:.85rem;font-weight:600;margin-bottom:1rem">Concern Thresholds</div>
@@ -488,7 +488,7 @@ function applyCT(){
   AP_MIN=parseInt(document.getElementById('ct-ap-min').value)||3;
   AP_PCT=parseInt(document.getElementById('ct-ap-pct').value)||40;
   AP_SLOT=parseInt(document.getElementById('ct-ap-slot').value)||30;
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:var(--tx)">${CT_AB}</b> · Ef: <b style="color:var(--tx)">${CT_EF}</b> · Sanc: <b style="color:var(--tx)">×${CT_SC}</b> · Min: <b style="color:var(--tx)">${CT_MN}</b> · Abs: <b style="color:var(--tx)">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
   document.getElementById('ct-modal').classList.remove('ct-show');
   document.getElementById('ct-overlay').style.display='none';
   const activeTab=document.querySelector('.tb.on');
@@ -517,7 +517,7 @@ function applySW(){
   SW_CODE=parseInt(document.getElementById('sw-code').value)||1;
   SW_ONCALL=parseInt(document.getElementById('sw-oncall').value)||3;
   SW_DET=parseInt(document.getElementById('sw-det').value)||5;
-  document.getElementById('sw-display').innerHTML=`C:<b style="color:var(--tx)">${SW_CODE}</b> O:<b style="color:var(--tx)">${SW_ONCALL}</b> D:<b style="color:var(--tx)">${SW_DET}</b>`;
+  document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   document.getElementById('sw-modal').style.display='none';
   document.getElementById('ct-overlay').style.display='none';
   const activeTab=document.querySelector('.tb.on');
@@ -679,10 +679,10 @@ function renderAbsencePattern(px,containerId){
       const border=isFlagged?'border:2px solid #ef4444;':'border-left:2px solid '+(subj?'var(--bd)':'transparent')+';';
       
       if(count){
-        html+=`<div class="tt-cell" style="${border}${heat}" title="${DAYS[d]} P${p+1}: ${count} absence${count!==1?'s':''} (${rate}% of weeks)${unauth?' — '+unauth+' unauthorised':''}${subj?' — '+subj:''}">`;
-        html+=`<span style="font-size:.75rem;font-weight:600;color:var(--tx)">${count}</span>`;
-        html+=`<span style="font-size:.5rem;color:var(--mu)">${rate}%</span>`;
-        if(unauth) html+=`<span style="font-size:.5rem;color:#ef4444">${unauth}u</span>`;
+        html+=`<div class="tt-cell" style="${border}${heat}" data-tip="1" onmouseenter="this._tip=document.createElement('div');this._tip.className='abs-tip';this._tip.innerHTML='<b>${DAYS[d]} P${p+1}</b><br>${count} absence${count!==1?'s':''} (${rate}% of weeks)${unauth?'<br><span style=color:#c62828>'+unauth+' unauthorised</span>':''}${subj?'<br>Subject: '+subj:''}';this._tip.style.cssText='position:absolute;z-index:50;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.7rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);pointer-events:none;white-space:nowrap;left:'+(this.offsetLeft+this.offsetWidth/2)+'px;top:'+(this.offsetTop-4)+'px;transform:translate(-50%,-100%)';this.parentElement.style.position='relative';this.parentElement.appendChild(this._tip)" onmouseleave="if(this._tip)this._tip.remove()">`;
+        html+=`<span style="font-size:.8rem;font-weight:700;color:var(--tx)">${count}</span>`;
+        html+=`<span style="font-size:.6rem;font-weight:500;color:#1a1a1a">${rate}%</span>`;
+        if(unauth) html+=`<span style="font-size:.6rem;font-weight:600;color:#c62828">${unauth}u</span>`;
         html+=`</div>`;
       }else{
         html+=`<div class="tt-cell" style="border-left:2px solid transparent"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
@@ -816,13 +816,15 @@ function renderTGAbsencePattern(tgPupilPxSet,containerId){
       const nPupils=Object.keys(slotPupils[d][p]).length;
       const isFlagged=slotFlags.some(f=>f.dayIdx===d&&f.perIdx===p);
       const border=isFlagged?'border:2px solid #ef4444;':'border-left:2px solid transparent;';
-      const tip=slotTooltip(d,p);
+      const tipData=slotPupils[d][p];
+      const tipEntries=Object.entries(tipData).sort((a,b)=>b[1].count-a[1].count);
 
       if(count){
-        html+=`<div class="tt-cell" style="${border}${heat};cursor:help" title="${tip}">`;
-        html+=`<span style="font-size:.75rem;font-weight:600;color:var(--tx)">${count}</span>`;
-        html+=`<span style="font-size:.5rem;color:var(--mu)">${nPupils}p</span>`;
-        if(unauth) html+=`<span style="font-size:.5rem;color:#ef4444">${unauth}u</span>`;
+        const tipHtml=tipEntries.slice(0,10).map(([px2,data])=>{const nm=((DD.registry||{})[String(px2)]?.id||px2).replace(/\s*\([^)]+\)\s*$/,'');return`<div style="display:flex;justify-content:space-between;gap:1rem;padding:.1rem 0;border-bottom:1px solid var(--bd)"><span>${nm}</span><span style="font-family:JetBrains Mono,monospace">${data.count}${data.unauth?' <span style=color:#c62828>('+data.unauth+'u)</span>':''}</span></div>`}).join('')+(tipEntries.length>10?`<div style="color:var(--mu);font-size:.6rem">+${tipEntries.length-10} more</div>`:'');
+        html+=`<div class="tt-cell" style="${border}${heat};cursor:help;position:relative" onmouseenter="const t=document.createElement('div');t.className='abs-tip';t.innerHTML='<div style=font-weight:600;margin-bottom:.3rem>${DAYS[d]} P${p+1} — ${count} abs (${nPupils}p)</div>${tipHtml.replace(/'/g,"\\'")}';t.style.cssText='position:absolute;z-index:50;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.6rem .8rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 16px rgba(0,0,0,.2);pointer-events:none;white-space:nowrap;left:50%;top:-4px;transform:translate(-50%,-100%)';this.appendChild(t);this._t=t" onmouseleave="if(this._t)this._t.remove()">`;
+        html+=`<span style="font-size:.8rem;font-weight:700;color:var(--tx)">${count}</span>`;
+        html+=`<span style="font-size:.6rem;font-weight:500;color:#1a1a1a">${nPupils}p</span>`;
+        if(unauth) html+=`<span style="font-size:.6rem;font-weight:600;color:#c62828">${unauth}u</span>`;
         html+=`</div>`;
       }else{
         html+=`<div class="tt-cell" style="border-left:2px solid transparent"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
@@ -1030,9 +1032,9 @@ function renderTimetable(x){
           const parts=[];
           if(ct){const cats=[];if(ss.b)cats.push(ss.b+'B');if(ss.u)cats.push(ss.u+'U');if(ss.e)cats.push(ss.e+'E');if(ss.a)cats.push(ss.a+'A');parts.push('<span style="color:#f97316">'+ct+'C ('+cats.join(' ')+')</span>')}
           if(ss.d)parts.push('<span style="color:#7c3aed">'+ss.d+'D</span>');
-          return parts.length?'<span style="font-size:.5rem;font-family:JetBrains Mono,monospace">'+parts.join(' ')+'</span>':'';
+          return parts.length?'<span style="font-size:.6rem;font-weight:500;font-family:JetBrains Mono,monospace">'+parts.join(' ')+'</span>':'';
         }
-        const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#f97316">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#7c3aed">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.55rem;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})();
+        const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#f97316">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#7c3aed">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.65rem;font-weight:500;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})();
 
         if(isSplit){
           // Split cell: two halves with per-subject sanctions
@@ -1096,7 +1098,7 @@ function renderTimetable(x){
         const parts=[];
         if(codeTotal){const cats=[];if(sc2.b)cats.push(sc2.b+'B');if(sc2.u)cats.push(sc2.u+'U');if(sc2.e)cats.push(sc2.e+'E');if(sc2.a)cats.push(sc2.a+'A');parts.push(`<span style="color:#f97316">${codeTotal} Code${codeTotal!==1?'s':''} (${cats.join(' ')})</span>`)}
         if(sc2.d)parts.push(`<span style="color:#7c3aed">${sc2.d} Detention${sc2.d!==1?'s':''}</span>`);
-        html+=`<div class="tt-cell" style="border-left:2px solid var(--mu);${heat}"><span style="font-size:.55rem;font-family:'JetBrains Mono',monospace">${parts.join(', ')}</span></div>`;
+        html+=`<div class="tt-cell" style="border-left:2px solid var(--mu);${heat}"><span style="font-size:.65rem;font-weight:500;font-family:'JetBrains Mono',monospace">${parts.join(', ')}</span></div>`;
       }else{
         html+=`<div class="tt-cell"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
       }
@@ -1285,6 +1287,11 @@ function rP(){
   const ayCodes=aySanc.filter(r=>r[1]===0).length;
   const ayOnCalls=aySanc.filter(r=>r[1]===1).length;
   const ayDetentions=aySanc.filter(r=>r[1]===2).length;
+  // Category breakdown for codes
+  const _ayCats={b:0,u:0,e:0,a:0};
+  aySanc.forEach((r,ri)=>{if(r[1]===0){const si=SAN_ALL.indexOf(r);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';if(cat==='Behaviour')_ayCats.b++;else if(cat==='Uniform')_ayCats.u++;else if(cat==='Equipment')_ayCats.e++;else if(cat==='Attendance')_ayCats.a++;else _ayCats.b++}});
+  const _ayCatParts=[];if(_ayCats.b)_ayCatParts.push(_ayCats.b+'B');if(_ayCats.u)_ayCatParts.push(_ayCats.u+'U');if(_ayCats.e)_ayCatParts.push(_ayCats.e+'E');if(_ayCats.a)_ayCatParts.push(_ayCats.a+'A');
+  const _ayCatStr=_ayCatParts.length?' ('+_ayCatParts.join(' ')+')':'';
 
   // Subject-specific sanctions for current AY
   let subjSancHtml='';
@@ -1297,7 +1304,7 @@ function rP(){
   const ayLabel=`${curAY}-${curAY+1}`;
   let sancHtml;
   if(isA){
-    sancHtml=`<span style="color:var(--mu)">Sanctions ${ayLabel}: <span style="color:#f97316">${ayCodes}</span> Codes · <span style="color:#ef4444">${ayOnCalls}</span> On-Calls · <span style="color:#7c3aed">${ayDetentions}</span> Detentions</span>`;
+    sancHtml=`<span style="color:var(--mu)">Sanctions ${ayLabel}: <span style="color:#f97316">${ayCodes}</span> Codes${_ayCatStr} · <span style="color:#7c3aed">${ayDetentions}</span> Detentions</span>`;
   }else{
     const ssSanc=aySanc.filter(r=>r[3]===sf);
     const ssC=ssSanc.filter(r=>r[1]===0).length,ssO=ssSanc.filter(r=>r[1]===1).length,ssD=ssSanc.filter(r=>r[1]===2).length;
@@ -2127,6 +2134,8 @@ function rCmp(){
         gb=AN.map(g=>({g,n:rows.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length})).filter(x=>x.n>0);
       }
       const send=rows.filter(r=>r[4]).length,ehcp=rows.filter(r=>r[5]).length,fsm=rows.filter(r=>r[6]).length;
+      const senCats2={K:0,E:0,Add:0,Strat:0,N:0};
+      rows.forEach(r=>{const c2=SEN_STATUS[String(r[0])];if(c2){if(c2==='K')senCats2.K++;else if(c2==='E')senCats2.E++;else if(c2==='Add'||c2==='add')senCats2.Add++;else if(c2==='Strat'||c2==='strat')senCats2.Strat++;else if(c2==='N')senCats2.N++}});
       // Per-grade sub-group counts for tooltip
       function gradeCount(rs,grade){
         if(isAll){let c2=0;rs.forEach(r=>{SUBS.forEach(s2=>{if(r[3][s2]&&AM[r[3][s2][0]]===grade)c2++})});return c2}
@@ -2157,7 +2166,7 @@ function rCmp(){
       const nCodes=coSanc.filter(s=>s[1]===0).length;
       const nOnCalls=coSanc.filter(s=>s[1]===1).length;
       const nDetentions=coSanc.filter(s=>s[1]===2).length;
-      cohorts.push({ink,ay,label:`${ay}-${ay+1}`,pupils:rows.length,avg,avgE,send,ehcp,fsm,gb,
+      cohorts.push({ink,ay,label:`${ay}-${ay+1}`,pupils:rows.length,avg,avgE,send,ehcp,fsm,senCats2,gb,
         sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
         nCodes,nOnCalls,nDetentions,
         status:ay+1<=CAY?'complete':(ay===CAY?'current':'future'),
@@ -2181,7 +2190,11 @@ function rCmp(){
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${fV(c.avgE,2)}</td>
       <td>${c.gb.map(x=>{const tip=`${x.g}: ${x.n}${x.sendN?`&#10;SEND: ${x.sendN}`:''}${x.ehcpN?`&#10;EHCP: ${x.ehcpN}`:''}${x.fsmN?`&#10;FSM: ${x.fsmN}`:''}`;return`<span style="display:inline-block;margin:.1rem;padding:.08rem .3rem;border-radius:3px;font-size:.65rem;background:${GC[x.g]}22;color:${GC[x.g]};cursor:help" title="${tip}">${x.g.slice(0,3)} ${x.n}</span>`}).join('')}</td>
       <td style="text-align:center;${c.send?'color:#f97316;font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
-      <td style="text-align:center;${c.ehcp?'color:#a78bfa;font-weight:600':'color:var(--mu)'}">${c.ehcp||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.K||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.E||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.Add||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.Strat||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.N||'\u2014'}</td>
       <td style="text-align:center;${c.fsm?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${c.fsm||'\u2014'}</td>
       <td style="text-align:center;${c.nCodes?'color:#f97316;font-weight:600':'color:var(--mu)'}">${c.nCodes||'\u2014'}</td>
       <td style="text-align:center;${c.nOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${c.nOnCalls||'\u2014'}</td>
@@ -2189,7 +2202,7 @@ function rCmp(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Year ${targetYG} ${subLabel} \u2014 Cohort Comparison Over Time</div>
-    <table class="d"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:#f97316">SEND</th><th style="color:#a78bfa">EHCP</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpef"></canvas></div></div></div>`;
 
@@ -2309,6 +2322,8 @@ function rPrg(){
       gb=AN.map(g=>({g,n:rows.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length})).filter(x=>x.n>0);
     }
     const send=rows.filter(r=>r[4]).length,ehcp=rows.filter(r=>r[5]).length,fsm=rows.filter(r=>r[6]).length;
+    const senCats2={K:0,E:0,Add:0,Strat:0,N:0};
+    rows.forEach(r=>{const c2=SEN_STATUS[String(r[0])];if(c2){if(c2==='K')senCats2.K++;else if(c2==='E')senCats2.E++;else if(c2==='Add'||c2==='add')senCats2.Add++;else if(c2==='Strat'||c2==='strat')senCats2.Strat++;else if(c2==='N')senCats2.N++}});
 
     function gradeCount(rs,grade){
       if(isAll){let c2=0;rs.forEach(r=>{SUBS.forEach(s2=>{if(r[3][s2]&&AM[r[3][s2][0]]===grade)c2++})});return c2}
@@ -2343,7 +2358,7 @@ function rPrg(){
     const isCurrent=ay===CAY;
     const isFuture=ay>CAY;
     years.push({yg,ay,ayLabel,pupils:rows.length,avg,avgE,gb,
-      send,ehcp,fsm,sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
+      send,ehcp,fsm,senCats2,sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
       nCodes,nOnCalls,nDetentions,isCurrent,isFuture});
   }
 
@@ -2360,7 +2375,11 @@ function rPrg(){
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${fV(c.avgE,2)}</td>
       <td>${c.gb.map(x=>{const tip=`${x.g}: ${x.n}${x.sendN?`&#10;SEND: ${x.sendN}`:''}${x.ehcpN?`&#10;EHCP: ${x.ehcpN}`:''}${x.fsmN?`&#10;FSM: ${x.fsmN}`:''}`;return`<span style="display:inline-block;margin:.1rem;padding:.08rem .3rem;border-radius:3px;font-size:.65rem;background:${GC[x.g]}22;color:${GC[x.g]};cursor:help" title="${tip}">${x.g.slice(0,3)} ${x.n}</span>`}).join('')}</td>
       <td style="text-align:center;${c.send?'color:#f97316;font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
-      <td style="text-align:center;${c.ehcp?'color:#a78bfa;font-weight:600':'color:var(--mu)'}">${c.ehcp||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.K||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.E||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.Add||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.Strat||'\u2014'}</td>
+      <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.N||'\u2014'}</td>
       <td style="text-align:center;${c.fsm?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${c.fsm||'\u2014'}</td>
       <td style="text-align:center;${c.nCodes?'color:#f97316;font-weight:600':'color:var(--mu)'}">${c.nCodes||'\u2014'}</td>
       <td style="text-align:center;${c.nOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${c.nOnCalls||'\u2014'}</td>
@@ -2368,7 +2387,7 @@ function rPrg(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Intake ${ink} — ${subLabel} Progression</div>
-    <table class="d"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:#f97316">SEND</th><th style="color:#a78bfa">EHCP</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgef"></canvas></div></div></div>
     <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">${subLabel} Grade Distribution Over Time — Intake ${ink}</div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prggrade"></canvas></div></div>
@@ -3436,9 +3455,15 @@ function rPP(){
     // Build dynamic pupil columns
     const pupilHeaders=Array.from({length:sz},(_,i)=>`<th>Pupil ${i+1}</th>`).join('');
     const rows=groups.map((g,i)=>{
-      const pupilCells=g.members.map((px,j)=>
-        `<td><span style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(px,g.names[j])}</span><div style="font-size:.58rem;color:var(--mu)">${g.ygs[j]} · ${g.tgs[j]}</div></td>`
-      ).join('');
+      const pupilCells=g.members.map((px,j)=>{
+        const senCode=SEN_STATUS[String(px)];
+        const senLabel2=senCode?SEN_LABELS[senCode]||senCode:'';
+        const senCol2=senCode?SEN_COLORS[senCode]||'':'';
+        const senBadge=senCode?`<span style="display:inline-block;padding:.02rem .2rem;border-radius:3px;font-size:.5rem;background:${senCol2}18;border:1px solid ${senCol2}44;color:${senCol2};margin-left:.2rem">${senLabel2}</span>`:'';
+        const isFsm=REG[String(px)]&&(()=>{for(const[ik,periods]of Object.entries(PRG)){for(const[p,rows]of Object.entries(periods)){const r=rows.find(r2=>r2[0]===px);if(r&&r[5])return true;break}}return false})();
+        const fsmBadge=isFsm?'<span style="display:inline-block;padding:.02rem .2rem;border-radius:3px;font-size:.5rem;background:#6488ff18;border:1px solid #6488ff44;color:#6488ff;margin-left:.2rem">FSM</span>':'';
+        return`<td><span style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(px,g.names[j])}</span>${senBadge}${fsmBadge}<div style="font-size:.58rem;color:var(--mu)">${g.ygs[j]} · ${g.tgs[j]}</div></td>`;
+      }).join('');
       const subjTags=g.subjects.map(s=>`<span style="display:inline-block;padding:.08rem .35rem;margin:.1rem;border-radius:4px;background:var(--sf2);border:1px solid var(--bd);font-size:.68rem">${s}</span>`).join('');
       return`<tr>
         <td style="color:var(--mu);font-size:.7rem;text-align:center">${i+1}</td>
@@ -3687,9 +3712,9 @@ function renderAttTable(){
     let bgStyle='';
     if(attPct!=null&&clsAtt!=null){
       const diff=clsAtt-attPct;
-      if(diff>=15) bgStyle='background:rgba(239,68,68,.25)';
-      else if(diff>=10) bgStyle='background:rgba(239,68,68,.18)';
-      else if(diff>=5) bgStyle='background:rgba(239,68,68,.10)';
+      if(diff>=6) bgStyle='background:rgba(239,68,68,.25)';
+      else if(diff>=4) bgStyle='background:rgba(239,68,68,.18)';
+      else if(diff>=2) bgStyle='background:rgba(239,68,68,.10)';
     }
 
     const attStr=attPct!=null?attPct.toFixed(1)+'%':'—';
@@ -4163,7 +4188,7 @@ function rSV(){
   function getRow(p,idx){return(ygRows(yearGroup,p)||[]).find(r=>r[0]===idx)||null}
 
   // Flags for each pupil in current period
-  const flagBadge2=(r)=>[r[4]?'<span style="font-size:.6rem;font-weight:600;color:#f97316">SEN</span>':'',r[5]?'<span style="font-size:.6rem;font-weight:600;color:#a78bfa">EHC</span>':'',r[6]?'<span style="font-size:.6rem;font-weight:600;color:#6488ff">FSM</span>':''].filter(Boolean).join(' ');
+  const flagBadge2=(r)=>[r[4]?senPillShort(r[0]):'',r[6]?'<span style="font-size:.6rem;font-weight:600;color:#6488ff;padding:.05rem .2rem;border-radius:3px;background:#6488ff18;border:1px solid #6488ff44;margin-left:.1rem">FSM</span>':''].filter(Boolean).join(' ');
 
   function abVal(r){return r&&r[3][sub]?AS[AM[r[3][sub][0]]]||0:0}
   function efVal(r){return r&&r[3][sub]?r[3][sub][1]||0:0}
@@ -4205,10 +4230,15 @@ function rSV(){
   const sancCounts={};
   const sancRawCounts={};
   termSancs.forEach(s=>{sancCounts[s[0]]=(sancCounts[s[0]]||0)+sancWeight(s[1]);sancRawCounts[s[0]]=(sancRawCounts[s[0]]||0)+1});
+  const _svSanAll=DD.sanctions||[];
   const top5Sanc=Object.entries(sancCounts).filter(([idx])=>(sancRawCounts[idx]||0)>=CT_MN).map(([idx,n])=>{
     const r=lr.find(r=>r[0]===parseInt(idx));
     const pid=r?r[1]:(REG[idx]?REG[idx].id:`#${idx}`);
-    return{idx:parseInt(idx),pid,n,flags:r||null};
+    const pS=termSancs.filter(s=>s[0]===parseInt(idx));
+    const cats={b:0,u:0,e:0,a:0,d:0};
+    pS.forEach(s=>{if(s[1]===2){cats.d++}else{const si=_svSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';cats[t]++}});
+    const catStr=[cats.b?cats.b+'B':'',cats.u?cats.u+'U':'',cats.e?cats.e+'E':'',cats.a?cats.a+'A':''].filter(Boolean).join(' ');
+    return{idx:parseInt(idx),pid,n,flags:r||null,cats,catStr};
   }).sort((a,b)=>b.n-a.n);
 
   function abLabel(v){const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return v>=1&&v<=7?n[v-1]:v}
@@ -4248,10 +4278,13 @@ function rSV(){
 
   function sancRow(item){
     const flags=item.flags?flagBadge2(item.flags):'';
+    const tipC=item.catStr||'';
+    const tipD=item.cats&&item.cats.d?item.cats.d+' Det':'';
+    const tipTxt=[tipC,tipD].filter(Boolean).join(' · ')||item.n+' sanctions';
     return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(38,45,68,.3)">
       <div style="min-width:6rem"><span style="font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span>${clsInfo(item.idx)}</div>
       ${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}
-      <span style="margin-left:auto;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600">${item.n} sanction${item.n!==1?'s':''}</span>
+      <span style="margin-left:auto;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600;cursor:help" title="${tipTxt}">${item.n} sanction${item.n!==1?'s':''}</span>
     </div>`;
   }
 
@@ -4430,7 +4463,7 @@ function rCL(){
 
   // Alerts
   function getClRow(p,idx){return clRows(p).find(r=>r[0]===idx)||null}
-  const flagBadge2=(r)=>[r[4]?'<span style="font-size:.6rem;font-weight:600;color:#f97316">SEN</span>':'',r[5]?'<span style="font-size:.6rem;font-weight:600;color:#a78bfa">EHC</span>':'',r[6]?'<span style="font-size:.6rem;font-weight:600;color:#6488ff">FSM</span>':''].filter(Boolean).join(' ');
+  const flagBadge2=(r)=>[r[4]?senPillShort(r[0]):'',r[6]?'<span style="font-size:.6rem;font-weight:600;color:#6488ff;padding:.05rem .2rem;border-radius:3px;background:#6488ff18;border:1px solid #6488ff44;margin-left:.1rem">FSM</span>':''].filter(Boolean).join(' ');
 
   // Helper: get TG for a pupil
   function pupilTG(idx){
@@ -4463,10 +4496,15 @@ function rCL(){
   const todayCLISO=`${todayCL.getFullYear()}-${String(todayCL.getMonth()+1).padStart(2,'0')}-${String(todayCL.getDate()).padStart(2,'0')}`;
   const termSancs=(DD.sanctions||[]).filter(s=>s[3]===sub&&s[2]>=clAySancStart&&s[2]<=todayCLISO&&lrIdxSet.has(s[0]));
   const sancCounts={};const sancRawCounts2={};termSancs.forEach(s=>{sancCounts[s[0]]=(sancCounts[s[0]]||0)+sancWeight(s[1]);sancRawCounts2[s[0]]=(sancRawCounts2[s[0]]||0)+1});
+  const _clSanAll=DD.sanctions||[];
   const top5Sanc=Object.entries(sancCounts).filter(([idx])=>(sancRawCounts2[idx]||0)>=CT_MN).map(([idx,n])=>{
     const r=lr.find(r=>r[0]===parseInt(idx));
     const pid=r?r[1]:(REG[idx]?REG[idx].id:`#${idx}`);
-    return{idx:parseInt(idx),pid,n,flags:r||null};
+    const pS=aySancAll2.filter(s=>s[0]===parseInt(idx));
+    const cats={b:0,u:0,e:0,a:0,d:0};
+    pS.forEach(s=>{if(s[1]===2){cats.d++}else{const si=_clSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';cats[t]++}});
+    const catStr=[cats.b?cats.b+'B':'',cats.u?cats.u+'U':'',cats.e?cats.e+'E':'',cats.a?cats.a+'A':''].filter(Boolean).join(' ');
+    return{idx:parseInt(idx),pid,n,flags:r||null,cats,catStr};
   }).sort((a,b)=>b.n-a.n);
   function abLabel(v){const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return v>=1&&v<=7?n[v-1]:v}
   function efLabel(v){return v>=1&&v<=4?['Exc','Good','Dev','Low'][v-1]:v}
@@ -4486,7 +4524,7 @@ function rCL(){
       <div style="overflow-y:auto;flex:1;min-height:0;padding-right:.4rem">${content}</div>
     </div>`;
   }
-  function sancRow(item){const flags=item.flags?flagBadge2(item.flags):'';const tg=pupilTG(item.idx);return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(38,45,68,.3)"><div style="min-width:6rem"><span style="font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span><div style="font-size:.58rem;color:var(--mu)">${tg}</div></div>${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}<span style="margin-left:auto;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600">${item.n} sanction${item.n!==1?'s':''}</span></div>`;}
+  function sancRow(item){const flags=item.flags?flagBadge2(item.flags):'';const tg=pupilTG(item.idx);const tipC=item.catStr||'';const tipD=item.cats&&item.cats.d?item.cats.d+' Det':'';const tipTxt=[tipC,tipD].filter(Boolean).join(' · ')||item.n+' sanctions';return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(38,45,68,.3)"><div style="min-width:6rem"><span style="font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span><div style="font-size:.58rem;color:var(--mu)">${tg}</div></div>${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}<span style="margin-left:auto;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#f97316;font-weight:600;cursor:help" title="${tipTxt}">${item.n} sanction${item.n!==1?'s':''}</span></div>`;}
 
   // ── Pupil Discipline History table ──
   // Academic year only, up to today
@@ -4497,10 +4535,18 @@ function rCL(){
 
   // Per-pupil: codes/oncalls/detentions (all subjects + in this subject)
   const dhPupil={};
+  const SAN_ALL2=DD.sanctions||[];
   dhAllSanc.forEach(s=>{
-    if(!dhPupil[s[0]])dhPupil[s[0]]={codes:0,oncalls:0,dets:0,sCodes:0,sOncalls:0,sDets:0};
+    if(!dhPupil[s[0]])dhPupil[s[0]]={codes:0,oncalls:0,dets:0,sCodes:0,sOncalls:0,sDets:0,cats:{b:0,u:0,e:0,a:0},sCats:{b:0,u:0,e:0,a:0}};
     const p=dhPupil[s[0]];
-    if(s[1]===0){p.codes++;if(s[3]===sub)p.sCodes++}
+    if(s[1]===0){
+      p.codes++;
+      const si=SAN_ALL2.indexOf(s);
+      const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';
+      const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';
+      p.cats[t]++;
+      if(s[3]===sub){p.sCodes++;p.sCats[t]++}
+    }
     else if(s[1]===1){p.oncalls++;if(s[3]===sub)p.sOncalls++}
     else if(s[1]===2){p.dets++;if(s[3]===sub)p.sDets++}
   });
@@ -4545,12 +4591,14 @@ function rCL(){
   if(dhRows.length){
     const trows=dhRows.map((p,i)=>{
       const flags=p.flags?flagBadge2(p.flags):'';
+      const catTip=p.cats?`${p.cats.b}B ${p.cats.u}U ${p.cats.e}E ${p.cats.a}A`:'';
+      const sCatTip=p.sCats?`${p.sCats.b}B ${p.sCats.u}U ${p.sCats.e}E ${p.sCats.a}A`:'';
       return`<tr>
         <td style="color:var(--mu);font-size:.7rem;text-align:center">${i+1}</td>
         <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(p.px,p.pid)}</td>
         <td style="font-size:.65rem;color:var(--mu)">${pupilTG(p.px)}</td>
         <td>${flags?`<span style="display:flex;gap:.25rem">${flags}</span>`:''}</td>
-        <td style="text-align:center;color:#f97316;font-weight:600">${p.codes} <span style="font-weight:400;font-size:.6rem;color:var(--mu)">(${p.sCodes})</span></td>
+        <td style="text-align:center;color:#f97316;font-weight:600;cursor:help;position:relative" onmouseenter="const t=document.createElement('div');t.innerHTML='<div style=font-weight:600;margin-bottom:.2rem>All Subjects: ${p.codes} Codes</div><div>${catTip}</div><div style=margin-top:.3rem;font-weight:600>${sub}: ${p.sCodes} Codes</div><div>${sCatTip}</div><div style=margin-top:.3rem>${p.dets} Detentions</div>';t.style.cssText='position:absolute;z-index:50;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;left:50%;bottom:100%;transform:translateX(-50%);pointer-events:none';this.appendChild(t);this._t=t" onmouseleave="if(this._t)this._t.remove()">${p.codes} <span style="font-weight:400;font-size:.6rem;color:var(--mu)">(${p.sCodes})</span></td>
         <td style="text-align:center;color:#ef4444;font-weight:600">${p.oncalls} <span style="font-weight:400;font-size:.6rem;color:var(--mu)">(${p.sOncalls})</span></td>
         <td style="text-align:center;color:#7c3aed;font-weight:600">${p.dets} <span style="font-weight:400;font-size:.6rem;color:var(--mu)">(${p.sDets})</span></td>
         <td style="text-align:center;font-weight:600">${p.ayTotal}</td>
@@ -4588,7 +4636,7 @@ function rCL(){
   if(sendPupils.length){
     const sendRows=sendPupils.sort((a,b)=>a[1].localeCompare(b[1])).map(r=>{
       const flags=[
-        r[4]?'<span style="font-size:.6rem;font-weight:600;color:#f97316;padding:.1rem .3rem;border-radius:3px;background:#f9731618">SEN</span>':'',
+        r[4]?senPillShort(r[0]):'',
         r[5]?'<span style="font-size:.6rem;font-weight:600;color:#a78bfa;padding:.1rem .3rem;border-radius:3px;background:#a78bfa18">EHC</span>':'',
         r[6]?'<span style="font-size:.6rem;font-weight:600;color:#6488ff;padding:.1rem .3rem;border-radius:3px;background:#6488ff18">FSM</span>':'',
       ].filter(Boolean).join(' ');
@@ -4636,7 +4684,7 @@ function rCL(){
   document.getElementById('cl-alerts').innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.85rem;align-items:stretch">${alertBox('Term-on-Term Ability Concern','#ef4444',abTT,i=>concernRow(i,'ab'))}${alertBox('Year-on-Year Ability Concern','#ef4444',abYoY,i=>concernRow(i,'ab'))}${alertBox('Term-on-Term Effort Concern','#f97316',efTT,i=>concernRow(i,'ef'))}${alertBox('Year-on-Year Effort Concern','#f97316',efYoY,i=>concernRow(i,'ef'))}${alertBox('Academic Year Discipline Issues','#7c3aed',top5Sanc,sancRow,true)}</div>${expDisciplineHtml}`;
 
   // SEND section
-  document.getElementById('cl-send-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">SEND, EHCP, FSM and Network Summary</div>`;
+  document.getElementById('cl-send-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">SEND and FSM Overview</div>`;
   document.getElementById('cl-send').innerHTML=sendTableHtml;
 
   // Performance section title
@@ -4738,6 +4786,9 @@ function rCC(){
     const chgE=avgE!=null&&pAvgE!=null?avgE-pAvgE:null;
     const chgES=chgE===null?'color:var(--mu)':chgE<0?'color:#34d399':chgE>=1?'color:#ef4444;font-weight:600':chgE>0?'color:#ef4444':'';
     const sendC=lr.filter(r=>r[4]).length,ehcpC=lr.filter(r=>r[5]).length,fsmC=lr.filter(r=>r[6]).length;
+    // SEN sub-categories
+    const senCats={K:0,E:0,Add:0,Strat:0,N:0};
+    lr.forEach(r=>{const c=SEN_STATUS[String(r[0])];if(c){if(c==='K')senCats.K++;else if(c==='E')senCats.E++;else if(c==='Add'||c==='add')senCats.Add++;else if(c==='Strat'||c==='strat')senCats.Strat++;else if(c==='N')senCats.N++}});
     const pupSetC=new Set(info.pups);
     const SAN_ALL=DD.sanctions||[];
     const _ccToday=new Date();
@@ -4777,9 +4828,9 @@ function rCC(){
     const dotD=clsDetentions>eDets?'#ef4444':clsDetentions<eDets?'#34d399':'var(--mu)';
     const dot=(col)=>`<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${col};vertical-align:middle;margin-left:.3rem"></span>`;
 
-    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}</td><td style="font-weight:600;color:${aC(avg)}">${fV(avg,2)}</td><td style="font-weight:600;color:${eC(avgE)}">${fV(avgE,2)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:#f97316;font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;${ehcpC?'color:#a78bfa;font-weight:600':'color:var(--mu)'}">${ehcpC||'—'}</td><td style="text-align:center;${fsmC?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:#f97316;font-weight:600':'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
+    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}</td><td style="font-weight:600;color:${aC(avg)}">${fV(avg,2)}</td><td style="font-weight:600;color:${eC(avgE)}">${fV(avgE,2)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:#f97316;font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:#f97316;font-weight:600':'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
 
-  document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:#f97316">SEND</th><th style="color:#a78bfa">EHCP</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">Codes</th><th style="color:#f97316">Exp.</th><th style="color:#ef4444">On-Calls</th><th style="color:#ef4444">Exp.</th><th style="color:#7c3aed">Det.</th><th style="color:#7c3aed">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">Codes</th><th style="color:#f97316">Exp.</th><th style="color:#ef4444">On-Calls</th><th style="color:#ef4444">Exp.</th><th style="color:#7c3aed">Det.</th><th style="color:#7c3aed">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 (function(){
@@ -4831,8 +4882,8 @@ function rCC(){
   SUBS.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;prgSub.appendChild(o)});
   rP();
   // Initialise concern threshold display
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:var(--tx)">${CT_AB}</b> · Ef: <b style="color:var(--tx)">${CT_EF}</b> · Sanc: <b style="color:var(--tx)">×${CT_SC}</b> · Min: <b style="color:var(--tx)">${CT_MN}</b>`;
-  document.getElementById('sw-display').innerHTML=`C:<b style="color:var(--tx)">${SW_CODE}</b> O:<b style="color:var(--tx)">${SW_ONCALL}</b> D:<b style="color:var(--tx)">${SW_DET}</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
+  document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
 })();
 
   // Expose functions called from HTML attributes to global scope
@@ -5288,18 +5339,18 @@ function rPeer(){
       const links=pairs.map(([k,v])=>{const[a,b]=k.split('-').map(Number);return{source:a,target:b,weight:v}});
 
       // Render SVG network
-      const W=Math.min(700,tgNetDiv.clientWidth||700),H=350;
+      const W=Math.min(1200,tgNetDiv.clientWidth||900),H=400;
       const R=14,pad=40;
-      // Position nodes in a circle
-      const cx=W/2,cy=H/2,radius=Math.min(W,H)/2-pad-R;
+      // Oval layout - wider than tall
+      const cx=W/2,cy=H/2,radiusX=W/2-pad-R,radiusY=H/2-pad-R;
       nodeData.forEach((n,i)=>{
         const angle=(2*Math.PI*i/nodeData.length)-Math.PI/2;
-        n.x=cx+radius*Math.cos(angle);
-        n.y=cy+radius*Math.sin(angle);
+        n.x=cx+radiusX*Math.cos(angle);
+        n.y=cy+radiusY*Math.sin(angle);
         n.r=R;
       });
       const maxW=Math.max(...links.map(l=>l.weight));
-      let svg=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:350px">`;
+      let svg=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:450px">`;
       links.forEach(l=>{
         const s=nodeData.find(n=>n.px===l.source),t=nodeData.find(n=>n.px===l.target);
         if(!s||!t)return;
