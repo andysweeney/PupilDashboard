@@ -5435,9 +5435,9 @@ function rPeer(){
       </tr>`).join('');
 
     dc('anSubjChart');
-    subjEl.innerHTML=`<div class="dw"><div class="dwt">Subject Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Bubble size = pupil count</span></div><div style="position:relative;height:400px"><canvas id="c-anSubjChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Subject Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${subjData.length} subjects · Avg Att: ${avgAtt.toFixed(1)}% · Avg Codes/Pupil: ${avgCodes.toFixed(1)}</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th style="text-align:center">Att %</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Pupils</th><th style="text-align:center;color:#f97316">SEND %</th><th style="text-align:center">Total Codes</th></tr></thead><tbody>${legendHtml}</tbody></table></div></div>`;
+    subjEl.innerHTML=`<div class="dw"><div class="dwt">Subject Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Colour-coded by subject</span></div><div style="position:relative;height:400px"><canvas id="c-anSubjChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Subject Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${subjData.length} subjects · Avg Att: ${avgAtt.toFixed(1)}% · Avg Codes/Pupil: ${avgCodes.toFixed(1)}</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th style="text-align:center">Att %</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Pupils</th><th style="text-align:center;color:#f97316">SEND %</th><th style="text-align:center">Total Codes</th></tr></thead><tbody>${legendHtml}</tbody></table></div></div>`;
 
-    sc2('anSubjChart',new Chart(document.getElementById('c-anSubjChart'),{type:'bubble',data:{datasets:subjData.map((d,i)=>({label:d.sub,data:[{x:d.attPct,y:d.codesPerPupil,r:Math.max(5,Math.min(25,d.pupils/3))}],backgroundColor:colors[subjData.indexOf(d)%colors.length]+'88',borderColor:colors[subjData.indexOf(d)%colors.length],borderWidth:1.5}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const d=subjData.find(dd=>dd.sub===c.dataset.label);return d?`${d.sub}: Att ${d.attPct}%, ${d.codesPerPupil.toFixed(1)} codes/pupil, ${d.pupils}p, ${d.sendPct}% SEND`:''}}}},scales:{x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.floor(Math.min(...subjData.map(d=>d.attPct))-2)),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...subjData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
+    sc2('anSubjChart',new Chart(document.getElementById('c-anSubjChart'),{type:'scatter',data:{datasets:subjData.map((d,i)=>({label:d.sub,data:[{x:d.attPct,y:d.codesPerPupil}],backgroundColor:colors[subjData.indexOf(d)%colors.length],borderColor:colors[subjData.indexOf(d)%colors.length],pointRadius:6,pointHoverRadius:9}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const d=subjData.find(dd=>dd.sub===c.dataset.label);return d?`${d.sub}: Att ${d.attPct}%, ${d.codesPerPupil.toFixed(1)} codes/pupil, ${d.pupils}p, ${d.sendPct}% SEND`:''}}}},scales:{x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.floor(Math.min(...subjData.map(d=>d.attPct))-2)),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...subjData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
 
     // ── RENDER CLASS SCATTER ──
     const classEl=document.getElementById('an-class-scatter');
@@ -5447,39 +5447,47 @@ function rPeer(){
       const avgCodesC=classData.reduce((s,d)=>s+d.codesPerPupil,0)/classData.length;
 
       dc('anClassChart');
-      classEl.innerHTML=`<div class="dw"><div class="dwt">Class Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Bubble size = pupil count · Hover for details</span></div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div>`;
+      classEl.innerHTML=`<div class="dw"><div class="dwt">Class Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Hover for details</span></div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div>`;
 
-      // Color by subject
+      // Color by subject — group classes into one dataset per subject
       const subjColorMap={};
       const colors2=['#ef4444','#f97316','#eab308','#34d399','#38bdf8','#6488ff','#a78bfa','#f472b6','#94a3b8','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#6366f1','#d946ef','#0ea5e9','#84cc16','#fb923c','#e11d48','#2dd4bf','#7c3aed','#059669','#dc2626'];
       SUBS.forEach((s,i)=>{subjColorMap[s]=colors2[i%colors2.length]});
 
+      const subjGroups={};
+      classData.forEach(d=>{
+        if(!subjGroups[d.sub]) subjGroups[d.sub]=[];
+        subjGroups[d.sub].push(d);
+      });
+
+      const scatterDS=Object.entries(subjGroups).map(([sub,classes])=>({
+        label:sub,
+        data:classes.map(d=>({x:d.attPct,y:d.codesPerPupil,cls:d.cls,teacher:d.teacher,pupils:d.pupils,sendPct:d.sendPct})),
+        backgroundColor:subjColorMap[sub]||'#94a3b8',
+        borderColor:subjColorMap[sub]||'#94a3b8',
+        pointRadius:6,pointHoverRadius:9
+      }));
+
       sc2('anClassChart',new Chart(document.getElementById('c-anClassChart'),{
-        type:'bubble',
-        data:{datasets:classData.map(d=>({
-          label:`${d.sub} (${d.teacher})`,
-          data:[{x:d.attPct,y:d.codesPerPupil,r:Math.max(4,Math.min(20,d.pupils/3))}],
-          backgroundColor:(subjColorMap[d.sub]||'#94a3b8')+'66',
-          borderColor:subjColorMap[d.sub]||'#94a3b8',
-          borderWidth:1.5
-        }))},
+        type:'scatter',
+        data:{datasets:scatterDS},
         options:{
           responsive:true,maintainAspectRatio:false,
           plugins:{
-            legend:{display:false},
+            legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:8,padding:6,usePointStyle:true}},
             tooltip:{callbacks:{
-              label:c=>{const d=classData[c.datasetIndex];return`${d.sub} Class ${d.cls} (${d.teacher}): Att ${d.attPct}%, ${d.codesPerPupil.toFixed(1)} codes/pupil, ${d.pupils} pupils, ${d.sendPct}% SEND`}
+              label:c=>{const pt=c.raw;return`${c.dataset.label} Cls${pt.cls} (${pt.teacher}): Att ${pt.x}%, ${pt.y.toFixed(1)} c/p, ${pt.pupils}p, ${pt.sendPct}% SEND`}
             }}
           },
           scales:{
-            x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.min(...classData.map(d=>d.attPct))-2),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
+            x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.floor(Math.min(...classData.map(d=>d.attPct))-2)),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
             y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...classData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
           }
         }
       }));
 
       // Class table sorted by codes/pupil
-      const classTableHtml=classData.sort((a,b)=>b.codesPerPupil-a.codesPerPupil).map(d=>`<tr>
+      const classTableHtml=[...classData].sort((a,b)=>b.codesPerPupil-a.codesPerPupil).map(d=>`<tr>
         <td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${subjColorMap[d.sub]||'#94a3b8'};margin-right:.3rem"></span>${d.sub}</td>
         <td style="text-align:center">${d.cls}</td>
         <td style="font-size:.72rem;color:var(--mu)">${d.teacher}</td>
