@@ -5335,10 +5335,10 @@ function rPeer(){
   // ── ANALYTICS TAB ──
   function rAnalytics(){
     const yearGroup=parseInt(document.getElementById('an-yg').value);
-    if(!yearGroup) return;
+    if(!yearGroup){document.getElementById('an-subj-scatter').innerHTML='<div style="color:var(--mu)">Select a year group</div>';return}
 
     const ink=CFG.intakes.find(i=>curYG(i)===yearGroup);
-    if(!ink) return;
+    if(!ink){document.getElementById('an-subj-scatter').innerHTML='<div style="color:var(--mu)">No data for Y'+yearGroup+'</div>';return}
     const ik=`I${ink}`;
     const enrols=ENR[ik]||[];
     const SAN=DD.sanctions||[];
@@ -5419,9 +5419,10 @@ function rPeer(){
 
     // ── RENDER SUBJECT SCATTER ──
     const subjEl=document.getElementById('an-subj-scatter');
-    if(subjData.length){
-      const avgAtt=subjData.reduce((s,d)=>s+d.attPct,0)/subjData.length;
-      const avgCodes=subjData.reduce((s,d)=>s+d.codesPerPupil,0)/subjData.length;
+    if(!subjData.length){subjEl.innerHTML='<div style="color:var(--mu)">No subject data found</div>';return}
+
+    const avgAtt=subjData.reduce((s,d)=>s+d.attPct,0)/subjData.length;
+    const avgCodes=subjData.reduce((s,d)=>s+d.codesPerPupil,0)/subjData.length;
 
       dc('anSubjChart');
       subjEl.innerHTML=`<div class="dw"><div class="dwt">Subject Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Bubble size = pupil count · Dashed lines = year averages</span></div><div style="position:relative;height:400px"><canvas id="c-anSubjChart"></canvas></div></div>`;
@@ -5475,11 +5476,11 @@ function rPeer(){
       </tr>`).join('');
 
       subjEl.innerHTML+=`<div class="dw" style="margin-top:.5rem"><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th style="text-align:center">Att %</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Pupils</th><th style="text-align:center;color:#f97316">SEND %</th><th style="text-align:center">Total Codes</th></tr></thead><tbody>${legendHtml}</tbody></table></div></div>`;
-    }
 
     // ── RENDER CLASS SCATTER ──
     const classEl=document.getElementById('an-class-scatter');
-    if(classData.length){
+    if(!classData.length){classEl.innerHTML='';}
+    else{
       const avgAttC=classData.reduce((s,d)=>s+d.attPct,0)/classData.length;
       const avgCodesC=classData.reduce((s,d)=>s+d.codesPerPupil,0)/classData.length;
 
