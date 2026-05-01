@@ -4050,7 +4050,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics')rAnalytics();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
