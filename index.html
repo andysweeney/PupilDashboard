@@ -577,7 +577,8 @@ function renderTimetable(x){
   SAN.forEach((r,i)=>{if(r[0]===x&&r[2]>=ayStart&&r[2]<=ayEnd)pSancIdx.push({r,cat:SANC_DET[i]?SANC_DET[i][1]:'Other'})});
   const pSancLesson=pSancIdx.filter(s=>s.r[3]!=null);
 
-  const slotSanc={};// "dow|period" -> {u,b,e,a,d}
+  const slotSanc={};// "dow|period" -> {u,b,e,a,d} (combined)
+  const slotSubjSanc={};// "dow|period|subject" -> {u,b,e,a,d} (per subject)
   pSancLesson.forEach(s=>{
     const r=s.r;
     if(r[3]===null||r[4]===null)return;
@@ -585,14 +586,13 @@ function renderTimetable(x){
     if(dow>=0&&dow<5){
       const key=dow+'|'+per;
       if(!slotSanc[key])slotSanc[key]={u:0,b:0,e:0,a:0,d:0};
-      if(r[1]===2){slotSanc[key].d++}
+      const sk3=key+'|'+r[3];
+      if(!slotSubjSanc[sk3])slotSubjSanc[sk3]={u:0,b:0,e:0,a:0,d:0};
+      if(r[1]===2){slotSanc[key].d++;slotSubjSanc[sk3].d++}
       else{
         const cat=s.cat;
-        if(cat==='Uniform')slotSanc[key].u++;
-        else if(cat==='Behaviour')slotSanc[key].b++;
-        else if(cat==='Equipment')slotSanc[key].e++;
-        else if(cat==='Attendance')slotSanc[key].a++;
-        else slotSanc[key].b++;
+        const t=cat==='Uniform'?'u':cat==='Behaviour'?'b':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';
+        slotSanc[key][t]++;slotSubjSanc[sk3][t]++;
       }
     }
   });
@@ -658,11 +658,24 @@ function renderTimetable(x){
         const col2=subj2?(TT_COLORS[subj2]||'var(--ac)'):'';
         const sk2=d+'|'+p;const sc=slotSanc[sk2];const score=slotScores[sk2]||0;
         const heat=heatBg(score);
+        // Helper to render sanction counts for a specific subject in a slot
+        function sancForSubj(slotKey,subjName){
+          const ssKey=slotKey+'|'+subjName;
+          const ss=slotSubjSanc[ssKey];
+          if(!ss) return'';
+          const ct=(ss.b||0)+(ss.u||0)+(ss.e||0)+(ss.a||0);
+          const parts=[];
+          if(ct){const cats=[];if(ss.b)cats.push(ss.b+'B');if(ss.u)cats.push(ss.u+'U');if(ss.e)cats.push(ss.e+'E');if(ss.a)cats.push(ss.a+'A');parts.push('<span style="color:#f97316">'+ct+'C ('+cats.join(' ')+')</span>')}
+          if(ss.d)parts.push('<span style="color:#7c3aed">'+ss.d+'D</span>');
+          return parts.length?'<span style="font-size:.5rem;font-family:JetBrains Mono,monospace">'+parts.join(' ')+'</span>':'';
+        }
         const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#f97316">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#7c3aed">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.55rem;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})();
 
         if(isSplit){
-          // Split cell: two halves stacked vertically
-          html+=`<div class="tt-cell" style="padding:0;${heat}"><div style="border-left:2px solid ${col};padding:.2rem .3rem;border-bottom:1px dashed var(--bd)"><span class="tt-subj" style="font-size:.55rem">${subj}</span><span class="tt-tchr" style="font-size:.45rem">${tchr}</span></div><div style="border-left:2px solid ${col2};padding:.2rem .3rem"><span class="tt-subj" style="font-size:.55rem">${subj2}</span><span class="tt-tchr" style="font-size:.45rem">${tchr2}</span></div>${sancHtml?`<div style="padding:0 .3rem .1rem">${sancHtml}</div>`:''}</div>`;
+          // Split cell: two halves with per-subject sanctions
+          const sanc1=sancForSubj(sk2,subj);
+          const sanc2=sancForSubj(sk2,subj2);
+          html+=`<div class="tt-cell" style="padding:0;${heat}"><div style="border-left:2px solid ${col};padding:.2rem .3rem;border-bottom:1px dashed var(--bd)"><span class="tt-subj" style="font-size:.55rem">${subj}</span><span class="tt-tchr" style="font-size:.45rem">${tchr}</span>${sanc1?`<div>${sanc1}</div>`:''}</div><div style="border-left:2px solid ${col2};padding:.2rem .3rem"><span class="tt-subj" style="font-size:.55rem">${subj2}</span><span class="tt-tchr" style="font-size:.45rem">${tchr2}</span>${sanc2?`<div>${sanc2}</div>`:''}</div></div>`;
         }else{
           html+=`<div class="tt-cell" style="border-left:2px solid ${col};${heat}"><span class="tt-subj">${subj}</span><span class="tt-tchr">${tchr}</span>${sancHtml}</div>`;
         }
