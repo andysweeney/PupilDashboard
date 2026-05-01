@@ -112,6 +112,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('behaviour',this)">⚠️ Behavioural Concerns</button>
 <button class="tb" onclick="sw('pairs',this)">👥 Problem Groups</button>
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
+<button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
@@ -127,6 +128,10 @@ table.d tr:hover td{background:var(--sf2)}
     <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="How many Effort Grades Change is a concern">Effort Concern Trigger</label><input id="ct-ef" type="number" min="1" max="4" step="1" value="2" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
     <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Multiple of Previous Rolling Average that becomes a concern">Sanctions Multiplier</label><input id="ct-sc" type="number" min="0.5" max="5" step="0.1" value="1.5" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
     <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Minimum Number of Sanctions that become a concern — if total sanctions in last 10 school days is below this, no concern is raised">Min Sanctions for Concern</label><input id="ct-mn" type="number" min="0" max="50" step="1" value="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
+    <div style="border-top:1px solid var(--bd);padding-top:.8rem;margin-top:.4rem"><div style="font-size:.75rem;font-weight:600;color:var(--tx);margin-bottom:.6rem">Absence Pattern Detection</div>
+    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Minimum number of absences in a single day/period slot before flagging a pattern">Min Absences per Slot</label><input id="ct-ap-min" type="number" min="1" max="20" step="1" value="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div></div>
+    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Minimum percentage of total absences concentrated in one day before flagging">Min % Concentration (Day)</label><input id="ct-ap-pct" type="number" min="10" max="100" step="5" value="40" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
+    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Minimum absence rate for a specific day+period slot (e.g. always absent Friday P1) — percentage of available instances of that slot">Min % Absence Rate (Slot)</label><input id="ct-ap-slot" type="number" min="10" max="100" step="5" value="30" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
   </div>
   <div style="display:flex;gap:.5rem;margin-top:1.2rem">
     <button onclick="applyCT()" style="flex:1;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem;border-radius:6px;cursor:pointer">Apply</button>
@@ -160,6 +165,7 @@ table.d tr:hover td{background:var(--sf2)}
 <div style="page-break-before:always"></div>
 <div id="p-behav-title" style="margin-bottom:.5rem"></div>
 <div id="p-tt" style="margin-bottom:1.25rem"></div>
+<div id="p-abs-pattern" style="margin-bottom:1.25rem"></div>
 <div id="p-sanc"></div>
 <div id="p-sanc-subj"></div>
 <div id="p-heatmaps"></div>
@@ -201,6 +207,7 @@ table.d tr:hover td{background:var(--sf2)}
 <div class="cg"><label>Year Group</label><select id="cl-yg" onchange="popCL()"></select></div>
 <div class="cg"><label>Subject</label><select id="cl-sub" onchange="popCL()"></select></div>
 <div class="cg"><label>Class</label><select id="cl-cls" onchange="rCL()"></select></div>
+<div id="cl-flags" style="font-size:.72rem;display:flex;align-items:center;margin-left:auto"></div>
 </div>
 <div id="cl-title" style="margin-bottom:.5rem"></div>
 <div id="cl-alerts" style="margin-bottom:1.25rem"></div>
@@ -218,11 +225,13 @@ table.d tr:hover td{background:var(--sf2)}
 <div class="ctl">
 <div class="cg"><label>Year Group</label><select id="tg-yg" onchange="popTG()"></select></div>
 <div class="cg"><label>Tutor Group</label><select id="tg-sel" onchange="rTG()"></select></div>
+<div id="tg-flags" style="font-size:.72rem;display:flex;align-items:center;margin-left:auto"></div>
 </div>
 <div id="tg-title" style="margin-bottom:.5rem"></div>
 <div id="tg-summary" style="margin-bottom:1.25rem"></div>
 <div id="tg-alerts" style="margin-bottom:1.25rem"></div>
 <div id="tg-pupils" style="margin-bottom:1.25rem"></div>
+<div id="tg-abs-pattern" style="margin-bottom:1.25rem"></div>
 <div id="tg-network" style="margin-bottom:1.25rem"></div>
 <div style="page-break-before:always"></div>
 <div id="tg-perf-title" style="margin-bottom:.5rem"></div>
@@ -260,6 +269,14 @@ table.d tr:hover td{background:var(--sf2)}
 <div class="cg"><label>Year Group</label><select id="send-yg" onchange="rSEND()"></select></div>
 </div>
 <div id="send-out"><div style="color:var(--mu);padding:2rem">Loading...</div></div>
+</div>
+
+<div id="vw-analytics" class="vw">
+<div class="ctl">
+<div class="cg"><label>Year Group</label><select id="an-yg" onchange="rAnalytics()"></select></div>
+</div>
+<div id="an-subj-scatter" style="margin-bottom:1.25rem"></div>
+<div id="an-class-scatter" style="margin-bottom:1.25rem"></div>
 </div>
 
 <div id="vw-peer" class="vw">
@@ -462,16 +479,18 @@ function goP(idx){
 function pLink(idx,name){const clean=name.replace(/\s*\(P\d+\)\s*$/,'');return`<a href="#" onclick="event.stopPropagation();goP(${idx});return false" style="color:var(--tx);text-decoration:none;border-bottom:1px dotted var(--bd);cursor:pointer" onmouseover="this.style.color='var(--ac)'" onmouseout="this.style.color='var(--tx)'">${clean}</a>`}
 
 // Concern thresholds (global)
-let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3;
+let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
 function applyCT(){
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
   CT_SC=parseFloat(document.getElementById('ct-sc').value)||1.5;
   CT_MN=parseInt(document.getElementById('ct-mn').value)||3;
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:var(--tx)">${CT_AB}</b> · Ef: <b style="color:var(--tx)">${CT_EF}</b> · Sanc: <b style="color:var(--tx)">×${CT_SC}</b> · Min: <b style="color:var(--tx)">${CT_MN}</b>`;
+  AP_MIN=parseInt(document.getElementById('ct-ap-min').value)||3;
+  AP_PCT=parseInt(document.getElementById('ct-ap-pct').value)||40;
+  AP_SLOT=parseInt(document.getElementById('ct-ap-slot').value)||30;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:var(--tx)">${CT_AB}</b> · Ef: <b style="color:var(--tx)">${CT_EF}</b> · Sanc: <b style="color:var(--tx)">×${CT_SC}</b> · Min: <b style="color:var(--tx)">${CT_MN}</b> · Abs: <b style="color:var(--tx)">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
   document.getElementById('ct-modal').classList.remove('ct-show');
   document.getElementById('ct-overlay').style.display='none';
-  // Refresh current view
   const activeTab=document.querySelector('.tb.on');
   if(activeTab) activeTab.click();
 }
@@ -480,6 +499,9 @@ function showCTModal(){
   document.getElementById('ct-ef').value=CT_EF;
   document.getElementById('ct-sc').value=CT_SC;
   document.getElementById('ct-mn').value=CT_MN;
+  document.getElementById('ct-ap-min').value=AP_MIN;
+  document.getElementById('ct-ap-pct').value=AP_PCT;
+  document.getElementById('ct-ap-slot').value=AP_SLOT;
   document.getElementById('ct-modal').classList.add('ct-show');
   document.getElementById('ct-overlay').style.display='block';
 }
@@ -543,6 +565,330 @@ const SEN_LABELS={'K':'SEN Support','E':'EHCP','Add':'Additional Help','add':'Ad
 const SEN_COLORS={'K':'#f97316','E':'#a78bfa','Add':'#38bdf8','add':'#38bdf8','Strat':'#34d399','strat':'#34d399','N':'#94a3b8'};
 const UNAUTH_MARKS=new Set(DD.config?.att_codes?.unauthorised_absent||['G','N','O','U','-','?']);
 function isUnauth(mark){return UNAUTH_MARKS.has(mark)}
+
+// ── ABSENCE PATTERN ANALYSIS ──
+// Analyse a single pupil's absence patterns by day+period
+function analyseAbsencePattern(px){
+  const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
+  const pMarks=(DD.attendanceMarks||{})[String(px)]||{};
+  const DAYS=['Mon','Tue','Wed','Thu','Fri'];
+
+  // Count absences per slot (day x period)
+  const slotAbs=Array.from({length:5},()=>Array(5).fill(0));
+  const slotUnauth=Array.from({length:5},()=>Array(5).fill(0));
+  const dayAbs=[0,0,0,0,0];
+  let totalAbs=0;
+
+  pAbsSubj.forEach(r=>{
+    // r = [date, subject, period, mark]
+    const dt=new Date(r[0]+'T12:00:00');
+    const dow=dt.getDay()-1; // 0=Mon
+    const per=(r[2]||1)-1; // 0-indexed
+    if(dow>=0&&dow<5&&per>=0&&per<5){
+      slotAbs[dow][per]++;
+      dayAbs[dow]++;
+      totalAbs++;
+      if(r[3]&&isUnauth(r[3])) slotUnauth[dow][per]++;
+    }
+  });
+
+  // Count available instances per slot (how many school weeks)
+  const WLK=DD.weekLessons||{};
+  const weekCount=Object.keys(WLK).length;
+
+  // Day-level flags
+  const dayFlags=[];
+  DAYS.forEach((d,i)=>{
+    if(dayAbs[i]>=AP_MIN&&totalAbs>0){
+      const pct=(dayAbs[i]/totalAbs*100);
+      if(pct>=AP_PCT) dayFlags.push({day:d,dayIdx:i,count:dayAbs[i],total:totalAbs,pct});
+    }
+  });
+
+  // Slot-level flags
+  const slotFlags=[];
+  for(let d=0;d<5;d++){
+    for(let p=0;p<5;p++){
+      if(slotAbs[d][p]>=AP_MIN&&weekCount>0){
+        const rate=(slotAbs[d][p]/weekCount*100);
+        if(rate>=AP_SLOT) slotFlags.push({day:DAYS[d],dayIdx:d,per:p+1,perIdx:p,count:slotAbs[d][p],weeks:weekCount,rate,unauth:slotUnauth[d][p]});
+      }
+    }
+  }
+
+  return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags};
+}
+
+// Render pupil absence pattern heatmap
+function renderAbsencePattern(px,containerId){
+  const el=document.getElementById(containerId);
+  if(!el) return;
+  const analysis=analyseAbsencePattern(px);
+  const{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags}=analysis;
+
+  if(totalAbs<AP_MIN){el.innerHTML='';return}
+
+  const DAYS=['Mon','Tue','Wed','Thu','Fri'];
+  const maxSlot=Math.max(...slotAbs.flat(),1);
+  const grid=(DD.timetables||{})[String(px)]||[];
+
+  function absHeat(count){
+    if(!count)return'';
+    const i=Math.min(count/maxSlot,1);
+    if(i<0.15)return'background:rgba(59,130,246,0.06)';
+    if(i<0.3)return'background:rgba(59,130,246,0.12)';
+    if(i<0.5)return'background:rgba(59,130,246,0.2)';
+    if(i<0.7)return'background:rgba(59,130,246,0.3)';
+    if(i<0.85)return'background:rgba(147,51,234,0.3)';
+    return'background:rgba(147,51,234,0.4)';
+  }
+
+  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${weekCount} weeks${dayFlags.length||slotFlags.length?' · <span style=color:#ef4444>'+( dayFlags.length+slotFlags.length)+' pattern'+(dayFlags.length+slotFlags.length!==1?'s':'')+' detected</span>':''}</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
+  html+=`<div style="padding:.5rem 1rem .75rem">`;
+
+  // Heatmap grid
+  html+=`<div class="tt-grid">`;
+  html+=`<div class="tt-per"></div>`;DAYS.forEach(d=>{html+=`<div class="tt-day">${d}</div>`});
+
+  for(let p=0;p<5;p++){
+    html+=`<div class="tt-per">P${p+1}</div>`;
+    for(let d=0;d<5;d++){
+      const count=slotAbs[d][p];
+      const unauth=slotUnauth[d][p];
+      const heat=absHeat(count);
+      const rate=weekCount>0?(count/weekCount*100).toFixed(0):'0';
+      const isFlagged=slotFlags.some(f=>f.dayIdx===d&&f.perIdx===p);
+      const subj=grid[d]?.[p]?grid[d][p][0]:'';
+      const border=isFlagged?'border:2px solid #ef4444;':'border-left:2px solid '+(subj?'var(--bd)':'transparent')+';';
+      
+      if(count){
+        html+=`<div class="tt-cell" style="${border}${heat}" title="${DAYS[d]} P${p+1}: ${count} absence${count!==1?'s':''} (${rate}% of weeks)${unauth?' — '+unauth+' unauthorised':''}${subj?' — '+subj:''}">`;
+        html+=`<span style="font-size:.75rem;font-weight:600;color:var(--tx)">${count}</span>`;
+        html+=`<span style="font-size:.5rem;color:var(--mu)">${rate}%</span>`;
+        if(unauth) html+=`<span style="font-size:.5rem;color:#ef4444">${unauth}u</span>`;
+        html+=`</div>`;
+      }else{
+        html+=`<div class="tt-cell" style="border-left:2px solid transparent"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
+      }
+    }
+  }
+  html+=`</div>`;
+
+  // Flags
+  if(dayFlags.length||slotFlags.length){
+    html+=`<div style="margin-top:.6rem;display:flex;flex-direction:column;gap:.3rem">`;
+    dayFlags.forEach(f=>{
+      html+=`<div style="font-size:.72rem;padding:.3rem .6rem;border-radius:4px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2)"><span style="color:#ef4444;font-weight:600">⚠ ${f.pct.toFixed(0)}% of absences fall on ${f.day}s</span> <span style="color:var(--mu)">(${f.count} of ${f.total})</span></div>`;
+    });
+    slotFlags.forEach(f=>{
+      html+=`<div style="font-size:.72rem;padding:.3rem .6rem;border-radius:4px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2)"><span style="color:#ef4444;font-weight:600">⚠ ${f.day} P${f.per}: absent ${f.rate.toFixed(0)}% of weeks</span> <span style="color:var(--mu)">(${f.count} of ${f.weeks}${f.unauth?' — '+f.unauth+' unauthorised':''})</span></div>`;
+    });
+    html+=`</div>`;
+  }
+
+  html+=`</div></div>`;
+  el.innerHTML=html;
+}
+
+// Render TG-level absence pattern heatmap with pupil tooltips
+function renderTGAbsencePattern(tgPupilPxSet,containerId){
+  const el=document.getElementById(containerId);
+  if(!el) return;
+  const DAYS=['Mon','Tue','Wed','Thu','Fri'];
+  const WLK=DD.weekLessons||{};
+  const weekCount=Object.keys(WLK).length;
+
+  // Aggregate absences across all TG pupils
+  const slotAbs=Array.from({length:5},()=>Array(5).fill(0));
+  const slotUnauth=Array.from({length:5},()=>Array(5).fill(0));
+  const slotPupils=Array.from({length:5},()=>Array.from({length:5},()=>({})));// {px: {count, unauth}}
+  let totalAbs=0;
+
+  tgPupilPxSet.forEach(px=>{
+    const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
+    pAbsSubj.forEach(r=>{
+      const dt=new Date(r[0]+'T12:00:00');
+      const dow=dt.getDay()-1;
+      const per=(r[2]||1)-1;
+      if(dow>=0&&dow<5&&per>=0&&per<5){
+        slotAbs[dow][per]++;
+        totalAbs++;
+        if(!slotPupils[dow][per][px]) slotPupils[dow][per][px]={count:0,unauth:0};
+        slotPupils[dow][per][px].count++;
+        if(r[3]&&isUnauth(r[3])){
+          slotUnauth[dow][per]++;
+          slotPupils[dow][per][px].unauth++;
+        }
+      }
+    });
+  });
+
+  if(totalAbs<1){el.innerHTML='';return}
+
+  const maxSlot=Math.max(...slotAbs.flat(),1);
+  const tgSize=tgPupilPxSet.size;
+  // Expected per slot = totalAbs / 25
+  const expected=totalAbs/25;
+
+  function absHeat(count){
+    if(!count)return'';
+    const i=Math.min(count/maxSlot,1);
+    if(i<0.15)return'background:rgba(59,130,246,0.06)';
+    if(i<0.3)return'background:rgba(59,130,246,0.12)';
+    if(i<0.5)return'background:rgba(59,130,246,0.2)';
+    if(i<0.7)return'background:rgba(59,130,246,0.3)';
+    if(i<0.85)return'background:rgba(147,51,234,0.3)';
+    return'background:rgba(147,51,234,0.4)';
+  }
+
+  // Build tooltip HTML for each slot
+  function slotTooltip(d,p){
+    const pupils=slotPupils[d][p];
+    const entries=Object.entries(pupils).sort((a,b)=>b[1].count-a[1].count);
+    if(!entries.length) return'';
+    const total=slotAbs[d][p];
+    const pupilCount=entries.length;
+    let tip=`${DAYS[d]} P${p+1} — ${total} absence${total!==1?'s':''} (${pupilCount} pupil${pupilCount!==1?'s':''})\\n`;
+    entries.slice(0,10).forEach(([px,data])=>{
+      const name=((DD.registry||{})[String(px)]?.id||px).replace(/\s*\([^)]+\)\s*$/,'');
+      tip+=`${name}: ${data.count}${data.unauth?' ('+data.unauth+' unauth)':''}\\n`;
+    });
+    if(entries.length>10) tip+=`... and ${entries.length-10} more`;
+    return tip;
+  }
+
+  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${tgSize} pupils · ${weekCount} weeks</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
+  html+=`<div style="padding:.5rem 1rem .75rem">`;
+
+  // Heatmap grid
+  html+=`<div class="tt-grid">`;
+  html+=`<div class="tt-per"></div>`;DAYS.forEach(d=>{html+=`<div class="tt-day">${d}</div>`});
+
+  // Day-level flags
+  const dayAbs=[0,0,0,0,0];
+  for(let d=0;d<5;d++) for(let p=0;p<5;p++) dayAbs[d]+=slotAbs[d][p];
+  const dayFlags=[];
+  DAYS.forEach((dn,i)=>{
+    const dayTotal=dayAbs[i];
+    if(dayTotal>=AP_MIN&&totalAbs>0){
+      const pct=dayTotal/totalAbs*100;
+      if(pct>=AP_PCT) dayFlags.push({day:dn,count:dayTotal,total:totalAbs,pct});
+    }
+  });
+
+  // Slot-level flags
+  const slotFlags=[];
+  for(let d=0;d<5;d++){
+    for(let p=0;p<5;p++){
+      if(slotAbs[d][p]>=AP_MIN&&weekCount>0){
+        const rate=slotAbs[d][p]/(weekCount*tgSize)*100;// per pupil per week
+        const rawRate=slotAbs[d][p]/weekCount;// avg absences per week in this slot
+        // Flag if concentration is high relative to expected
+        const ratio=expected>0?slotAbs[d][p]/expected:0;
+        if(ratio>=1.5&&slotAbs[d][p]>=AP_MIN) slotFlags.push({day:DAYS[d],dayIdx:d,per:p+1,perIdx:p,count:slotAbs[d][p],ratio,pupils:Object.keys(slotPupils[d][p]).length});
+      }
+    }
+  }
+
+  for(let p=0;p<5;p++){
+    html+=`<div class="tt-per">P${p+1}</div>`;
+    for(let d=0;d<5;d++){
+      const count=slotAbs[d][p];
+      const unauth=slotUnauth[d][p];
+      const heat=absHeat(count);
+      const nPupils=Object.keys(slotPupils[d][p]).length;
+      const isFlagged=slotFlags.some(f=>f.dayIdx===d&&f.perIdx===p);
+      const border=isFlagged?'border:2px solid #ef4444;':'border-left:2px solid transparent;';
+      const tip=slotTooltip(d,p);
+
+      if(count){
+        html+=`<div class="tt-cell" style="${border}${heat};cursor:help" title="${tip}">`;
+        html+=`<span style="font-size:.75rem;font-weight:600;color:var(--tx)">${count}</span>`;
+        html+=`<span style="font-size:.5rem;color:var(--mu)">${nPupils}p</span>`;
+        if(unauth) html+=`<span style="font-size:.5rem;color:#ef4444">${unauth}u</span>`;
+        html+=`</div>`;
+      }else{
+        html+=`<div class="tt-cell" style="border-left:2px solid transparent"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
+      }
+    }
+  }
+  html+=`</div>`;
+
+  // Flags
+  if(dayFlags.length||slotFlags.length){
+    html+=`<div style="margin-top:.6rem;display:flex;flex-direction:column;gap:.3rem">`;
+    dayFlags.forEach(f=>{
+      html+=`<div style="font-size:.72rem;padding:.3rem .6rem;border-radius:4px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2)"><span style="color:#ef4444;font-weight:600">⚠ ${f.pct.toFixed(0)}% of absences fall on ${f.day}s</span> <span style="color:var(--mu)">(${f.count} of ${f.total})</span></div>`;
+    });
+    slotFlags.forEach(f=>{
+      html+=`<div style="font-size:.72rem;padding:.3rem .6rem;border-radius:4px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2)"><span style="color:#ef4444;font-weight:600">⚠ ${f.day} P${f.per}: ${f.ratio.toFixed(1)}× expected rate</span> <span style="color:var(--mu)">(${f.count} absences, ${f.pupils} pupils)</span></div>`;
+    });
+    html+=`</div>`;
+  }
+
+  html+=`<div style="font-size:.55rem;color:var(--mu);margin-top:.4rem">Cells show total absences / number of pupils / unauthorised count. Hover for pupil breakdown. Red borders = flagged patterns.</div>`;
+  html+=`</div></div>`;
+  el.innerHTML=html;
+}
+
+// SEND breakdown: "147 SEND (40K · 21E · 41Add · 32Strat · 13N) · 59 FSM"
+function sendBreakdown(rows,pxField){
+  // rows = progress rows, pxField = index of px in the row (0 for standard)
+  const pi=pxField||0;
+  const sendCount=rows.filter(r=>r[4]).length;
+  const fsmCount=rows.filter(r=>r[6]||r[5+1]).length;
+  // Count by SEN code
+  const senCounts={};
+  rows.forEach(r=>{
+    const px=r[pi];
+    const code=SEN_STATUS[String(px)];
+    if(code){senCounts[code]=(senCounts[code]||0)+1}
+  });
+  const subParts=[];
+  if(senCounts['K'])subParts.push(`${senCounts['K']}K`);
+  if(senCounts['E'])subParts.push(`${senCounts['E']}E`);
+  if(senCounts['Add']||senCounts['add'])subParts.push(`${(senCounts['Add']||0)+(senCounts['add']||0)}Add`);
+  if(senCounts['Strat']||senCounts['strat'])subParts.push(`${(senCounts['Strat']||0)+(senCounts['strat']||0)}Strat`);
+  if(senCounts['N'])subParts.push(`${senCounts['N']}N`);
+  const subStr=subParts.length?` (${subParts.join(' · ')})`:'';
+  return`<span style="color:#f97316;font-weight:600">${sendCount}</span> SEND${subStr} · <span style="color:#6488ff;font-weight:600">${fsmCount}</span> FSM`;
+}
+
+// Simpler version taking pre-counted values and a pupil set
+function sendBreakdownFromSet(pupils){
+  // pupils = array of px values
+  const senCounts={};
+  let sendCount=0,fsmCount=0;
+  // We can't count FSM from px alone without progress rows
+  // So this version just does SEND breakdown
+  pupils.forEach(px=>{
+    const code=SEN_STATUS[String(px)];
+    if(code){sendCount++;senCounts[code]=(senCounts[code]||0)+1}
+  });
+  const subParts=[];
+  if(senCounts['K'])subParts.push(`${senCounts['K']}K`);
+  if(senCounts['E'])subParts.push(`${senCounts['E']}E`);
+  if(senCounts['Add']||senCounts['add'])subParts.push(`${(senCounts['Add']||0)+(senCounts['add']||0)}Add`);
+  if(senCounts['Strat']||senCounts['strat'])subParts.push(`${(senCounts['Strat']||0)+(senCounts['strat']||0)}Strat`);
+  if(senCounts['N'])subParts.push(`${senCounts['N']}N`);
+  const subStr=subParts.length?` (${subParts.join(' · ')})`:'';
+  return`<span style="color:#f97316;font-weight:600">${sendCount}</span> SEND${subStr}`;
+}
+
+// Standard flags string with breakdown
+function flagsStr(sendN,ehcpN,fsmN,rows){
+  if(!rows||!rows.length) return`<span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM`;
+  const senCounts={};
+  rows.forEach(r=>{const code=SEN_STATUS[String(r[0])];if(code){senCounts[code]=(senCounts[code]||0)+1}});
+  const subParts=[];
+  if(senCounts['K'])subParts.push(`${senCounts['K']}K`);
+  if(senCounts['E'])subParts.push(`${senCounts['E']}E`);
+  if(senCounts['Add']||senCounts['add'])subParts.push(`${(senCounts['Add']||0)+(senCounts['add']||0)}Add`);
+  if(senCounts['Strat']||senCounts['strat'])subParts.push(`${(senCounts['Strat']||0)+(senCounts['strat']||0)}Strat`);
+  if(senCounts['N'])subParts.push(`${senCounts['N']}N`);
+  const subStr=subParts.length?` (${subParts.join(' · ')})`:'';
+  return`<span style="color:#f97316;font-weight:600">${sendN}</span> SEND${subStr} · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM`;
+}
 function senPill(px){
   const code=SEN_STATUS[String(px)];
   if(!code) return'';
@@ -765,9 +1111,10 @@ function rP(){
     ['p-crds','p-ch','p-tbl'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
     // Still render timetable, sanctions, network, attendance table
     renderTimetable(x);
+    renderAbsencePattern(x,'p-abs-pattern');
     return;
   }
-  const lp=pp[nP-1],p3=nP>=4?pp[nP-4]:null,p5=nP>=2?pp[nP-2]:null;
+  const lp=pp[nP-1],p3=nP>=3?pp[nP-3]:null,p5=nP>=2?pp[nP-2]:null;
   const lt=data[lp],r3=p3?data[p3]:null,r5=p5?data[p5]:null;
   const sf=document.getElementById('p-sf').value;
   const isA=sf==='all';
@@ -804,7 +1151,7 @@ function rP(){
     return ri?`${ord(ri)}/${ranks.length}`:'—';
   }
 
-  const prevP=pp.slice(Math.max(0,nP-4),nP-1).reverse();
+  const prevP=pp.slice(Math.max(0,nP-3),nP-1).reverse();
 
   let abRkStr='',efRkStr='',abPrv='',efPrv='';
   if(isA){
@@ -1013,6 +1360,7 @@ function rP(){
 
   // Render timetable grid
   renderTimetable(x);
+  renderAbsencePattern(x,'p-abs-pattern');
 
   // Section titles
   document.getElementById('p-acad-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Academic Performance</div>`;
@@ -2559,7 +2907,7 @@ function rSEND(){
       const lp=pp[pp.length-1];
       const lr=ygRows(yg,lp);
       const prevTermP=pp.length>=2?pp[pp.length-2]:null;
-      const prevYearP=pp.length>=4?pp[pp.length-4]:null;
+      const prevYearP=pp.length>=3?pp[pp.length-3]:null;
 
       // Compute TG-level rankings for ability and effort
       const tgAbRanks={};// tg -> [{px, avg}] sorted desc
@@ -3702,7 +4050,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics')rAnalytics();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -3748,7 +4096,7 @@ function rSV(){
   function avgEf(rs){const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 
   // Current, YoY (3 back), term-on-term (1 back)
-  const p3=nP>=4?pp[nP-4]:null,p5=nP>=2?pp[nP-2]:null;
+  const p3=nP>=3?pp[nP-3]:null,p5=nP>=2?pp[nP-2]:null;
   const lr3=p3?ygRows(yearGroup,p3):null,lr5=p5?ygRows(yearGroup,p5):null;
 
   const avg=avgAb(lr),avgE=avgEf(lr);
@@ -3761,7 +4109,7 @@ function rSV(){
   const eT=avgE!=null&&avgE5!=null?avgE-avgE5:null;
 
   // Previous 3 periods for prev2
-  const prevP=pp.slice(Math.max(0,nP-4),nP-1).reverse();
+  const prevP=pp.slice(Math.max(0,nP-3),nP-1).reverse();
   const abPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgAb(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
   const efPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgEf(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
 
@@ -3905,13 +4253,13 @@ function rSV(){
   const efRows=efLabels.map((label,i)=>{const c=efCounts[i];const p=efTotal?(c/efTotal*100).toFixed(0):0;const barW=Math.round(c/maxEfCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${efColors[i]}"></span><span style="color:var(--mu);min-width:3.5rem">${label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${efColors[i]}44;border-left:2px solid ${efColors[i]}"></div></div><span style="font-family:'JetBrains Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
 
   // Set flags in header bar
-  document.getElementById('sv-flags').innerHTML=`<span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils`;
+  document.getElementById('sv-flags').innerHTML=`${flagsStr(sendN,ehcpN,fsmN,lrSubj)} · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils`;
 
   // Section title
   document.getElementById('sv-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} ${sub} Report Breakdown</div>`;
 
   if(!hasGradesSV){
-    document.getElementById('sv-cards').innerHTML='<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported.</div><div style="margin-top:.25rem"><span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils</div></div>';
+    document.getElementById('sv-cards').innerHTML='<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported.</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lrSubj)} · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils</div></div>';
     document.getElementById('sv-charts-top').innerHTML='';
     document.getElementById('sv-charts-bottom').innerHTML='';
     document.getElementById('sv-dist-title').innerHTML='';
@@ -4024,7 +4372,7 @@ function rCL(){
   function avgAb(rs){const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
   function avgEf(rs){const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 
-  const p3=nP>=4?pp[nP-4]:null,p5=nP>=2?pp[nP-2]:null;
+  const p3=nP>=3?pp[nP-3]:null,p5=nP>=2?pp[nP-2]:null;
   const lr3=p3?clRows(p3):null,lr5=p5?clRows(p5):null;
 
   const avg=avgAb(lr),avgE=avgEf(lr);
@@ -4036,7 +4384,7 @@ function rCL(){
   const eY=avgE!=null&&avgE3!=null?avgE-avgE3:null;
   const eT=avgE!=null&&avgE5!=null?avgE-avgE5:null;
 
-  const prevP=pp.slice(Math.max(0,nP-4),nP-1).reverse();
+  const prevP=pp.slice(Math.max(0,nP-3),nP-1).reverse();
   const abPrv=prevP.map(p=>{const rs=clRows(p);const v=avgAb(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
   const efPrv=prevP.map(p=>{const rs=clRows(p);const v=avgEf(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
 
@@ -4045,6 +4393,7 @@ function rCL(){
   const sendAb=sgAvgAb(4),ehcpAb=sgAvgAb(5),fsmAb=sgAvgAb(6);
   const sendEf=sgAvgEf(4),ehcpEf=sgAvgEf(5),fsmEf=sgAvgEf(6);
   const sendN=lr.filter(r=>r[4]).length,ehcpN=lr.filter(r=>r[5]).length,fsmN=lr.filter(r=>r[6]).length;
+  document.getElementById('cl-flags').innerHTML=`${flagsStr(sendN,ehcpN,fsmN,lr)} · <span style="color:var(--tx);font-weight:500">${classPups.size}</span> pupils`;
 
   function sgLine(label,color,abV,efV,n,isAbCard){
     if(!n)return'';
@@ -4302,10 +4651,10 @@ function rCL(){
       ${sgBlockEf}
     </div>
     <div class="crd"><div class="ct2">Grade Breakdown</div><div style="display:flex;flex-direction:column;gap:.15rem;margin-top:.25rem">${gradeRows}</div></div>
-    <div class="crd"><div class="ct2">Flags</div><div style="margin-top:.25rem"><span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM</div></div>`;
+    <div class="crd"><div class="ct2">Flags</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lr)}</div></div>`;
   }else{
     document.getElementById('cl-cards').innerHTML=`
-    <div class="crd"><div class="ct2">Class Summary</div><div style="font-size:.75rem;color:var(--mu)">Grade data not available. ${classPups.size} pupils · ${teacher}</div><div style="margin-top:.25rem"><span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM</div></div>`;
+    <div class="crd"><div class="ct2">Class Summary</div><div style="font-size:.75rem;color:var(--mu)">Grade data not available. ${classPups.size} pupils · ${teacher}</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lr)}</div></div>`;
   }
 
   dc('clab');dc('clef');dc('clst');dc('clefst');
@@ -4350,7 +4699,7 @@ function rCC(){
   const enrols=ygEnrol(yearGroup);
   const cm={};enrols.filter(r=>r.t==='cls'&&r.s===sub&&r.u===null).forEach(r=>{if(!cm[r.c])cm[r.c]={pups:new Set(),tc:r.tc};cm[r.c].pups.add(r.x)});
   const pp=ygPeriods(yearGroup);if(!pp.length)return;
-  const lp=pp[pp.length-1],p3=pp.length>=4?pp[pp.length-4]:null;
+  const lp=pp[pp.length-1],p3=pp.length>=3?pp[pp.length-3]:null;
 
   const rows=Object.entries(cm).sort(([a],[b])=>a-b).map(([c,info])=>{
     const lr=ygRows(yearGroup,lp).filter(r=>info.pups.has(r[0]));
@@ -4433,7 +4782,8 @@ function rCC(){
     'cmp-yg':{hasAll:false,onChange:'rCmp()'},
     'bc-yg':{hasAll:true,onChange:'popBCTG();rBC()'},
     'pp-yg':{hasAll:true,onChange:'rPP()'},
-    'send-yg':{hasAll:true,onChange:'rSEND()'}
+    'send-yg':{hasAll:true,onChange:'rSEND()'},
+    'an-yg':{hasAll:false,onChange:'rAnalytics()'}
   };
   for(const[id,cfg2]of Object.entries(ygDropdowns)){
     const sel=document.getElementById(id);
@@ -4757,7 +5107,7 @@ function rPeer(){
 
   if(!tgRows.length){
     document.getElementById('tg-title').innerHTML=`<div style="color:var(--mu)">No pupils in ${tgName}</div>`;
-    ['tg-summary','tg-alerts','tg-pupils','tg-network','tg-perf-title','tg-cards','tg-charts'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
+    ['tg-summary','tg-alerts','tg-pupils','tg-abs-pattern','tg-network','tg-perf-title','tg-cards','tg-charts'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
     return;
   }
 
@@ -4774,6 +5124,7 @@ function rPeer(){
   const sendN=tgRows.filter(r=>r[4]).length;
   const ehcpN=tgRows.filter(r=>r[5]).length;
   const fsmN=tgRows.filter(r=>r[6]).length;
+  document.getElementById('tg-flags').innerHTML=`${flagsStr(sendN,ehcpN,fsmN,tgRows)} · <span style="color:var(--tx);font-weight:500">${tgRows.length}</span> pupils`;
 
   // Attendance
   let tgYtdAtt='—',tgTtdAtt='—';
@@ -4800,7 +5151,7 @@ function rPeer(){
     <div class="crd"><div class="ct2">Tutor Group ${tgName}</div>
       <div style="font-size:1.5rem;font-weight:700;color:var(--ac)">${tgRows.length}</div>
       <div style="font-size:.72rem;color:var(--mu)">pupils</div>
-      <div style="margin-top:.4rem"><span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM</div>
+      <div style="margin-top:.4rem">${flagsStr(sendN,ehcpN,fsmN,tgRows)}</div>
       <div style="margin-top:.2rem;font-size:.65rem;color:var(--mu)">SEN: ${(()=>{const counts=tgRows.map(r=>SEN_STATUS[String(r[0])]).filter(Boolean).reduce((m,c)=>{m[c]=(m[c]||0)+1;return m},{});const parts=[];for(const[k,v]of Object.entries(counts))parts.push(k+':'+v);return parts.join(' · ')||'None'})()}</div>
     </div>
     <div class="crd"><div class="ct2">YTD Attendance</div>
@@ -4876,6 +5227,9 @@ function rPeer(){
       <th>Name</th><th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center;color:#7c3aed">Detentions</th><th style="text-align:center">Total</th>
     </tr></thead><tbody>${alertRows}</tbody></table></div></div>`:'';
 
+  // ── ABSENCE PATTERNS ──
+  renderTGAbsencePattern(tgPupilPx,'tg-abs-pattern');
+
   // ── NETWORK GRAPH ──
   const tgNetDiv=document.getElementById('tg-network');
   if(typeof renderNet==='function'){
@@ -4944,7 +5298,7 @@ function rPeer(){
 
   // ── EFFORT & ABILITY (guarded) ──
   if(hasGradesTG){
-    const p3=pp.length>=4?pp[pp.length-4]:null;
+    const p3=pp.length>=3?pp[pp.length-3]:null;
     const lr3=p3?ygRows(yearGroup,p3).filter(r=>tgPupilPx.has(r[0])):null;
     const avg3=lr3?avgAb(lr3):null;
     const avgE3=lr3?avgEf(lr3):null;
@@ -4978,8 +5332,200 @@ function rPeer(){
 }
 
   window.rCC=rCC;
+  // ── ANALYTICS TAB ──
+  function rAnalytics(){
+    const yearGroup=parseInt(document.getElementById('an-yg').value);
+    if(!yearGroup) return;
+
+    const ink=CFG.intakes.find(i=>curYG(i)===yearGroup);
+    if(!ink) return;
+    const ik=`I${ink}`;
+    const enrols=ENR[ik]||[];
+    const SAN=DD.sanctions||[];
+    const today=new Date();
+    const todayISO=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    const ayStart=`${CAY}-09-01`;
+    const WLK=DD.weekLessons||{};
+    let totalWeeks=0;
+    for(const w of Object.keys(WLK)){if(w>=ayStart&&w<=todayISO)totalWeeks++}
+
+    // ── SUBJECT RISK MATRIX ──
+    // For each subject: avg attendance %, avg sanctions per pupil
+    const subjData=[];
+    SUBS.forEach(sub=>{
+      // Pupils taking this subject
+      const pupils=new Set(enrols.filter(r=>r.t==='cls'&&r.s===sub&&r.u===null).map(r=>r.x));
+      if(pupils.size<3) return;
+
+      // Attendance: count absences in this subject
+      let totalLessons=0,totalAbs=0;
+      const grid2=[];
+      pupils.forEach(px=>{
+        const tt=TT_DATA[String(px)];
+        let lpw=0;
+        if(tt){for(let d=0;d<5;d++)for(let p=0;p<5;p++){const gc=tt[d]?.[p];if(gc&&(gc[0]===sub||(gc.length===4&&gc[2]===sub)))lpw++}}
+        totalLessons+=lpw*totalWeeks;
+        const pAbs=(DD.attAbsSubj||{})[String(px)]||[];
+        const subAbs=pAbs.filter(r=>r[1]===sub&&r[0]>=ayStart&&r[0]<=todayISO).length;
+        totalAbs+=subAbs;
+      });
+      const attPct=totalLessons>0?((totalLessons-totalAbs)/totalLessons*100):100;
+
+      // Sanctions per pupil in this subject
+      const subjSanc=SAN.filter(s=>pupils.has(s[0])&&s[3]===sub&&s[2]>=ayStart&&s[2]<=todayISO&&s[1]===0);
+      const codesPerPupil=subjSanc.length/pupils.size;
+
+      // SEND %
+      const sendCount=[...pupils].filter(px=>DD.senStatus?.[String(px)]).length;
+      const sendPct=(sendCount/pupils.size*100).toFixed(0);
+
+      subjData.push({sub,pupils:pupils.size,attPct:parseFloat(attPct.toFixed(1)),codesPerPupil:parseFloat(codesPerPupil.toFixed(2)),sendPct:parseInt(sendPct),totalCodes:subjSanc.length});
+    });
+
+    // ── CLASS RISK MATRIX ──
+    // For each class (subject+class): same metrics
+    const classData=[];
+    SUBS.forEach(sub=>{
+      const classMap={};
+      enrols.filter(r=>r.t==='cls'&&r.s===sub&&r.u===null).forEach(r=>{
+        if(!classMap[r.c]) classMap[r.c]={pupils:new Set(),teacher:r.tc};
+        classMap[r.c].pupils.add(r.x);
+      });
+
+      Object.entries(classMap).forEach(([cls,info])=>{
+        if(info.pupils.size<3) return;
+        const pupils=info.pupils;
+
+        let totalLessons=0,totalAbs=0;
+        pupils.forEach(px=>{
+          const tt=TT_DATA[String(px)];
+          let lpw=0;
+          if(tt){for(let d=0;d<5;d++)for(let p=0;p<5;p++){const gc=tt[d]?.[p];if(gc&&(gc[0]===sub||(gc.length===4&&gc[2]===sub)))lpw++}}
+          totalLessons+=lpw*totalWeeks;
+          const pAbs=(DD.attAbsSubj||{})[String(px)]||[];
+          totalAbs+=pAbs.filter(r=>r[1]===sub&&r[0]>=ayStart&&r[0]<=todayISO).length;
+        });
+        const attPct=totalLessons>0?((totalLessons-totalAbs)/totalLessons*100):100;
+
+        const classSanc=SAN.filter(s=>pupils.has(s[0])&&s[3]===sub&&s[2]>=ayStart&&s[2]<=todayISO&&s[1]===0);
+        const codesPerPupil=classSanc.length/pupils.size;
+
+        const sendCount=[...pupils].filter(px=>DD.senStatus?.[String(px)]).length;
+        const sendPct=(sendCount/pupils.size*100).toFixed(0);
+
+        classData.push({sub,cls:parseInt(cls),teacher:info.teacher,pupils:pupils.size,attPct:parseFloat(attPct.toFixed(1)),codesPerPupil:parseFloat(codesPerPupil.toFixed(2)),sendPct:parseInt(sendPct),totalCodes:classSanc.length});
+      });
+    });
+
+    // ── RENDER SUBJECT SCATTER ──
+    const subjEl=document.getElementById('an-subj-scatter');
+    if(subjData.length){
+      const avgAtt=subjData.reduce((s,d)=>s+d.attPct,0)/subjData.length;
+      const avgCodes=subjData.reduce((s,d)=>s+d.codesPerPupil,0)/subjData.length;
+
+      dc('anSubjChart');
+      subjEl.innerHTML=`<div class="dw"><div class="dwt">Subject Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Bubble size = pupil count · Dashed lines = year averages</span></div><div style="position:relative;height:400px"><canvas id="c-anSubjChart"></canvas></div></div>`;
+
+      const colors=['#ef4444','#f97316','#eab308','#34d399','#38bdf8','#6488ff','#a78bfa','#f472b6','#94a3b8','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#6366f1','#d946ef','#0ea5e9','#84cc16','#fb923c','#e11d48','#2dd4bf','#7c3aed','#059669','#dc2626'];
+
+      sc2('anSubjChart',new Chart(document.getElementById('c-anSubjChart'),{
+        type:'bubble',
+        data:{datasets:subjData.map((d,i)=>({
+          label:d.sub,
+          data:[{x:d.attPct,y:d.codesPerPupil,r:Math.max(5,Math.min(25,d.pupils/3))}],
+          backgroundColor:colors[i%colors.length]+'88',
+          borderColor:colors[i%colors.length],
+          borderWidth:1.5
+        }))},
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{
+              label:c=>{const d=subjData[c.datasetIndex];return`${d.sub}: Att ${d.attPct}%, ${d.codesPerPupil.toFixed(1)} codes/pupil, ${d.pupils} pupils, ${d.sendPct}% SEND`}
+            }}
+          },
+          scales:{
+            x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(80,Math.min(...subjData.map(d=>d.attPct))-2),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
+            y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
+          },
+          annotation:{annotations:{
+            avgAttLine:{type:'line',xMin:avgAtt,xMax:avgAtt,borderColor:'#94a3b866',borderWidth:1,borderDash:[4,4]},
+            avgCodesLine:{type:'line',yMin:avgCodes,yMax:avgCodes,borderColor:'#94a3b866',borderWidth:1,borderDash:[4,4]}
+          }}
+        }
+      }));
+
+      // Add a legend table below
+      const legendHtml=subjData.sort((a,b)=>b.codesPerPupil-a.codesPerPupil).map((d,i)=>`<tr>
+        <td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colors[subjData.indexOf(d)%colors.length]};margin-right:.3rem"></span>${d.sub}</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.attPct<avgAtt?'color:#ef4444;font-weight:600':''}">${d.attPct}%</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.codesPerPupil>avgCodes?'color:#ef4444;font-weight:600':''}">${d.codesPerPupil.toFixed(1)}</td>
+        <td style="text-align:center">${d.pupils}</td>
+        <td style="text-align:center;color:#f97316">${d.sendPct}%</td>
+        <td style="text-align:center">${d.totalCodes}</td>
+      </tr>`).join('');
+
+      subjEl.innerHTML+=`<div class="dw" style="margin-top:.5rem"><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th style="text-align:center">Att %</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Pupils</th><th style="text-align:center;color:#f97316">SEND %</th><th style="text-align:center">Total Codes</th></tr></thead><tbody>${legendHtml}</tbody></table></div></div>`;
+    }
+
+    // ── RENDER CLASS SCATTER ──
+    const classEl=document.getElementById('an-class-scatter');
+    if(classData.length){
+      const avgAttC=classData.reduce((s,d)=>s+d.attPct,0)/classData.length;
+      const avgCodesC=classData.reduce((s,d)=>s+d.codesPerPupil,0)/classData.length;
+
+      dc('anClassChart');
+      classEl.innerHTML=`<div class="dw"><div class="dwt">Class Risk Matrix — Y${yearGroup} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">Attendance % vs Codes per Pupil · Bubble size = pupil count · Hover for details</span></div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div>`;
+
+      // Color by subject
+      const subjColorMap={};
+      const colors2=['#ef4444','#f97316','#eab308','#34d399','#38bdf8','#6488ff','#a78bfa','#f472b6','#94a3b8','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#6366f1','#d946ef','#0ea5e9','#84cc16','#fb923c','#e11d48','#2dd4bf','#7c3aed','#059669','#dc2626'];
+      SUBS.forEach((s,i)=>{subjColorMap[s]=colors2[i%colors2.length]});
+
+      sc2('anClassChart',new Chart(document.getElementById('c-anClassChart'),{
+        type:'bubble',
+        data:{datasets:classData.map(d=>({
+          label:`${d.sub} (${d.teacher})`,
+          data:[{x:d.attPct,y:d.codesPerPupil,r:Math.max(4,Math.min(20,d.pupils/3))}],
+          backgroundColor:(subjColorMap[d.sub]||'#94a3b8')+'66',
+          borderColor:subjColorMap[d.sub]||'#94a3b8',
+          borderWidth:1.5
+        }))},
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{
+              label:c=>{const d=classData[c.datasetIndex];return`${d.sub} Class ${d.cls} (${d.teacher}): Att ${d.attPct}%, ${d.codesPerPupil.toFixed(1)} codes/pupil, ${d.pupils} pupils, ${d.sendPct}% SEND`}
+            }}
+          },
+          scales:{
+            x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.min(...classData.map(d=>d.attPct))-2),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},
+            y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
+          }
+        }
+      }));
+
+      // Class table sorted by codes/pupil
+      const classTableHtml=classData.sort((a,b)=>b.codesPerPupil-a.codesPerPupil).map(d=>`<tr>
+        <td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${subjColorMap[d.sub]||'#94a3b8'};margin-right:.3rem"></span>${d.sub}</td>
+        <td style="text-align:center">${d.cls}</td>
+        <td style="font-size:.72rem;color:var(--mu)">${d.teacher}</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.attPct<avgAttC?'color:#ef4444;font-weight:600':''}">${d.attPct}%</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.codesPerPupil>avgCodesC?'color:#ef4444;font-weight:600':''}">${d.codesPerPupil.toFixed(1)}</td>
+        <td style="text-align:center">${d.pupils}</td>
+        <td style="text-align:center;color:#f97316">${d.sendPct}%</td>
+        <td style="text-align:center">${d.totalCodes}</td>
+      </tr>`).join('');
+
+      classEl.innerHTML+=`<div class="dw" style="margin-top:.5rem"><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th style="text-align:center">Class</th><th>Teacher</th><th style="text-align:center">Att %</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Pupils</th><th style="text-align:center;color:#f97316">SEND %</th><th style="text-align:center">Total Codes</th></tr></thead><tbody>${classTableHtml}</tbody></table></div></div>`;
+    }
+  }
+
   window.popTG=popTG;
   window.rTG=rTG;
+  window.rAnalytics=rAnalytics;
   window.rTV=rTV;
   window.rBC=rBC;
   window.rPP=rPP;
