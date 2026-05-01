@@ -4705,8 +4705,9 @@ function rPeer(){
   window.popCL=popCL;
   window.rCmp=rCmp;
   window.rPrg=rPrg;
-// ── TUTOR GROUP VIEW ──
-function popTG(){
+
+  // ── TUTOR GROUP VIEW ──
+  function popTG(){
   const yearGroup=parseInt(document.getElementById('tg-yg').value);
   const sel=document.getElementById('tg-sel');
   const prev=sel.value;
@@ -4721,7 +4722,7 @@ function popTG(){
   rTG();
 }
 
-function rTG(){
+  function rTG(){
   const yearGroup=parseInt(document.getElementById('tg-yg').value);
   const tgName=document.getElementById('tg-sel').value;
   if(!yearGroup||!tgName) return;
