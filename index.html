@@ -2778,12 +2778,11 @@ function rBC(){
   allSubjConcerns.sort((a,b)=>{if(a.imm!==b.imm)return a.imm?-1:1;return b.s10-a.s10});
 
   // Sortable table helper
-  function bcSortTable(tableId,data,renderRow,defaultSort){
-    let sortCol=defaultSort||0,sortDir='desc';
+  function bcSortTable(tableId,data,renderRow,defaultField){
+    let sortField=defaultField,sortDir='desc';
     function render(){
       const sorted=[...data].sort((a,b)=>{
-        const va=typeof sortCol==='function'?sortCol(a):Object.values(a)[sortCol];
-        const vb=typeof sortCol==='function'?sortCol(b):Object.values(b)[sortCol];
+        const va=a[sortField],vb=b[sortField];
         if(va==null&&vb==null)return 0;
         if(va==null)return 1;if(vb==null)return-1;
         const cmp=typeof va==='string'?va.localeCompare(vb):va-vb;
@@ -2792,7 +2791,7 @@ function rBC(){
       const tbody=document.getElementById(tableId);
       if(tbody)tbody.innerHTML=sorted.map(renderRow).join('');
     }
-    return{render,setSort:(col)=>{if(sortCol===col)sortDir=sortDir==='asc'?'desc':'asc';else{sortCol=col;sortDir='desc'}render()}};
+    return{render,setSort:(field)=>{if(sortField===field)sortDir=sortDir==='asc'?'desc':'asc';else{sortField=field;sortDir='desc'}render()}};
   }
 
   let allSubjHtml='';
@@ -2812,20 +2811,20 @@ function rBC(){
     const thSort=(label,sortFn,idx)=>`<th style="text-align:center;cursor:pointer;user-select:none" onclick="window._bcSort1.setSort(${typeof sortFn==='string'?sortFn:'c=>c.'+sortFn})">${label} ↕</th>`;
     allSubjHtml=`<div class="dw"><div class="dwt">All-Subject Behavioural Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${headerNote} · ${allSubjConcerns.length} pupil${allSubjConcerns.length!==1?'s':''}</span></div>
       <table class="d"><thead><tr>
-        <th style="cursor:pointer" onclick="window._bcSort1.setSort(c=>c.pid)">Pupil ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.yg)">Year ↕</th>
-        <th style="text-align:center;color:#ef4444;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.imm?0:1)">Immediate ↕</th>
-        <th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.grad?0:1)">Graduated ↕</th>
-        <th style="cursor:pointer" onclick="window._bcSort1.setSort(c=>c.tg)">TG ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.s10)">10sd ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.s20)">20sd ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.s100)">100sd ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.pct10v20)">% 10v20 ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort(c=>c.pct10v100)">% 10v100 ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort1.setSort('pid')">Pupil ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort('yg')">Year ↕</th>
+        <th style="text-align:center;color:#ef4444;cursor:pointer" onclick="window._bcSort1.setSort('imm')">Immediate ↕</th>
+        <th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._bcSort1.setSort('grad')">Graduated ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort1.setSort('tg')">TG ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort('s10')">10sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort('s20')">20sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort('s100')">100sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort('pct10v20')">% 10v20 ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort1.setSort('pct10v100')">% 10v100 ↕</th>
       </tr></thead><tbody id="bc-all-tbody"></tbody></table></div>`;
     // Deferred sort init
     setTimeout(()=>{
-      window._bcSort1=bcSortTable('bc-all-tbody',allSubjConcerns,renderAllRow,c=>c.s10);
+      window._bcSort1=bcSortTable('bc-all-tbody',allSubjConcerns,renderAllRow,'s10');
       window._bcSort1.render();
     },0);
   }else{
@@ -2873,22 +2872,22 @@ function rBC(){
     </tr>`;
     subjHtml=`<div class="dw" style="margin-top:1rem"><div class="dwt">Subject-Specific Behavioural Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${headerNote} · ${subjConcerns.length} concern${subjConcerns.length!==1?'s':''} across ${new Set(subjConcerns.map(c=>c.px)).size} pupil${new Set(subjConcerns.map(c=>c.px)).size!==1?'s':''}</span></div>
       <table class="d"><thead><tr>
-        <th style="cursor:pointer" onclick="window._bcSort2.setSort(c=>c.pid)">Pupil ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.yg)">Year ↕</th>
-        <th style="text-align:center;color:#ef4444;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.imm?0:1)">Immediate ↕</th>
-        <th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.grad?0:1)">Graduated ↕</th>
-        <th style="cursor:pointer" onclick="window._bcSort2.setSort(c=>c.tg)">TG ↕</th>
-        <th style="cursor:pointer" onclick="window._bcSort2.setSort(c=>c.subj)">Subject ↕</th>
-        <th style="cursor:pointer" onclick="window._bcSort2.setSort(c=>c.tc)">Teacher ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.c)">Class ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.s10)">10sd ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.s20)">20sd ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.s100)">100sd ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.pct10v20)">% 10v20 ↕</th>
-        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort(c=>c.pct10v100)">% 10v100 ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort2.setSort('pid')">Pupil ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort('yg')">Year ↕</th>
+        <th style="text-align:center;color:#ef4444;cursor:pointer" onclick="window._bcSort2.setSort('imm')">Immediate ↕</th>
+        <th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._bcSort2.setSort('grad')">Graduated ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort2.setSort('tg')">TG ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort2.setSort('subj')">Subject ↕</th>
+        <th style="cursor:pointer" onclick="window._bcSort2.setSort('tc')">Teacher ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort('c')">Class ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort('s10')">10sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort('s20')">20sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort('s100')">100sd ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort('pct10v20')">% 10v20 ↕</th>
+        <th style="text-align:center;cursor:pointer" onclick="window._bcSort2.setSort('pct10v100')">% 10v100 ↕</th>
       </tr></thead><tbody id="bc-subj-tbody"></tbody></table></div>`;
     setTimeout(()=>{
-      window._bcSort2=bcSortTable('bc-subj-tbody',subjConcerns,renderSubjRow,c=>c.s10);
+      window._bcSort2=bcSortTable('bc-subj-tbody',subjConcerns,renderSubjRow,'s10');
       window._bcSort2.render();
     },0);
   }else{
@@ -5449,7 +5448,7 @@ function rPeer(){
         const avgCodes=subjData.reduce((s,d)=>s+d.codesPerPupil,0)/subjData.length;
         dc('anSubjChart');
         const renderSR=d=>`<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${subjColorMap[d.sub]||'#94a3b8'};margin-right:.3rem"></span>${d.sub}</td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.attPct<avgAtt?'color:#ef4444;font-weight:600':''}">${d.attPct}%</td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.codesPerPupil>avgCodes?'color:#ef4444;font-weight:600':''}">${d.codesPerPupil.toFixed(1)}</td><td style="text-align:center">${d.pupils}</td><td style="text-align:center;color:#f97316">${d.sendPct}%</td><td style="text-align:center">${d.totalCodes}</td></tr>`;
-        subjEl.innerHTML=`<div class="dw"><div class="dwt">Subject Risk Matrix — Y${yearGroup}</div><div style="position:relative;height:400px"><canvas id="c-anSubjChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Subject Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${subjData.length} subjects · Avg Att: ${avgAtt.toFixed(1)}% · Avg Codes/Pupil: ${avgCodes.toFixed(1)}</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th style="cursor:pointer" onclick="window._anSS.setSort(d=>d.sub)">Subject ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anSS.setSort(d=>d.attPct)">Att % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anSS.setSort(d=>d.codesPerPupil)">Codes/Pupil ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anSS.setSort(d=>d.pupils)">Pupils ↕</th><th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._anSS.setSort(d=>d.sendPct)">SEND % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anSS.setSort(d=>d.totalCodes)">Total Codes ↕</th></tr></thead><tbody id="an-subj-tbody"></tbody></table></div></div>`;
+        subjEl.innerHTML=`<div class="dw"><div class="dwt">Subject Risk Matrix — Y${yearGroup}</div><div style="position:relative;height:400px"><canvas id="c-anSubjChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Subject Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${subjData.length} subjects · Avg Att: ${avgAtt.toFixed(1)}% · Avg Codes/Pupil: ${avgCodes.toFixed(1)}</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th style="cursor:pointer" onclick="window._anSS.setSort('sub')">Subject ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anSS.setSort('attPct')">Att % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anSS.setSort('codesPerPupil')">Codes/Pupil ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anSS.setSort('pupils')">Pupils ↕</th><th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._anSS.setSort('sendPct')">SEND % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anSS.setSort('totalCodes')">Total Codes ↕</th></tr></thead><tbody id="an-subj-tbody"></tbody></table></div></div>`;
         window._anSS=sortableTable('an-subj-tbody',subjData,renderSR,d=>d.codesPerPupil);
         window._anSS.render();
         sc2('anSubjChart',new Chart(document.getElementById('c-anSubjChart'),{type:'scatter',data:{datasets:subjData.map(d=>({label:d.sub,data:[{x:d.attPct,y:d.codesPerPupil}],backgroundColor:subjColorMap[d.sub],borderColor:subjColorMap[d.sub],pointRadius:6,pointHoverRadius:9}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const d=subjData.find(dd=>dd.sub===c.dataset.label);return d?d.sub+': Att '+d.attPct+'%, '+d.codesPerPupil.toFixed(1)+' c/p, '+d.pupils+'p, '+d.sendPct+'% SEND':''}}}},scales:{x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.floor(Math.min(...subjData.map(d=>d.attPct))-2)),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...subjData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
@@ -5467,7 +5466,7 @@ function rPeer(){
         classData.forEach(d=>{if(!subjGroups[d.sub])subjGroups[d.sub]=[];subjGroups[d.sub].push({x:d.attPct,y:d.codesPerPupil,cls:d.cls,teacher:d.teacher,pupils:d.pupils,sendPct:d.sendPct})});
         const scatterDS=Object.entries(subjGroups).map(([sub,pts])=>({label:sub,data:pts,backgroundColor:subjColorMap[sub]||'#94a3b8',pointRadius:6,pointHoverRadius:9}));
         const renderCR=d=>`<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${subjColorMap[d.sub]||'#94a3b8'};margin-right:.3rem"></span>${d.sub}</td><td style="text-align:center">${d.cls}</td><td style="font-size:.72rem;color:var(--mu)">${d.teacher}</td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.attPct<avgAttC?'color:#ef4444;font-weight:600':''}">${d.attPct}%</td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${d.codesPerPupil>avgCodesC?'color:#ef4444;font-weight:600':''}">${d.codesPerPupil.toFixed(1)}</td><td style="text-align:center">${d.pupils}</td><td style="text-align:center;color:#f97316">${d.sendPct}%</td><td style="text-align:center">${d.totalCodes}</td></tr>`;
-        classEl.innerHTML=`<div class="dw"><div class="dwt">Class Risk Matrix — Y${yearGroup}</div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Class Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${classData.length} classes</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th style="cursor:pointer" onclick="window._anCS.setSort(d=>d.sub)">Subject ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort(d=>d.cls)">Class ↕</th><th style="cursor:pointer" onclick="window._anCS.setSort(d=>d.teacher)">Teacher ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort(d=>d.attPct)">Att % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort(d=>d.codesPerPupil)">Codes/Pupil ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort(d=>d.pupils)">Pupils ↕</th><th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._anCS.setSort(d=>d.sendPct)">SEND % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort(d=>d.totalCodes)">Total Codes ↕</th></tr></thead><tbody id="an-class-tbody"></tbody></table></div></div>`;
+        classEl.innerHTML=`<div class="dw"><div class="dwt">Class Risk Matrix — Y${yearGroup}</div><div style="position:relative;height:400px"><canvas id="c-anClassChart"></canvas></div></div><div class="dw" style="margin-top:.5rem"><div class="dwt">Class Data <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${classData.length} classes</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th style="cursor:pointer" onclick="window._anCS.setSort('sub')">Subject ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('cls')">Class ↕</th><th style="cursor:pointer" onclick="window._anCS.setSort('teacher')">Teacher ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('attPct')">Att % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('codesPerPupil')">Codes/Pupil ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('pupils')">Pupils ↕</th><th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._anCS.setSort('sendPct')">SEND % ↕</th><th style="text-align:center;cursor:pointer" onclick="window._anCS.setSort('totalCodes')">Total Codes ↕</th></tr></thead><tbody id="an-class-tbody"></tbody></table></div></div>`;
         window._anCS=sortableTable('an-class-tbody',classData,renderCR,d=>d.codesPerPupil);
         window._anCS.render();
         sc2('anClassChart',new Chart(document.getElementById('c-anClassChart'),{type:'scatter',data:{datasets:scatterDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:8,padding:4,usePointStyle:true}},tooltip:{callbacks:{label:c=>{const pt=c.raw;return c.dataset.label+' Cls'+pt.cls+' ('+pt.teacher+'): Att '+pt.x+'%, '+pt.y.toFixed(1)+' c/p, '+pt.pupils+'p, '+pt.sendPct+'% SEND'}}}},scales:{x:{title:{display:true,text:'Attendance %',color:'#666666'},min:Math.max(75,Math.floor(Math.min(...classData.map(d=>d.attPct))-2)),max:100,ticks:{color:'#666666',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y:{title:{display:true,text:'Codes per Pupil',color:'#666666'},min:0,suggestedMax:Math.ceil(Math.max(...classData.map(d=>d.codesPerPupil))+1),ticks:{color:'#666666'},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}}}}));
