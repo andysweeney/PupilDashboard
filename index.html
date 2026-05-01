@@ -5441,8 +5441,9 @@ function rPeer(){
 
     // ── RENDER CLASS SCATTER ──
     const classEl=document.getElementById('an-class-scatter');
-    if(!classData.length){classEl.innerHTML='';}
+    if(!classData.length){classEl.innerHTML='<div style="color:red;padding:1rem">classData is empty — no classes found</div>';}
     else{
+      classEl.innerHTML=`<div style="color:green;padding:.5rem">classData: ${classData.length} classes. First: ${classData[0].sub} att=${classData[0].attPct} codes=${classData[0].codesPerPupil}</div>`;
       const avgAttC=classData.reduce((s,d)=>s+d.attPct,0)/classData.length;
       const avgCodesC=classData.reduce((s,d)=>s+d.codesPerPupil,0)/classData.length;
 
