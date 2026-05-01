@@ -5352,6 +5352,8 @@ function rPeer(){
     // ── SUBJECT RISK MATRIX ──
     // For each subject: avg attendance %, avg sanctions per pupil
     const subjData=[];
+    const _debugEl=document.getElementById('an-subj-scatter');
+    _debugEl.innerHTML=`<div style="color:var(--mu);padding:1rem">Building data for Y${yearGroup}... ink=${ink}, enrols=${enrols.length}, SUBS=${SUBS.length}, totalWeeks=${totalWeeks}</div>`;
     SUBS.forEach(sub=>{
       // Pupils taking this subject
       const pupils=new Set(enrols.filter(r=>r.t==='cls'&&r.s===sub&&r.u===null).map(r=>r.x));
