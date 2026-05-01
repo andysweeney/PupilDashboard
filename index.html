@@ -343,19 +343,35 @@ table.d tr:hover td{background:var(--sf2)}
     }
     DD.attByPeriodSubj=abps2;
 
-    // attAbsSubj: decompress date indices + subject keys
+    // attAbsSubj: decompress date indices + subject keys (now includes mark codes)
     if(DD.attAbsSubj){
       const expanded={};
       for(const[pi,byDate] of Object.entries(DD.attAbsSubj)){
         const flat=[];
         for(const[dateKey,lessons] of Object.entries(byDate)){
           const dateStr=DI[parseInt(dateKey)]||dateKey;
-          for(const[sk,period] of lessons) flat.push([dateStr,SKR[sk]||sk,period]);
+          for(const lesson of lessons){
+            const sk2=lesson[0],period=lesson[1],mark=lesson[2]||null;
+            flat.push([dateStr,SKR[sk2]||sk2,period,mark]);
+          }
         }
         flat.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:a[2]-b[2]);
         expanded[pi]=flat;
       }
       DD.attAbsSubj=expanded;
+    }
+
+    // attendanceMarks: decompress date indices
+    if(DD.attendanceMarks){
+      const expanded2={};
+      for(const[pi,byDate] of Object.entries(DD.attendanceMarks)){
+        expanded2[pi]={};
+        for(const[dateKey,marks] of Object.entries(byDate)){
+          const dateStr=DI[parseInt(dateKey)]||dateKey;
+          expanded2[pi][dateStr]=marks;
+        }
+      }
+      DD.attendanceMarks=expanded2;
     }
 
     // Sanctions: decompress date indices + subject keys
@@ -505,6 +521,27 @@ const TT_COLORS={
 // Read timetables from data.json (generated with school-wide teacher clash prevention)
 const TT_DATA=DD.timetables||{};
 const SANC_DET=DD.sanctionDetails||[];
+const SEN_STATUS=DD.senStatus||{};
+const SEN_LABELS={'K':'SEN Support','E':'EHCP','Add':'Additional Help','add':'Additional Help','Strat':'Strategies Applied','strat':'Strategies Applied','N':'SEN Monitoring'};
+const SEN_COLORS={'K':'#f97316','E':'#a78bfa','Add':'#38bdf8','add':'#38bdf8','Strat':'#34d399','strat':'#34d399','N':'#94a3b8'};
+const UNAUTH_MARKS=new Set(DD.config?.att_codes?.unauthorised_absent||['G','N','O','U','-','?']);
+function isUnauth(mark){return UNAUTH_MARKS.has(mark)}
+function senPill(px){
+  const code=SEN_STATUS[String(px)];
+  if(!code) return'';
+  const label=SEN_LABELS[code]||code;
+  const col=SEN_COLORS[code]||'#f97316';
+  return`<span class="fb2" style="background:${col}18;border:1px solid ${col}44;color:${col}">${label}</span>`;
+}
+function senPillShort(px){
+  const code=SEN_STATUS[String(px)];
+  if(!code) return'';
+  const label=SEN_LABELS[code]||code;
+  const col=SEN_COLORS[code]||'#f97316';
+  // Short version for tables
+  const short=code==='K'?'K':code==='E'?'EHCP':code.charAt(0).toUpperCase()+code.slice(1);
+  return`<span style="display:inline-block;padding:.05rem .25rem;border-radius:3px;font-size:.55rem;background:${col}18;border:1px solid ${col}44;color:${col};margin-left:.2rem">${short}</span>`;
+}
 
 // Render timetable for a pupil
 function renderTimetable(x){
@@ -774,8 +811,8 @@ function rP(){
 
   // Flags + header
   const fl=[];
-  if(lt.send)fl.push('<span class="fb2" style="background:#f9731618;border:1px solid #f9731644;color:#f97316">SEND</span>');
-  if(lt.ehcp)fl.push('<span class="fb2" style="background:#a78bfa18;border:1px solid #a78bfa44;color:#a78bfa">EHCP</span>');
+  if(lt.send){const sp=senPill(x);if(sp)fl.push(sp);else fl.push('<span class="fb2" style="background:#f9731618;border:1px solid #f9731644;color:#f97316">SEND</span>')}
+  if(lt.ehcp&&!SEN_STATUS[String(x)])fl.push('<span class="fb2" style="background:#a78bfa18;border:1px solid #a78bfa44;color:#a78bfa">EHCP</span>');
   if(lt.fsm)fl.push('<span class="fb2" style="background:#6488ff18;border:1px solid #6488ff44;color:#6488ff">FSM</span>');
   const leftTag=pu.left?'<span class="left-tag">LEFT SCHOOL</span>':'';
   const cYG=pu.left?`was Y11 in ${ink+4}-${ink+5}`:`Y${curYG(ink)}`;
@@ -1139,11 +1176,23 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   const abw={};
   pAbsRaw.forEach(r=>{const d2=typeof r==='string'?r:r[0];const m=localISO(gm(new Date(d2+'T12:00:00')));abw[m]=(abw[m]||0)+1});
 
-  let attP;
+  // Unauthorised absence per week
+  const uAbw={};
+  const pMarks=(DD.attendanceMarks||{})[String(x)]||{};
+  Object.entries(pMarks).forEach(([dt,marks])=>{
+    const m=localISO(gm(new Date(dt+'T12:00:00')));
+    const uCount=marks.filter(mk=>isUnauth(mk)).length;
+    if(uCount) uAbw[m]=(uAbw[m]||0)+uCount;
+  });
+
+  let attP,unauthP;
   if(!subjFilter){
     // Overall: weekly from absence counts vs total lessons
     const attR=wks.map(w=>{const tl=WLK[w];if(!tl)return null;const abs=abw[w]||0;return Math.max(0,Math.min(100,parseFloat(((tl-abs)/tl*100).toFixed(1))))});
     attP=[];let lv2=null;for(const v of attR){if(v!==null)lv2=v;attP.push(lv2)}
+    // Unauthorised line: 100% minus unauth absence rate
+    const uR=wks.map(w=>{const tl=WLK[w];if(!tl)return null;const uabs=uAbw[w]||0;return Math.max(0,Math.min(100,parseFloat(((tl-uabs)/tl*100).toFixed(1))))});
+    unauthP=[];let lv2u=null;for(const v of uR){if(v!==null)lv2u=v;unauthP.push(lv2u)}
   }else{
     // Subject-specific: use pre-computed termly data mapped onto weeks
     const pAS=(DD.attByPeriodSubj||{})[String(x)]||{};
@@ -1166,6 +1215,22 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
     // Fill nulls with carry-forward
     let lv3=null;
     attP=attP.map(v=>{if(v!==null)lv3=v;return lv3});
+
+    // Subject-specific unauthorised: count unauth absences for this subject per week
+    const pAbsSubjAll=(DD.attAbsSubj||{})[String(x)]||[];
+    const uSubjAbw={};
+    pAbsSubjAll.forEach(r=>{
+      if(r[1]===subjFilter&&r[3]&&isUnauth(r[3])){
+        const m=localISO(gm(new Date(r[0]+'T12:00:00')));
+        uSubjAbw[m]=(uSubjAbw[m]||0)+1;
+      }
+    });
+    // LPW for this subject
+    const grid3=TT_DATA[String(x)];
+    let sLPW2=0;
+    if(grid3){for(let dd=0;dd<5;dd++)for(let pp3=0;pp3<5;pp3++){const gc=grid3[dd]?.[pp3];if(gc&&(gc[0]===subjFilter||(gc.length===4&&gc[2]===subjFilter)))sLPW2++}}
+    const uSubjR=wks.map(w=>{if(!sLPW2)return null;const uabs=uSubjAbw[w]||0;return Math.max(0,Math.min(100,parseFloat(((sLPW2-uabs)/sLPW2*100).toFixed(1))))});
+    unauthP=[];let lv3u=null;for(const v of uSubjR){if(v!==null)lv3u=v;unauthP.push(lv3u)}
   }
 
   const tc=ps.filter(r=>r[1]===0).length,to=ps.filter(r=>r[1]===1).length,td=ps.filter(r=>r[1]===2).length;
@@ -1192,14 +1257,17 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   }
 
   const grpLabel=groupLabel||'Group Avg Att';
-  wrap.innerHTML=`<div class="dw"><div class="dwt">${title}<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:#f97316">●</span>${tc} <span style="color:#ef4444;margin-left:.3rem">●</span>${to} <span style="color:#7c3aed;margin-left:.3rem">●</span>${td} <span style="color:#34d399;margin-left:.3rem">━</span>Att% ${grpAttP?`<span style="color:#38bdf8;margin-left:.3rem">┈</span>${grpLabel}`:''}</span></div><div style="position:relative;height:clamp(170px,14vw,260px)"><canvas id="${cSancId}"></canvas></div><div id="${flgWId}" style="position:relative;margin-top:2px"><canvas id="${cFlgId}"></canvas></div><div id="${tchrWId}" style="position:relative;margin-top:2px"><canvas id="${cTchrId}"></canvas></div></div>`;
+  wrap.innerHTML=`<div class="dw"><div class="dwt">${title}<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:#f97316">●</span>${tc} <span style="color:#ef4444;margin-left:.3rem">●</span>${to} <span style="color:#7c3aed;margin-left:.3rem">●</span>${td} <span style="color:#34d399;margin-left:.3rem">━</span>Att% <span style="color:#ef4444;margin-left:.3rem">┈</span>Excl.Auth ${grpAttP?`<span style="color:#38bdf8;margin-left:.3rem">┈</span>${grpLabel}`:''}</span></div><div style="position:relative;height:clamp(170px,14vw,260px)"><canvas id="${cSancId}"></canvas></div><div id="${flgWId}" style="position:relative;margin-top:2px"><canvas id="${cFlgId}"></canvas></div><div id="${tchrWId}" style="position:relative;margin-top:2px"><canvas id="${cTchrId}"></canvas></div></div>`;
 
   const ds=TN.map((n,i)=>({label:n,data:wks.map(w=>wm[w][i]),backgroundColor:TC[i],borderRadius:i===2?2:0,borderSkipped:false,barPercentage:0.9,categoryPercentage:0.9,yAxisID:'y',order:2}));
   ds.push({label:'Attendance',data:attP,type:'line',borderColor:'#34d399',borderWidth:1.5,pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:true});
+  if(unauthP){
+    ds.push({label:'Excl. Authorised',data:unauthP,type:'line',borderColor:'#ef4444',borderWidth:1.2,borderDash:[4,3],pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:true});
+  }
   if(grpAttP){
     ds.push({label:grpLabel,data:grpAttP,type:'line',borderColor:'#38bdf8',borderWidth:1.5,borderDash:[4,3],pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:true});
   }
-  const allAttVals=[...(attP||[]).filter(v=>v!=null),...(grpAttP||[]).filter(v=>v!=null)];
+  const allAttVals=[...(attP||[]).filter(v=>v!=null),...(grpAttP||[]).filter(v=>v!=null),...(unauthP||[]).filter(v=>v!=null)];
   const y1Min=allAttVals.length?Math.max(0,Math.min(80,Math.min(...allAttVals)-5)):80;
   sc2(sancKey,new Chart(document.getElementById(cSancId),{type:'bar',data:{labels:wl,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#7a85a0',font:{family:'Outfit',size:8},boxWidth:7,padding:6}},tooltip:{callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',label:c=>c.dataset.yAxisID==='y1'?` ${c.dataset.label}: ${c.parsed.y}%`:` ${c.dataset.label}: ${c.parsed.y}`}}},scales:{x:{stacked:true,offset:true,ticks:{color:'#7a85a0',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#262d44'}},y:{stacked:true,position:'left',beginAtZero:true,ticks:{color:'#7a85a0',stepSize:1,font:{size:7}},grid:{color:'#262d4422'},border:{color:'#262d44'},afterFit:a=>{a.width=35}},y1:{position:'right',min:y1Min,max:100,ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#34d39944'},afterFit:a=>{a.width=35}}}}}));
 
@@ -2258,21 +2326,27 @@ function rBC(){
   const today=new Date();
   const todayISO=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 
+  // Find the latest sanction date for these pupils (not today — data may lag)
+  const allPxSet=new Set(allLR.map(r=>r[0]));
+  let latestSancDate=null;
+  SAN.forEach(s=>{if(allPxSet.has(s[0])&&s[2]<=todayISO&&(!latestSancDate||s[2]>latestSancDate))latestSancDate=s[2]});
+  const bcEndDate=latestSancDate||todayISO;
+
   // Build school days list
   const bcSD=[];
   Object.keys(DD.weekLessons||{}).sort().forEach(wk=>{
     for(let off=0;off<5;off++){
       const d=new Date(wk+'T12:00:00');d.setDate(d.getDate()+off);
       const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      if(iso<=todayISO) bcSD.push(iso);
+      if(iso<=bcEndDate) bcSD.push(iso);
     }
   });
   bcSD.sort();
 
   function bcRA(nSD,sancs){
     const cutIdx=Math.max(0,bcSD.length-nSD);
-    const cutISO=bcSD[cutIdx]||todayISO;
-    const f=sancs.filter(r=>r[2]>=cutISO&&r[2]<=todayISO);
+    const cutISO=bcSD[cutIdx]||bcEndDate;
+    const f=sancs.filter(r=>r[2]>=cutISO&&r[2]<=bcEndDate);
     return f.reduce((s,r)=>s+(sancWeight(r[1])),0)/(nSD/10);
   }
 
@@ -2291,7 +2365,7 @@ function rBC(){
     const px=r[0],pid=r[1],yg=r._yg;
     const pSan=SAN.filter(s=>s[0]===px);
     const s10=bcRA(10,pSan),s20=bcRA(20,pSan),s100=bcRA(100,pSan);
-    const sanCount10=pSan.filter(r=>r[2]>=bcSD[Math.max(0,bcSD.length-10)]&&r[2]<=todayISO).length;
+    const sanCount10=pSan.filter(r=>r[2]>=bcSD[Math.max(0,bcSD.length-10)]&&r[2]<=bcEndDate).length;
     const imm=s10>s20*CT_SC&&s20>0&&sanCount10>=CT_MN;
     const grad=s10>s100*CT_SC&&s100>0&&sanCount10>=CT_MN;
     if(imm||grad) allSubjConcerns.push({px,pid,yg,imm,grad,tg:getTG(px),s10,s20,s100});
@@ -2301,7 +2375,7 @@ function rBC(){
   let allSubjHtml='';
   if(allSubjConcerns.length){
     const rows=allSubjConcerns.map(c=>`<tr>
-      <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(c.px,c.pid)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(c.px,c.pid)}${senPillShort(c.px)}</td>
       <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${c.yg}</td>
       <td style="text-align:center">${c.imm?tick:blank}</td>
       <td style="text-align:center">${c.grad?tick:blank}</td>
@@ -2334,7 +2408,7 @@ function rBC(){
     subjects.forEach(subj=>{
       const sSan=pSan.filter(s=>(s[3]||'Non-Lesson')===subj);
       const s10=bcRA(10,sSan),s20=bcRA(20,sSan),s100=bcRA(100,sSan);
-      const sSanCount10=sSan.filter(r=>r[2]>=bcSD[Math.max(0,bcSD.length-10)]&&r[2]<=todayISO).length;
+      const sSanCount10=sSan.filter(r=>r[2]>=bcSD[Math.max(0,bcSD.length-10)]&&r[2]<=bcEndDate).length;
       const imm=s10>s20*CT_SC&&s20>0&&sSanCount10>=CT_MN;
       const grad=s10>s100*CT_SC&&s100>0&&sSanCount10>=CT_MN;
       if(imm||grad){
@@ -2348,7 +2422,7 @@ function rBC(){
   let subjHtml='';
   if(subjConcerns.length){
     const rows=subjConcerns.map(c=>`<tr>
-      <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(c.px,c.pid)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(c.px,c.pid)}${senPillShort(c.px)}</td>
       <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${c.yg}</td>
       <td style="text-align:center">${c.imm?tick:blank}</td>
       <td style="text-align:center">${c.grad?tick:blank}</td>
@@ -2668,8 +2742,9 @@ function rSEND(){
 
     const filterLabel=ygVal==='all'?'All Years':'Y'+ygVal;
     const sinceLabel=flagName==='SEND'?'SEND Since':flagName==='EHCP'?'EHCP Since':'FSM Since';
-    return`<div class="dw" style="margin-bottom:1rem"><div class="dwt"><span style="color:${flagColor}">${flagName}</span> Pupils <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${filterLabel} · ${pupils.length} pupil${pupils.length!==1?'s':''}</span></div>
-      <div style="overflow-x:auto"><table class="d"><thead><tr>
+    const tableId=`send-tbl-${tablePrefix}`;
+    return`<div class="dw" style="margin-bottom:1rem;padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=document.getElementById('${tableId}');bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span><span style="color:${flagColor}">${flagName}</span> Pupils</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${filterLabel} · ${pupils.length} pupil${pupils.length!==1?'s':''}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>
+      <div id="${tableId}" style="padding:0 .5rem .75rem"><div style="overflow-x:auto"><table class="d"><thead><tr>
         <th>Name</th><th style="text-align:center">Year</th><th>TG (Rankings)</th><th>${sinceLabel}</th>
         <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center;color:#ef4444">On-Calls</th><th style="text-align:center;color:#7c3aed">Det.</th>
         <th style="text-align:center">YTD Att.</th><th style="text-align:center">TTD Att.</th>
@@ -2677,7 +2752,32 @@ function rSEND(){
         <th style="text-align:center">Ability</th><th style="text-align:center">Ab. LT</th><th style="text-align:center">Ab. LY</th>
       </tr></thead><tbody>${yearRow}${nonRow}${rows}</tbody></table></div>
       <div style="font-size:.6rem;color:var(--mu);margin-top:.4rem">Rankings in brackets: TG rank for overall, class rank for per-subject · LT = Last Term · LY = Last Year · YTD/TTD = Year/Term to Date attendance · ▲ improved · ▼ declined · Click row to expand</div>
-    </div>`;
+      </div></div>`;
+  }
+
+  // Collect per-SEN-code groups
+  function collectBySenCode(code,label){
+    const pupils=[];
+    for(const[ik,periods]of Object.entries(PRG)){
+      const ink=parseInt(ik.slice(1));
+      const yg=curYG(ink);
+      if(yg<7||yg>11) continue;
+      if(ygVal!=='all'&&yg!==parseInt(ygVal)) continue;
+      const pp=ygPeriods(yg);
+      if(!pp.length) continue;
+      const lp=pp[pp.length-1];
+      const lr=ygRows(yg,lp);
+      lr.forEach(r=>{
+        const px=r[0];
+        const senCode=SEN_STATUS[String(px)];
+        if(senCode!==code) return;
+        // Reuse the same data from the full SEND collection
+        const match=allSendPupils.find(p=>p.px===px);
+        if(match) pupils.push(match);
+      });
+    }
+    pupils.sort((a,b)=>a.yg-b.yg||a.pid.localeCompare(b.pid));
+    return pupils;
   }
 
   const sendPupils=collectFlagged(4,'SEND');
@@ -2717,7 +2817,32 @@ function rSEND(){
   const ehcpAvgs=computeAvgs(allPupilData,ehcpPxSet);
   const fsmAvgs=computeAvgs(allPupilData,fsmPxSet);
 
-  out.innerHTML=buildTable(sendPupils,'SEND','#f97316','send-exp',sendAvgs.year,sendAvgs.nonFlag)+buildTable(ehcpPupils,'EHCP','#a78bfa','ehcp-exp',ehcpAvgs.year,ehcpAvgs.nonFlag)+buildTable(fsmPupils,'FSM','#6488ff','fsm-exp',fsmAvgs.year,fsmAvgs.nonFlag);
+  // Per-SEN-code groups
+  function collectBySenCode(code){
+    return allPupilData.filter(p=>SEN_STATUS[String(p.px)]===code);
+  }
+  const senKPupils=collectBySenCode('K');
+  const senEPupils=collectBySenCode('E');
+  const senAddPupils=[...collectBySenCode('Add'),...collectBySenCode('add')];
+  const senStratPupils=[...collectBySenCode('Strat'),...collectBySenCode('strat')];
+  const senNPupils=collectBySenCode('N');
+
+  const kAvgs=computeAvgs(allPupilData,new Set(senKPupils.map(p=>p.px)));
+  const addAvgs=computeAvgs(allPupilData,new Set(senAddPupils.map(p=>p.px)));
+  const stratAvgs=computeAvgs(allPupilData,new Set(senStratPupils.map(p=>p.px)));
+  const nAvgs=computeAvgs(allPupilData,new Set(senNPupils.map(p=>p.px)));
+
+  let html='';
+  html+=buildTable(sendPupils,'All SEND','#f97316','send-exp',sendAvgs.year,sendAvgs.nonFlag);
+  html+=buildTable(ehcpPupils,'EHCP','#a78bfa','ehcp-exp',ehcpAvgs.year,ehcpAvgs.nonFlag);
+  html+=buildTable(fsmPupils,'FSM','#6488ff','fsm-exp',fsmAvgs.year,fsmAvgs.nonFlag);
+  html+=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:1rem;margin-top:1rem;border-top:1px solid var(--bd)">SEN Sub-Categories</div>`;
+  html+=buildTable(senKPupils,'SEN Support (K)','#f97316','senk-exp',kAvgs.year,kAvgs.nonFlag);
+  html+=buildTable(senEPupils,'EHCP (E)','#a78bfa','sene-exp',ehcpAvgs.year,ehcpAvgs.nonFlag);
+  html+=buildTable(senAddPupils,'Additional Help','#38bdf8','senadd-exp',addAvgs.year,addAvgs.nonFlag);
+  html+=buildTable(senStratPupils,'Strategies Applied','#34d399','senstrat-exp',stratAvgs.year,stratAvgs.nonFlag);
+  html+=buildTable(senNPupils,'SEN Monitoring (N)','#94a3b8','senn-exp',nAvgs.year,nAvgs.nonFlag);
+  out.innerHTML=html;
 }
 
 function rPP(){
@@ -3003,12 +3128,14 @@ function renderAttTable(){
     if(c){subjLPW[c[0]]=(subjLPW[c[0]]||0)+1;totalLPW++}
   }
 
-  // Count absences per subject in range
+  // Count absences per subject in range (split by auth/unauth)
   const subjAbsCount={};
+  const subjUnauthCount={};
   pAbsSubj.forEach(r=>{
-    // r = [date, subject, period]
+    // r = [date, subject, period, mark]
     if(r[0]>=ayStart&&r[0]<=ayEnd){
       subjAbsCount[r[1]]=(subjAbsCount[r[1]]||0)+1;
+      if(r[3]&&isUnauth(r[3])) subjUnauthCount[r[1]]=(subjUnauthCount[r[1]]||0)+1;
     }
   });
 
@@ -3085,6 +3212,9 @@ function renderAttTable(){
     const lessonsStr=totalLessons>0?`${attended}/${totalLessons}`:'—';
     const clsStr=clsAtt!=null?clsAtt.toFixed(1)+'%':'—';
     const tgStr=tgAtt!=null?tgAtt.toFixed(1)+'%':'—';
+    const unauthAbs=subjUnauthCount[s]||0;
+    const unauthPct=totalLessons>0?((unauthAbs/totalLessons)*100).toFixed(1)+'%':'—';
+    const unauthCol=unauthAbs===0?'color:var(--mu)':parseFloat(unauthPct)>=5?'color:#ef4444;font-weight:600':parseFloat(unauthPct)>=2?'color:#f97316':'color:var(--mu)';
 
     return`<tr style="${bgStyle}">
       <td style="font-weight:500;font-size:.72rem">${s}</td>
@@ -3092,6 +3222,7 @@ function renderAttTable(){
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--mu)">${lessonsStr}</td>
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${clsStr}</td>
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--mu)">${tgStr}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.72rem;${unauthCol}">${unauthPct}</td>
     </tr>`;
   }).join('');
 
@@ -3100,6 +3231,8 @@ function renderAttTable(){
   const allAbs=Object.values(subjAbsCount).reduce((a,b)=>a+b,0);
   const allAttended=totalAllLessons-allAbs;
   const allPct=totalAllLessons>0?((allAttended/totalAllLessons)*100).toFixed(1)+'%':'—';
+  const allUnauth=Object.values(subjUnauthCount).reduce((a,b)=>a+b,0);
+  const allUnauthPct=totalAllLessons>0?((allUnauth/totalAllLessons)*100).toFixed(1)+'%':'—';
 
   container.innerHTML=`<div style="overflow-x:auto"><table class="d"><thead><tr>
     <th>Subject</th>
@@ -3107,6 +3240,7 @@ function renderAttTable(){
     <th style="text-align:center">Attended</th>
     <th style="text-align:center">Class Avg %</th>
     <th style="text-align:center">TG Avg %</th>
+    <th style="text-align:center;color:#ef4444">Unauth %</th>
   </tr></thead><tbody>${rows}
   <tr style="border-top:2px solid var(--bd);font-weight:600">
     <td>Overall</td>
@@ -3114,6 +3248,7 @@ function renderAttTable(){
     <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--mu)">${totalAllLessons>0?`${allAttended}/${totalAllLessons}`:'—'}</td>
     <td style="text-align:center;color:var(--mu)">—</td>
     <td style="text-align:center;color:var(--mu)">—</td>
+    <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:#ef4444">${allUnauthPct}</td>
   </tr></tbody></table></div>
   <div style="font-size:.6rem;color:var(--mu);margin-top:.4rem">Row shading: <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.10);border-radius:2px;vertical-align:middle"></span> 5%+ below class avg <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.18);border-radius:2px;vertical-align:middle;margin-left:.4rem"></span> 10%+ below <span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,.25);border-radius:2px;vertical-align:middle;margin-left:.4rem"></span> 15%+ below</div>`;
 }
@@ -4230,7 +4365,7 @@ function peerBuildSelects(id){
     <select data-peer="${id}" data-f="intake" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${intOpts}</select>
     <select data-peer="${id}" data-f="fsm" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">FSM: Any</option><option value="Y">FSM: Y</option><option value="N">FSM: N</option></select>
     <select data-peer="${id}" data-f="ehcp" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">EHCP: Any</option><option value="Y">EHCP: Y</option><option value="N">EHCP: N</option></select>
-    <select data-peer="${id}" data-f="send" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">SEND: Any</option><option value="Y">SEND: Y</option><option value="N">SEND: N</option></select>
+    <select data-peer="${id}" data-f="send" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">SEND: Any</option><option value="Y">Any SEND</option><option value="N">No SEND</option><option value="K">SEN Support</option><option value="E">EHCP</option><option value="Add">Additional Help</option><option value="Strat">Strategies</option><option value="Ncode">Monitoring</option></select>
     <select data-peer="${id}" data-f="gender" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">Gender: Both</option><option value="M">Male</option><option value="F">Female</option></select>
     <select data-peer="${id}" data-f="subject" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${subjOpts}</select>
     <select data-peer="${id}" data-f="attband" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">Att: Any</option><option value="100">100%</option><option value="97-99">97-99%</option><option value="95-97">95-97%</option><option value="90-95">90-95%</option><option value="85-90">85-90%</option><option value="lt85">&lt;85%</option></select>
@@ -4284,6 +4419,11 @@ function peerFilterPupils(filters){
     // SEND/EHCP/FSM flags from progress row
     if(send==='Y'&&!r[4]) return false;
     if(send==='N'&&r[4]) return false;
+    if(send==='K'&&SEN_STATUS[String(px)]!=='K') return false;
+    if(send==='E'&&SEN_STATUS[String(px)]!=='E') return false;
+    if(send==='Add'&&SEN_STATUS[String(px)]!=='Add'&&SEN_STATUS[String(px)]!=='add') return false;
+    if(send==='Strat'&&SEN_STATUS[String(px)]!=='Strat'&&SEN_STATUS[String(px)]!=='strat') return false;
+    if(send==='Ncode'&&SEN_STATUS[String(px)]!=='N') return false;
     if(ehcp==='Y'&&!r[5]) return false;
     if(ehcp==='N'&&r[5]) return false;
     if(fsm==='Y'&&!r[6]) return false;
