@@ -117,42 +117,11 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
-<div style="display:flex;align-items:center;gap:.5rem;margin-left:auto">
-  <button class="tb" onclick="showCTModal()" style="border:1px solid rgba(255,255,255,.3)">⚙ Concern Thresholds</button>
+<div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
   <span id="ct-display" style="font-size:.72rem;color:#ffffff"></span>
-  <button class="tb" onclick="showSWModal()" style="border:1px solid rgba(255,255,255,.3)">⚖ Sanction Weightings</button>
   <span id="sw-display" style="font-size:.72rem;color:#ffffff"></span>
+  <span id="ap-display" style="font-size:.72rem;color:#ffffff"></span>
 </div>
-<div id="ct-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:1.5rem;z-index:200;min-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
-  <div style="font-size:.85rem;font-weight:600;margin-bottom:1rem">Concern Thresholds</div>
-  <div style="display:flex;flex-direction:column;gap:.8rem">
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="How many Ability Grades Change is a concern">Ability Concern Trigger</label><input id="ct-ab" type="number" min="1" max="7" step="1" value="2" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="How many Effort Grades Change is a concern">Effort Concern Trigger</label><input id="ct-ef" type="number" min="1" max="4" step="1" value="2" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Multiple of Previous Rolling Average that becomes a concern">Sanctions Multiplier</label><input id="ct-sc" type="number" min="0.5" max="5" step="0.1" value="1.5" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Minimum Number of Sanctions that become a concern — if total sanctions in last 10 school days is below this, no concern is raised">Min Sanctions for Concern</label><input id="ct-mn" type="number" min="0" max="50" step="1" value="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-    <div style="border-top:1px solid var(--bd);padding-top:.8rem;margin-top:.4rem"><div style="font-size:.75rem;font-weight:600;color:var(--tx);margin-bottom:.6rem">Absence Pattern Detection</div>
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Minimum number of absences in a single day/period slot before flagging a pattern">Min Absences per Slot</label><input id="ct-ap-min" type="number" min="1" max="20" step="1" value="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div></div>
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Minimum percentage of total absences concentrated in one day before flagging">Min % Concentration (Day)</label><input id="ct-ap-pct" type="number" min="10" max="100" step="5" value="40" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Minimum absence rate for a specific day+period slot (e.g. always absent Friday P1) — percentage of available instances of that slot">Min % Absence Rate (Slot)</label><input id="ct-ap-slot" type="number" min="10" max="100" step="5" value="30" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-  </div>
-  <div style="display:flex;gap:.5rem;margin-top:1.2rem">
-    <button onclick="applyCT()" style="flex:1;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem;border-radius:6px;cursor:pointer">Apply</button>
-    <button onclick="hideCTModal()" style="flex:1;background:var(--sf2);color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.8rem;padding:.5rem;border-radius:6px;cursor:pointer">Cancel</button>
-  </div>
-</div>
-<div id="sw-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:1.5rem;z-index:200;min-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
-  <div style="font-size:.85rem;font-weight:600;margin-bottom:1rem">Sanction Weightings</div>
-  <div style="display:flex;flex-direction:column;gap:.8rem">
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Severity weight applied to each Code sanction">Code Weight</label><input id="sw-code" type="number" min="0" max="20" step="1" value="1" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Severity weight applied to each On-Call sanction">On-Call Weight</label><input id="sw-oncall" type="number" min="0" max="20" step="1" value="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-    <div><label style="font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem;cursor:help" title="Severity weight applied to each Detention sanction">Detention Weight</label><input id="sw-det" type="number" min="0" max="20" step="1" value="5" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:100%"></div>
-  </div>
-  <div style="display:flex;gap:.5rem;margin-top:1.2rem">
-    <button onclick="applySW()" style="flex:1;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem;border-radius:6px;cursor:pointer">Apply</button>
-    <button onclick="hideSWModal()" style="flex:1;background:var(--sf2);color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.8rem;padding:.5rem;border-radius:6px;cursor:pointer">Cancel</button>
-  </div>
-</div>
-<div id="ct-overlay" onclick="hideCTModal();hideSWModal()" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:199"></div>
 </header>
 
 <div id="vw-pupil" class="vw on">
@@ -494,27 +463,11 @@ function applyCT(){
   AP_MIN=parseInt(document.getElementById('ct-ap-min').value)||3;
   AP_PCT=parseInt(document.getElementById('ct-ap-pct').value)||40;
   AP_SLOT=parseInt(document.getElementById('ct-ap-slot').value)||30;
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
-  document.getElementById('ct-modal').classList.remove('ct-show');
-  document.getElementById('ct-overlay').style.display='none';
-  const activeTab=document.querySelector('.tb.on');
-  if(activeTab) activeTab.click();
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
+  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
 }
-function showCTModal(){
-  document.getElementById('ct-ab').value=CT_AB;
-  document.getElementById('ct-ef').value=CT_EF;
-  document.getElementById('ct-sc').value=CT_SC;
-  document.getElementById('ct-mn').value=CT_MN;
-  document.getElementById('ct-ap-min').value=AP_MIN;
-  document.getElementById('ct-ap-pct').value=AP_PCT;
-  document.getElementById('ct-ap-slot').value=AP_SLOT;
-  document.getElementById('ct-modal').classList.add('ct-show');
-  document.getElementById('ct-overlay').style.display='block';
-}
-function hideCTModal(){
-  document.getElementById('ct-modal').classList.remove('ct-show');
-  document.getElementById('ct-overlay').style.display='none';
-}
+function showCTModal(){}
+function hideCTModal(){}
 
 // Sanction weightings (global)
 let SW_CODE=1, SW_ONCALL=3, SW_DET=5;
@@ -524,22 +477,9 @@ function applySW(){
   SW_ONCALL=parseInt(document.getElementById('sw-oncall').value)||3;
   SW_DET=parseInt(document.getElementById('sw-det').value)||5;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
-  document.getElementById('sw-modal').style.display='none';
-  document.getElementById('ct-overlay').style.display='none';
-  const activeTab=document.querySelector('.tb.on');
-  if(activeTab) activeTab.click();
 }
-function showSWModal(){
-  document.getElementById('sw-code').value=SW_CODE;
-  document.getElementById('sw-oncall').value=SW_ONCALL;
-  document.getElementById('sw-det').value=SW_DET;
-  document.getElementById('sw-modal').style.display='block';
-  document.getElementById('ct-overlay').style.display='block';
-}
-function hideSWModal(){
-  document.getElementById('sw-modal').style.display='none';
-  document.getElementById('ct-overlay').style.display='none';
-}
+function showSWModal(){}
+function hideSWModal(){}
 function fN(v,d=1){return v!=null?v.toFixed(d):'No Data'}
 function aC(v){return v==null?'var(--mu)':v>=4?'#34d399':v<=2?'#ef4444':'var(--mu)'}
 function eC(v){return v==null?'var(--mu)':v<=1.5?'#34d399':v>=3?'#ef4444':'var(--mu)'}
@@ -1108,13 +1048,18 @@ function renderTimetable(x){
         }
         const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#1a1a1a;text-shadow:0 0 2px rgba(255,255,255,.6)">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#1a1a1a;text-shadow:0 0 2px rgba(255,255,255,.6)">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.65rem;font-weight:500;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})();
 
+        // Teacher session info from slotTeachers
+        const _st=(DD.slotTeachers||{})[String(x)];
+        const _slotT=_st?_st[d]?.[p]:null;
+        const teacherHtml=_slotT&&_slotT.length?`<div style="font-size:.42rem;color:var(--mu);margin-top:.15rem;line-height:1.2">${_slotT.map(t=>`T${t[0]} (${t[1]})`).join(' · ')}</div>`:'';
+
         if(isSplit){
           // Split cell: two halves with per-subject sanctions
           const sanc1=sancForSubj(sk2,subj);
           const sanc2=sancForSubj(sk2,subj2);
-          html+=`<div class="tt-cell" style="padding:0;${heat}"><div style="border-left:2px solid ${col};padding:.2rem .3rem;border-bottom:1px dashed var(--bd)"><span class="tt-subj" style="font-size:.55rem">${subj}</span><span class="tt-tchr" style="font-size:.45rem">${tchr}</span>${sanc1?`<div>${sanc1}</div>`:''}</div><div style="border-left:2px solid ${col2};padding:.2rem .3rem"><span class="tt-subj" style="font-size:.55rem">${subj2}</span><span class="tt-tchr" style="font-size:.45rem">${tchr2}</span>${sanc2?`<div>${sanc2}</div>`:''}</div></div>`;
+          html+=`<div class="tt-cell" style="padding:0;${heat}"><div style="border-left:2px solid ${col};padding:.2rem .3rem;border-bottom:1px dashed var(--bd)"><span class="tt-subj" style="font-size:.55rem">${subj}</span><span class="tt-tchr" style="font-size:.45rem">${tchr}</span>${sanc1?`<div>${sanc1}</div>`:''}</div><div style="border-left:2px solid ${col2};padding:.2rem .3rem"><span class="tt-subj" style="font-size:.55rem">${subj2}</span><span class="tt-tchr" style="font-size:.45rem">${tchr2}</span>${sanc2?`<div>${sanc2}</div>`:''}</div>${teacherHtml?`<div style="padding:0 .3rem .15rem">${teacherHtml}</div>`:''}</div>`;
         }else{
-          html+=`<div class="tt-cell" style="border-left:2px solid ${col};${heat}"><span class="tt-subj">${subj}</span><span class="tt-tchr">${tchr}</span>${sancHtml}</div>`;
+          html+=`<div class="tt-cell" style="border-left:2px solid ${col};${heat}"><span class="tt-subj">${subj}</span><span class="tt-tchr">${tchr}</span>${sancHtml}${teacherHtml}</div>`;
         }
       }else{
         html+=`<div class="tt-cell"><span style="color:var(--mu)">—</span></div>`;
@@ -2850,27 +2795,42 @@ function rBC(){
   const today=new Date();
   const todayISO=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 
-  // Find the latest sanction date for these pupils (not today — data may lag)
-  const allPxSet=new Set(allLR.map(r=>r[0]));
-  let latestSancDate=null;
-  SAN.forEach(s=>{if(allPxSet.has(s[0])&&s[2]<=todayISO&&(!latestSancDate||s[2]>latestSancDate))latestSancDate=s[2]});
-  const bcEndDate=latestSancDate||todayISO;
+  // Find latest sanction date PER YEAR GROUP for rolling window anchoring
+  const ygLatest={};
+  allLR.forEach(r=>{
+    const yg=r._yg;
+    const px=r[0];
+    SAN.forEach(s=>{
+      if(s[0]===px&&s[2]<=todayISO){
+        if(!ygLatest[yg]||s[2]>ygLatest[yg]) ygLatest[yg]=s[2];
+      }
+    });
+  });
 
-  // Build school days list
+  // Build school days list (use overall latest for the list)
+  const allLatest=Object.values(ygLatest).sort().pop()||todayISO;
   const bcSD=[];
   Object.keys(DD.weekLessons||{}).sort().forEach(wk=>{
     for(let off=0;off<5;off++){
       const d=new Date(wk+'T12:00:00');d.setDate(d.getDate()+off);
       const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      if(iso<=bcEndDate) bcSD.push(iso);
+      if(iso<=allLatest) bcSD.push(iso);
     }
   });
   bcSD.sort();
 
-  function bcRA(nSD,sancs){
-    const cutIdx=Math.max(0,bcSD.length-nSD);
-    const cutISO=bcSD[cutIdx]||bcEndDate;
-    const f=sancs.filter(r=>r[2]>=cutISO&&r[2]<=bcEndDate);
+  // Per-year-group school days lists
+  const ygSD={};
+  for(const[yg,latest]of Object.entries(ygLatest)){
+    ygSD[yg]=bcSD.filter(d=>d<=latest);
+  }
+
+  function bcRA(nSD,sancs,yg){
+    const sd=ygSD[yg]||bcSD;
+    const endDate=ygLatest[yg]||allLatest;
+    const cutIdx=Math.max(0,sd.length-nSD);
+    const cutISO=sd[cutIdx]||endDate;
+    const f=sancs.filter(r=>r[2]>=cutISO&&r[2]<=endDate);
     return f.reduce((s,r)=>s+(sancWeight(r[1])),0)/(nSD/10);
   }
 
@@ -2888,8 +2848,10 @@ function rBC(){
   allLR.forEach(r=>{
     const px=r[0],pid=r[1],yg=r._yg;
     const pSan=SAN.filter(s=>s[0]===px);
-    const s10=bcRA(10,pSan),s20=bcRA(20,pSan),s100=bcRA(100,pSan);
-    const sanCount10=pSan.filter(r=>r[2]>=bcSD[Math.max(0,bcSD.length-10)]&&r[2]<=bcEndDate).length;
+    const s10=bcRA(10,pSan,yg),s20=bcRA(20,pSan,yg),s100=bcRA(100,pSan,yg);
+    const _ygSD=ygSD[yg]||bcSD;
+    const _ygEnd=ygLatest[yg]||allLatest;
+    const sanCount10=pSan.filter(r=>r[2]>=_ygSD[Math.max(0,_ygSD.length-10)]&&r[2]<=_ygEnd).length;
     const imm=s10>s20*CT_SC&&s20>0&&sanCount10>=CT_MN;
     const grad=s10>s100*CT_SC&&s100>0&&sanCount10>=CT_MN;
     if(imm||grad){
@@ -2962,8 +2924,10 @@ function rBC(){
     const subjects=[...new Set(pSan.map(s=>s[3]||'Non-Lesson'))];
     subjects.forEach(subj=>{
       const sSan=pSan.filter(s=>(s[3]||'Non-Lesson')===subj);
-      const s10=bcRA(10,sSan),s20=bcRA(20,sSan),s100=bcRA(100,sSan);
-      const sSanCount10=sSan.filter(r=>r[2]>=bcSD[Math.max(0,bcSD.length-10)]&&r[2]<=bcEndDate).length;
+      const s10=bcRA(10,sSan,yg),s20=bcRA(20,sSan,yg),s100=bcRA(100,sSan,yg);
+      const _ygSD2=ygSD[yg]||bcSD;
+      const _ygEnd2=ygLatest[yg]||allLatest;
+      const sSanCount10=sSan.filter(r=>r[2]>=_ygSD2[Math.max(0,_ygSD2.length-10)]&&r[2]<=_ygEnd2).length;
       const imm=s10>s20*CT_SC&&s20>0&&sSanCount10>=CT_MN;
       const grad=s10>s100*CT_SC&&s100>0&&sSanCount10>=CT_MN;
       if(imm||grad){
@@ -3017,7 +2981,13 @@ function rBC(){
     subjHtml=`<div class="dw" style="margin-top:1rem"><div class="dwt">Subject-Specific Behavioural Concerns</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No subject-specific behavioural concerns for ${headerNote}</div></div>`;
   }
 
-  out.innerHTML=allSubjHtml+subjHtml;
+  // Count per year group
+  const ygCounts={};
+  allLR.forEach(r=>{ygCounts[r._yg]=(ygCounts[r._yg]||0)+1});
+  const ygSummary=Object.entries(ygCounts).sort((a,b)=>a[0]-b[0]).map(([yg,n])=>`Y${yg}: ${n}`).join(' · ');
+
+  const ygAnchorStr=Object.entries(ygLatest).map(([yg,d])=>`Y${yg}: ${d}`).join(' · ');
+  out.innerHTML=`<div style="font-size:.68rem;color:var(--mu);margin-bottom:.6rem">${ygSummary} pupils scanned · Anchored: ${ygAnchorStr} · ${bcSD.length} school days · All-Subject: ${allSubjConcerns.length} flagged · Per-Subject: ${subjConcerns.length} flagged</div>`+allSubjHtml+subjHtml;
 }
 
 // ── SEND FOCUS VIEW ──
@@ -3140,7 +3110,8 @@ function rSEND(){
         const ytdAttPct=ytdTotalLessons>0?((ytdTotalLessons-ytdAbs)/ytdTotalLessons*100).toFixed(1):'—';
 
         // TTD Attendance (current term)
-        const ttdAbs=pAbsAll.filter(d=>d>=ttdStart&&d<=ttdEndCap).length;
+        const _sAbsTtd=countAbsPeriods(px,ttdStart,ttdEndCap);
+        const ttdAbs=_sAbsTtd.total;
         let ttdTotalLessons=0;
         for(const[w,tl]of Object.entries(WLK)){if(w>=ttdStart&&w<=ttdEndCap)ttdTotalLessons+=tl}
         const ttdAttPct=ttdTotalLessons>0?((ttdTotalLessons-ttdAbs)/ttdTotalLessons*100).toFixed(1):'—';
@@ -5005,6 +4976,7 @@ function rCC(){
   // Initialise concern threshold display
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
+  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
 })();
 
   // Expose functions called from HTML attributes to global scope
@@ -5759,7 +5731,42 @@ function rPeer(){
       <div style="display:flex;align-items:center;gap:.8rem;margin-top:.5rem"><button onclick="window._adminExport()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;cursor:pointer">Save</button><span style="font-size:.65rem;color:var(--mu)">Changes take effect immediately. Save downloads the current config for use in future imports.</span></div>
     </div>`;
 
-    out.innerHTML=summaryHtml+attHtml+senHtml+incHtml;
+    // Thresholds & Weightings section
+    const inputStyle='background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:"JetBrains Mono",monospace;font-size:.85rem;padding:.4rem .6rem;border-radius:6px;width:80px';
+    const labelStyle='font-size:.7rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.25rem';
+    
+    const threshHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Concern Thresholds & Weightings</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.2rem;padding:.5rem 0">
+        <div>
+          <div style="font-size:.75rem;font-weight:600;color:var(--tx);margin-bottom:.6rem">Concern Thresholds</div>
+          <div style="display:flex;flex-direction:column;gap:.6rem">
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="How many Ability Grades Change is a concern">Ability Trigger</label><input id="ct-ab" type="number" min="1" max="7" step="1" value="${CT_AB}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="How many Effort Grades Change is a concern">Effort Trigger</label><input id="ct-ef" type="number" min="1" max="4" step="1" value="${CT_EF}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Multiple of Previous Rolling Average that becomes a concern">Sanctions Multiplier</label><input id="ct-sc" type="number" min="0.5" max="5" step="0.1" value="${CT_SC}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum Number of Sanctions that become a concern">Min Sanctions</label><input id="ct-mn" type="number" min="0" max="50" step="1" value="${CT_MN}" style="${inputStyle}"></div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:.75rem;font-weight:600;color:var(--tx);margin-bottom:.6rem">Absence Pattern Detection</div>
+          <div style="display:flex;flex-direction:column;gap:.6rem">
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum absences in a single slot before flagging">Min Absences/Slot</label><input id="ct-ap-min" type="number" min="1" max="20" step="1" value="${AP_MIN}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Min % of total absences in one day">Min % Conc. (Day)</label><input id="ct-ap-pct" type="number" min="10" max="100" step="5" value="${AP_PCT}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Min absence rate for a specific slot">Min % Rate (Slot)</label><input id="ct-ap-slot" type="number" min="10" max="100" step="5" value="${AP_SLOT}" style="${inputStyle}"></div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:.75rem;font-weight:600;color:var(--tx);margin-bottom:.6rem">Sanction Weightings</div>
+          <div style="display:flex;flex-direction:column;gap:.6rem">
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Weight for Code sanctions">Code Weight</label><input id="sw-code" type="number" min="0" max="20" step="1" value="${SW_CODE}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Weight for On-Call sanctions">On-Call Weight</label><input id="sw-oncall" type="number" min="0" max="20" step="1" value="${SW_ONCALL}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Weight for Detention sanctions">Detention Weight</label><input id="sw-det" type="number" min="0" max="20" step="1" value="${SW_DET}" style="${inputStyle}"></div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:.8rem"><button onclick="applyCT();applySW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;cursor:pointer">Apply Changes</button></div>
+    </div>`;
+
+    out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml;
   }
 
   // Admin change handlers
