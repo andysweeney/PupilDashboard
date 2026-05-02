@@ -5677,6 +5677,10 @@ function rPeer(){
 
   window.popTG=popTG;
   window.rTG=rTG;
+  // Reverse subject key map for timetable lookups
+  const _SKR2={};
+  if(DD.subjectKeys) Object.entries(DD.subjectKeys).forEach(([name,key])=>{_SKR2[key]=name});
+
   // ── SANCTIONS ANALYSIS ──
   // Compute disproportionate sanctions for a pupil
   function getSanctionsConcentration(px){
@@ -5694,7 +5698,7 @@ function rPeer(){
       for(let p=0;p<5;p++){
         const cell=grid[d]?.[p];
         if(cell){
-          const subj=SKR[cell[0]]||cell[0];
+          const subj=_SKR2[cell[0]]||cell[0];
           subjLPW[subj]=(subjLPW[subj]||0)+1;
         }
       }
