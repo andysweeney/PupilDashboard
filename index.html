@@ -6511,25 +6511,25 @@ function rPeer(){
     // Pupil concerns table
     if(pupilConcerns.length){
       const pRows=pupilConcerns.map(p=>{
-        const sevDot=p.maxSeverity==='red'?'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:.3rem"></span>':'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f97316;margin-right:.3rem"></span>';
-        const concernTags=p.concerns.map(c=>{
+        const n=p.concerns.length;
+        return p.concerns.map((c,ci)=>{
           const col=c.severity==='red'?'#ef4444':'#f97316';
-          return`<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.55rem;background:${col}12;border:1px solid ${col}44;color:${col};margin:.1rem">${c.label}</span>`;
-        }).join('');
-        const detailLines=p.concerns.map(c=>`<div style="font-size:.62rem;color:var(--mu);padding:.1rem 0">${c.detail}</div>`).join('');
-        return`<tr>
-          <td>${sevDot}</td>
-          <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(p.px,p.pid)}${senPillShort(p.px)}</td>
-          <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${p.yg}</td>
-          <td style="font-size:.72rem;color:var(--mu)">${p.tg}</td>
-          <td>${concernTags}</td>
-          <td style="max-width:300px">${detailLines}</td>
+          const sevDot=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col}"></span>`;
+          const tag=`<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:${col}12;border:1px solid ${col}44;color:${col}">${c.label}</span>`;
+          const pupilCells=ci===0?`<td style="font-family:'JetBrains Mono',monospace;font-weight:500;vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">${pLink(p.px,p.pid)}${senPillShort(p.px)}</td>
+          <td style="text-align:center;font-size:.72rem;color:var(--mu);vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">Y${p.yg}</td>
+          <td style="font-size:.72rem;color:var(--mu);vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">${p.tg}</td>`:'';
+          const borderStyle=ci<n-1?'border-bottom:1px dashed rgba(38,45,68,.15)':'';
+          return`<tr>${pupilCells}
+          <td style="${borderStyle}">${sevDot} ${tag}</td>
+          <td style="font-size:.68rem;color:var(--mu);${borderStyle}">${c.detail}</td>
         </tr>`;
+        }).join('');
       }).join('');
 
       html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Pupil Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${pupilConcerns.length} pupils flagged</span></div>
         <div style="overflow-x:auto"><table class="d"><thead><tr>
-          <th style="width:20px"></th><th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concerns</th><th>Detail</th>
+          <th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concern</th><th>Detail</th>
         </tr></thead><tbody>${pRows}</tbody></table></div></div>`;
     }
 
