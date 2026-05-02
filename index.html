@@ -569,8 +569,8 @@ const NOT_COUNTED_MARKS=new Set(DD.config?.att_codes?.not_counted||['Y1','Y2','Y
 function sancTipAttrs(codes,dets,cats,label){
   if(!codes&&!dets) return'';
   const c=cats||{b:0,u:0,e:0,a:0};
-  const tipHtml=`<div style='font-weight:600;margin-bottom:.3rem'>${label||'Sanctions'}</div><table style='font-size:.65rem;border-collapse:collapse'><tr><td style='padding:.1rem .4rem'>Behaviour</td><td style='padding:.1rem .4rem;font-weight:600'>${c.b||0}</td></tr><tr><td style='padding:.1rem .4rem'>Uniform</td><td style='padding:.1rem .4rem;font-weight:600'>${c.u||0}</td></tr><tr><td style='padding:.1rem .4rem'>Equipment</td><td style='padding:.1rem .4rem;font-weight:600'>${c.e||0}</td></tr><tr><td style='padding:.1rem .4rem'>Attendance</td><td style='padding:.1rem .4rem;font-weight:600'>${c.a||0}</td></tr><tr style='border-top:1px solid var(--bd)'><td style='padding:.1rem .4rem;color:#7c3aed'>Detentions</td><td style='padding:.1rem .4rem;font-weight:600;color:#7c3aed'>${dets||0}</td></tr></table>`.replace(/"/g,'&quot;');
-  return`cursor:help" onmouseenter="const t=document.createElement('div');t.innerHTML='${tipHtml}';t.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;pointer-events:none';const r=this.getBoundingClientRect();t.style.left=(r.left+r.width/2)+'px';t.style.top=(r.top-4)+'px';t.style.transform='translate(-50%,-100%)';document.body.appendChild(t);this._t=t" onmouseleave="if(this._t){this._t.remove();this._t=null}"`;
+  const tipHtml=`<div style="font-weight:600;margin-bottom:.3rem">${label||'Sanctions'}</div><table style="font-size:.65rem;border-collapse:collapse"><tr><td style="padding:.1rem .4rem">Behaviour</td><td style="padding:.1rem .4rem;font-weight:600">${c.b||0}</td></tr><tr><td style="padding:.1rem .4rem">Uniform</td><td style="padding:.1rem .4rem;font-weight:600">${c.u||0}</td></tr><tr><td style="padding:.1rem .4rem">Equipment</td><td style="padding:.1rem .4rem;font-weight:600">${c.e||0}</td></tr><tr><td style="padding:.1rem .4rem">Attendance</td><td style="padding:.1rem .4rem;font-weight:600">${c.a||0}</td></tr><tr style="border-top:1px solid var(--bd)"><td style="padding:.1rem .4rem;color:#7c3aed">Detentions</td><td style="padding:.1rem .4rem;font-weight:600;color:#7c3aed">${dets||0}</td></tr></table>`.replace(/"/g,'&quot;');
+  return`cursor:help" data-tip="${tipHtml}" onmouseenter="const t=document.createElement('div');t.innerHTML=this.dataset.tip;t.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;pointer-events:none';const r=this.getBoundingClientRect();t.style.left=(r.left+r.width/2)+'px';t.style.top=(r.top-4)+'px';t.style.transform='translate(-50%,-100%)';document.body.appendChild(t);this._t=t" onmouseleave="if(this._t){this._t.remove();this._t=null}"`;
 }
 // Compute category breakdown for a set of sanctions
 function sancCatsFor(pxOrSet,sanArr,sanDetArr){
@@ -2118,7 +2118,6 @@ function rHeatmaps(x,ink,subjFilter){
     <div class="ch-g" style="position:relative">
       <div class="chc"><div class="cht">Sanctions by Subject</div><div id="dist-subj"></div></div>
       <div class="chc"><div class="cht">Sanctions by Type</div><div id="dist-type"></div></div>
-      <div class="chc"><div class="cht">Sanctions by Type</div><div id="dist-type"></div></div>
       <div class="chc"><div class="cht">Sanctions by Day of Week</div><div id="dist-dow-legend"></div><div id="dist-dow"></div></div>
       <div class="chc"><div class="cht">Sanctions by Period</div><div id="dist-les"></div></div>
       <div id="dist-tip" style="display:none;position:fixed;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:999"></div>
@@ -3628,7 +3627,7 @@ function renderDistCharts(){
     ${subjsSorted2.map(s=>{
     const total=subjTotals[s];
     const maxBarW=200;
-    return`<div style="display:flex;align-items:center;gap:.4rem;cursor:pointer" data-dist-tip="subj-${s}"><span style="font-size:.65rem;color:var(--mu);min-width:6.5rem;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s}</span><div style="display:flex;height:14px;border-radius:2px;overflow:hidden">${visAyLabels.map((ay,ai)=>{
+    return`<div style="display:flex;align-items:center;gap:.4rem;cursor:pointer" data-dist-tip="subj-${s}"><span style="font-size:.65rem;color:var(--mu);min-width:12rem;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s}</span><div style="display:flex;height:14px;border-radius:2px;overflow:hidden">${visAyLabels.map((ay,ai)=>{
       const c2=subjAyCounts[s]?.[ay]||0;if(!c2)return'';
       const w=Math.max(2,Math.round(c2/maxSubj2*maxBarW));
       return`<div style="width:${w}px;background:${ayColors[ai%ayColors.length]}"></div>`;
