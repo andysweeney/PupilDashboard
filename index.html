@@ -116,6 +116,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
 <button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
 <button class="tb" onclick="sw('sanctions',this)">⚖ Sanctions Analysis</button>
+<button class="tb" onclick="sw('concerns',this)">🚨 Concerns</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
@@ -250,6 +251,15 @@ table.d tr:hover td{background:var(--sf2)}
 </div>
 <div id="an-subj-scatter" style="margin-bottom:1.25rem"></div>
 <div id="an-class-scatter" style="margin-bottom:1.25rem"></div>
+</div>
+
+<div id="vw-concerns" class="vw">
+<div class="ctl">
+<div class="cg"><label>Role</label><select id="cn-role" onchange="popCNFilters();rCN()"><option value="slt">SLT</option><option value="yl">Year Leader</option><option value="tutor">Tutor</option></select></div>
+<div class="cg" id="cn-yg-wrap"><label>Year Group</label><select id="cn-yg" onchange="rCN()"></select></div>
+<div class="cg" id="cn-tg-wrap" style="display:none"><label>Tutor Group</label><select id="cn-tg" onchange="rCN()"></select></div>
+</div>
+<div id="cn-out"></div>
 </div>
 
 <div id="vw-sanctions" class="vw">
@@ -4234,7 +4244,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='sanctions')rSA();else if(v==='admin')rAdmin();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='admin')rAdmin();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -6077,6 +6087,413 @@ function rPeer(){
   window.rAnalytics=rAnalytics;
   window.rAdmin=rAdmin;
   window.rSA=rSA;
+
+  // ── CONCERNS DASHBOARD ──
+  function popCNFilters(){
+    const role=document.getElementById('cn-role').value;
+    const ygWrap=document.getElementById('cn-yg-wrap');
+    const tgWrap=document.getElementById('cn-tg-wrap');
+    const ygSel=document.getElementById('cn-yg');
+    const tgSel=document.getElementById('cn-tg');
+
+    if(role==='slt'){
+      ygWrap.style.display='none';tgWrap.style.display='none';
+    }else if(role==='yl'){
+      ygWrap.style.display='';tgWrap.style.display='none';
+      if(!ygSel.options.length){
+        const avail=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)).sort((a,b)=>a-b);
+        avail.forEach(yg=>{const o=document.createElement('option');o.value=yg;o.textContent=`Year ${yg}`;ygSel.appendChild(o)});
+      }
+    }else{
+      ygWrap.style.display='';tgWrap.style.display='';
+      if(!ygSel.options.length){
+        const avail=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)).sort((a,b)=>a-b);
+        avail.forEach(yg=>{const o=document.createElement('option');o.value=yg;o.textContent=`Year ${yg}`;ygSel.appendChild(o)});
+      }
+      // Populate TGs for selected year
+      const yg=parseInt(ygSel.value);
+      const enrols=ygEnrol(yg);
+      const prev=tgSel.value;
+      tgSel.innerHTML='';
+      const tgs=new Set();
+      enrols.filter(r=>r.t==='tg'&&r.u===null).forEach(r=>tgs.add(r.v));
+      [...tgs].sort().forEach(tg=>{const o=document.createElement('option');o.value=tg;o.textContent=tg;tgSel.appendChild(o)});
+      if([...tgs].includes(prev)) tgSel.value=prev;
+    }
+  }
+
+  function rCN(){
+    const role=document.getElementById('cn-role').value;
+    const out=document.getElementById('cn-out');
+    out.innerHTML='<div style="color:var(--mu);padding:1rem">Scanning for concerns...</div>';
+
+    const SAN=DD.sanctions||[];
+    const today=new Date();
+    const todayISO=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    const ayStart=`${CAY}-09-01`;
+    const WLK=DD.weekLessons||{};
+    let ytdTotalL=0;
+    for(const[w,tl]of Object.entries(WLK)){if(w>=ayStart&&w<=todayISO)ytdTotalL+=tl}
+
+    // Determine which year groups and TGs to scan
+    let targetYGs=[];
+    let targetTG=null;
+    if(role==='slt'){
+      targetYGs=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink));
+    }else if(role==='yl'){
+      targetYGs=[parseInt(document.getElementById('cn-yg').value)];
+    }else{
+      targetYGs=[parseInt(document.getElementById('cn-yg').value)];
+      targetTG=document.getElementById('cn-tg').value;
+    }
+
+    // Collect pupils
+    let allPupils=[];
+    targetYGs.forEach(yg=>{
+      const pp=ygPeriods(yg);
+      if(!pp.length) return;
+      const lp=pp[pp.length-1];
+      const lr=ygRows(yg,lp);
+      const enrols=ygEnrol(yg);
+      lr.forEach(r=>{
+        const tgRec=enrols.filter(e=>e.t==='tg'&&e.x===r[0]&&e.u===null);
+        const tg=tgRec.length?tgRec[tgRec.length-1].v:'—';
+        if(targetTG&&tg!==targetTG) return;
+        allPupils.push({px:r[0],pid:r[1],yg,tg,row:r});
+      });
+    });
+
+    // ── INDIVIDUAL PUPIL CONCERNS ──
+    const pupilConcerns=[];
+
+    allPupils.forEach(p=>{
+      const px=p.px,pid=p.pid,yg=p.yg,tg=p.tg;
+      const concerns=[];
+
+      // 1. Attendance trajectory — compare T1 vs T2 vs T3
+      const t1Start=`${CAY}-09-01`,t1End=`${CAY}-12-31`;
+      const t2Start=`${CAY+1}-01-01`,t2End=`${CAY+1}-03-31`;
+      const t3Start=`${CAY+1}-04-01`,t3End=todayISO;
+      const t1Abs=countAbsPeriods(px,t1Start,t1End);
+      const t2Abs=countAbsPeriods(px,t2Start,t2End);
+      const t3Abs=countAbsPeriods(px,t3Start,t3End);
+      let t1L=0,t2L=0,t3L=0;
+      for(const[w,tl]of Object.entries(WLK)){
+        if(w>=t1Start&&w<=t1End) t1L+=tl;
+        if(w>=t2Start&&w<=t2End) t2L+=tl;
+        if(w>=t3Start&&w<=t3End) t3L+=tl;
+      }
+      const t1Pct=t1L>0?(t1Abs.total/t1L*100):0;
+      const t2Pct=t2L>0?(t2Abs.total/t2L*100):0;
+      const t3Pct=t3L>0?(t3Abs.total/t3L*100):0;
+      // Rising absence: each term worse than the last
+      if(t2Pct>t1Pct+2&&t2L>0&&t1L>0) concerns.push({type:'att-rising',severity:t3Pct>t2Pct?'red':'amber',label:'Attendance Declining',detail:`Absence: T1 ${t1Pct.toFixed(1)}% → T2 ${t2Pct.toFixed(1)}%${t3L>0?' → T3 '+t3Pct.toFixed(1)+'%':''}`});
+      // PA threshold
+      const ytdAbs=countAbsPeriods(px,ayStart,todayISO);
+      const ytdPct=ytdTotalL>0?(ytdAbs.total/ytdTotalL*100):0;
+      if(ytdPct>=10) concerns.push({type:'att-pa',severity:'red',label:'Persistent Absence',detail:`YTD absence ${ytdPct.toFixed(1)}%`});
+
+      // 2. Sanctions acceleration
+      const pSan=SAN.filter(s=>s[0]===px&&s[1]===0);
+      const t1San=pSan.filter(s=>s[2]>=t1Start&&s[2]<=t1End).length;
+      const t2San=pSan.filter(s=>s[2]>=t2Start&&s[2]<=t2End).length;
+      const t3San=pSan.filter(s=>s[2]>=t3Start&&s[2]<=t3End).length;
+      if(t2San>t1San*CT_SC&&t1San>=CT_MN) concerns.push({type:'sanc-accel',severity:'amber',label:'Sanctions Accelerating',detail:`T1: ${t1San} → T2: ${t2San}${t3L>0?' → T3: '+t3San:''}`});
+      if(t3San>t2San*CT_SC&&t2San>=CT_MN&&t3L>0) concerns.push({type:'sanc-accel',severity:'red',label:'Sanctions Accelerating',detail:`T2: ${t2San} → T3: ${t3San}`});
+
+      // 3. Combined decline — both attendance AND behaviour worsening
+      if(t2Pct>t1Pct+1&&t2San>t1San&&t2San>=CT_MN&&t1L>0) concerns.push({type:'disengage',severity:'red',label:'Possible Disengagement',detail:`Absence ↑ (${t1Pct.toFixed(0)}%→${t2Pct.toFixed(0)}%) + Sanctions ↑ (${t1San}→${t2San})`});
+
+      // 4. Sanctions concentration
+      const scFlags=getSanctionsConcentration(px);
+      scFlags.filter(f=>f.teacher!=='Unknown').forEach(f=>{
+        concerns.push({type:'sanc-conc',severity:parseFloat(f.ratio)>=4?'red':'amber',label:'Sanctions Concentration',detail:`${f.actualPct}% of codes from ${f.teacher} (${f.subjects.join(', ')}) — expected ${f.expectedPct}%, ratio ${f.ratio}×`});
+      });
+
+      // 5. Absence pattern flags
+      const absAnalysis=analyseAbsencePattern(px);
+      if(absAnalysis.slotFlags.length){
+        const worst=absAnalysis.slotFlags.sort((a,b)=>b.rate-a.rate)[0];
+        concerns.push({type:'abs-pattern',severity:worst.rate>=60?'red':'amber',label:'Absence Pattern',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate)${absAnalysis.slotFlags.length>1?' + '+(absAnalysis.slotFlags.length-1)+' more':''}`});
+      }
+
+      if(concerns.length){
+        pupilConcerns.push({px,pid,yg,tg,concerns,
+          maxSeverity:concerns.some(c=>c.severity==='red')?'red':'amber',
+          totalConcerns:concerns.length
+        });
+      }
+    });
+
+    pupilConcerns.sort((a,b)=>{
+      if(a.maxSeverity!==b.maxSeverity) return a.maxSeverity==='red'?-1:1;
+      return b.totalConcerns-a.totalConcerns;
+    });
+
+    // ── CLASS CONCERNS (Year Leader + SLT) ──
+    const classConcerns=[];
+    if(role!=='tutor'){
+      targetYGs.forEach(yg=>{
+        const enrols=ygEnrol(yg);
+        const pp=ygPeriods(yg);
+        if(!pp.length) return;
+        const lp=pp[pp.length-1];
+        const lr=ygRows(yg,lp);
+        const lrIdxSet=new Set(lr.map(r=>r[0]));
+
+        // Group by subject+class
+        const classes={};
+        enrols.filter(e=>e.t==='cls'&&e.u===null).forEach(e=>{
+          if(!lrIdxSet.has(e.x)) return;
+          const key=`${e.s}|${e.c}`;
+          if(!classes[key]) classes[key]={sub:e.s,cls:e.c,tc:e.tc,pupils:new Set()};
+          classes[key].pupils.add(e.x);
+        });
+
+        for(const[key,info]of Object.entries(classes)){
+          if(info.pupils.size<5) continue;
+          const clsSan=SAN.filter(s=>info.pupils.has(s[0])&&s[3]===info.sub&&s[2]>=ayStart&&s[2]<=todayISO&&s[1]===0);
+          const codesPerPupil=clsSan.length/info.pupils.size;
+
+          // Compare to subject average across all classes
+          const allSubjSan=SAN.filter(s=>lrIdxSet.has(s[0])&&s[3]===info.sub&&s[2]>=ayStart&&s[2]<=todayISO&&s[1]===0);
+          const subjAvgPP=allSubjSan.length/lrIdxSet.size;
+
+          if(codesPerPupil>subjAvgPP*2&&clsSan.length>=5){
+            classConcerns.push({
+              yg,sub:info.sub,cls:info.cls,tc:info.tc,pupils:info.pupils.size,
+              codes:clsSan.length,codesPerPupil:codesPerPupil.toFixed(1),
+              subjAvg:subjAvgPP.toFixed(1),
+              ratio:(codesPerPupil/subjAvgPP).toFixed(1),
+              severity:codesPerPupil>subjAvgPP*3?'red':'amber'
+            });
+          }
+        }
+      });
+      classConcerns.sort((a,b)=>parseFloat(b.ratio)-parseFloat(a.ratio));
+    }
+
+    // ── TG CONCERNS (Year Leader + SLT) ──
+    const tgConcerns=[];
+    if(role!=='tutor'){
+      targetYGs.forEach(yg=>{
+        const enrols=ygEnrol(yg);
+        const pp=ygPeriods(yg);
+        if(!pp.length) return;
+        const lr=ygRows(yg,pp[pp.length-1]);
+
+        // Group pupils by TG
+        const tgs={};
+        lr.forEach(r=>{
+          const tgRec=enrols.filter(e=>e.t==='tg'&&e.x===r[0]&&e.u===null);
+          const tg=tgRec.length?tgRec[tgRec.length-1].v:'—';
+          if(!tgs[tg]) tgs[tg]={pupils:[],yg};
+          tgs[tg].pupils.push(r[0]);
+        });
+
+        // Year-level averages
+        let yrTotalAbs=0;
+        lr.forEach(r=>{yrTotalAbs+=countAbsPeriods(r[0],ayStart,todayISO).total});
+        const yrAbsRate=ytdTotalL>0?(yrTotalAbs/(ytdTotalL*lr.length)*100):0;
+
+        const yrSan=SAN.filter(s=>new Set(lr.map(r=>r[0])).has(s[0])&&s[1]===0&&s[2]>=ayStart&&s[2]<=todayISO);
+        const yrSanPP=yrSan.length/lr.length;
+
+        for(const[tg,info]of Object.entries(tgs)){
+          if(info.pupils.length<5) continue;
+          // TG absence rate
+          let tgTotalAbs=0;
+          info.pupils.forEach(px2=>{tgTotalAbs+=countAbsPeriods(px2,ayStart,todayISO).total});
+          const tgAbsRate=ytdTotalL>0?(tgTotalAbs/(ytdTotalL*info.pupils.length)*100):0;
+
+          // TG sanctions rate
+          const tgPxSet=new Set(info.pupils);
+          const tgSan=SAN.filter(s=>tgPxSet.has(s[0])&&s[1]===0&&s[2]>=ayStart&&s[2]<=todayISO);
+          const tgSanPP=tgSan.length/info.pupils.length;
+
+          const concerns=[];
+          if(tgAbsRate>yrAbsRate+2) concerns.push(`Absence ${tgAbsRate.toFixed(1)}% vs year avg ${yrAbsRate.toFixed(1)}%`);
+          if(tgSanPP>yrSanPP*1.5&&tgSan.length>=5) concerns.push(`Sanctions ${tgSanPP.toFixed(1)}/pupil vs year avg ${yrSanPP.toFixed(1)}`);
+
+          // Count PA pupils
+          const paPupils=info.pupils.filter(px2=>{
+            const a=countAbsPeriods(px2,ayStart,todayISO);
+            return ytdTotalL>0&&(a.total/ytdTotalL*100)>=10;
+          }).length;
+          if(paPupils>=3) concerns.push(`${paPupils} persistently absent pupils`);
+
+          if(concerns.length){
+            tgConcerns.push({yg:info.yg,tg,pupils:info.pupils.length,absRate:tgAbsRate.toFixed(1),sanPP:tgSanPP.toFixed(1),paPupils,concerns,severity:concerns.length>=2?'red':'amber'});
+          }
+        }
+      });
+    }
+
+    // ── TEACHER CONCERNS (SLT only) ──
+    const teacherConcerns=[];
+    if(role==='slt'){
+      // Find teachers flagged across multiple pupils in sanctions concentration
+      const teacherFlags={};
+      pupilConcerns.forEach(p=>{
+        p.concerns.filter(c=>c.type==='sanc-conc').forEach(c=>{
+          const match=c.detail.match(/from (T\d+)/);
+          if(match){
+            const tid=match[1];
+            if(!teacherFlags[tid]) teacherFlags[tid]={pupils:new Set(),subjects:new Set(),details:[]};
+            teacherFlags[tid].pupils.add(p.pid);
+            teacherFlags[tid].details.push({pid:p.pid,px:p.px,yg:p.yg,detail:c.detail});
+            const subjMatch=c.detail.match(/\(([^)]+)\)/);
+            if(subjMatch) subjMatch[1].split(', ').forEach(s=>teacherFlags[tid].subjects.add(s));
+          }
+        });
+      });
+
+      for(const[tid,data]of Object.entries(teacherFlags)){
+        if(data.pupils.size>=2){
+          teacherConcerns.push({
+            teacher:tid,
+            pupilCount:data.pupils.size,
+            subjects:[...data.subjects].sort(),
+            details:data.details,
+            severity:data.pupils.size>=3?'red':'amber'
+          });
+        }
+      }
+      teacherConcerns.sort((a,b)=>b.pupilCount-a.pupilCount);
+    }
+
+    // ── RENDER ──
+    const roleLabel=role==='slt'?'SLT Overview':role==='yl'?`Year Leader — Y${document.getElementById('cn-yg').value}`:`Tutor — ${targetTG}`;
+    const redCount=pupilConcerns.filter(c=>c.maxSeverity==='red').length;
+    const amberCount=pupilConcerns.filter(c=>c.maxSeverity==='amber').length;
+
+    let html=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">${roleLabel} — Concerns Summary</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;padding:.5rem 0">
+        <div style="padding:.6rem;border-radius:8px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);text-align:center">
+          <div style="font-size:1.4rem;font-weight:700;color:#ef4444">${redCount}</div>
+          <div style="font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">High Priority Pupils</div>
+        </div>
+        <div style="padding:.6rem;border-radius:8px;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2);text-align:center">
+          <div style="font-size:1.4rem;font-weight:700;color:#f97316">${amberCount}</div>
+          <div style="font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Monitoring Pupils</div>
+        </div>
+        ${role!=='tutor'?`<div style="padding:.6rem;border-radius:8px;background:rgba(100,37,53,.08);border:1px solid rgba(100,37,53,.2);text-align:center">
+          <div style="font-size:1.4rem;font-weight:700;color:#642535">${classConcerns.length}</div>
+          <div style="font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Classes of Concern</div>
+        </div>
+        <div style="padding:.6rem;border-radius:8px;background:rgba(100,37,53,.08);border:1px solid rgba(100,37,53,.2);text-align:center">
+          <div style="font-size:1.4rem;font-weight:700;color:#642535">${tgConcerns.length}</div>
+          <div style="font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">TGs of Concern</div>
+        </div>`:''}
+        ${role==='slt'?`<div style="padding:.6rem;border-radius:8px;background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);text-align:center">
+          <div style="font-size:1.4rem;font-weight:700;color:#7c3aed">${teacherConcerns.length}</div>
+          <div style="font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Teachers Flagged</div>
+        </div>`:''}
+      </div>
+    </div>`;
+
+    // Pupil concerns table
+    if(pupilConcerns.length){
+      const pRows=pupilConcerns.map(p=>{
+        const sevDot=p.maxSeverity==='red'?'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:.3rem"></span>':'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f97316;margin-right:.3rem"></span>';
+        const concernTags=p.concerns.map(c=>{
+          const col=c.severity==='red'?'#ef4444':'#f97316';
+          return`<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.55rem;background:${col}12;border:1px solid ${col}44;color:${col};margin:.1rem">${c.label}</span>`;
+        }).join('');
+        const detailLines=p.concerns.map(c=>`<div style="font-size:.62rem;color:var(--mu);padding:.1rem 0">${c.detail}</div>`).join('');
+        return`<tr>
+          <td>${sevDot}</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(p.px,p.pid)}${senPillShort(p.px)}</td>
+          <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${p.yg}</td>
+          <td style="font-size:.72rem;color:var(--mu)">${p.tg}</td>
+          <td>${concernTags}</td>
+          <td style="max-width:300px">${detailLines}</td>
+        </tr>`;
+      }).join('');
+
+      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Pupil Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${pupilConcerns.length} pupils flagged</span></div>
+        <div style="overflow-x:auto"><table class="d"><thead><tr>
+          <th style="width:20px"></th><th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concerns</th><th>Detail</th>
+        </tr></thead><tbody>${pRows}</tbody></table></div></div>`;
+    }
+
+    // Class concerns
+    if(classConcerns.length){
+      const cRows=classConcerns.map(c=>{
+        const sevDot=c.severity==='red'?'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:.3rem"></span>':'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f97316;margin-right:.3rem"></span>';
+        return`<tr>
+          <td>${sevDot}</td>
+          <td>Y${c.yg}</td>
+          <td>${c.sub}</td>
+          <td style="text-align:center">${c.cls}</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:.72rem">${c.tc}</td>
+          <td style="text-align:center">${c.pupils}</td>
+          <td style="text-align:center;font-weight:600;color:#f97316">${c.codes}</td>
+          <td style="text-align:center;font-weight:600">${c.codesPerPupil}</td>
+          <td style="text-align:center;color:var(--mu)">${c.subjAvg}</td>
+          <td style="text-align:center;font-weight:700;color:${c.severity==='red'?'#ef4444':'#f97316'}">${c.ratio}×</td>
+        </tr>`;
+      }).join('');
+
+      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Class Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${classConcerns.length} classes flagged — sanctions rate 2×+ subject average</span></div>
+        <div style="overflow-x:auto"><table class="d"><thead><tr>
+          <th style="width:20px"></th><th>Year</th><th>Subject</th><th style="text-align:center">Class</th><th>Teacher</th><th style="text-align:center">Pupils</th>
+          <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Subj Avg</th><th style="text-align:center">Ratio</th>
+        </tr></thead><tbody>${cRows}</tbody></table></div></div>`;
+    }
+
+    // TG concerns
+    if(tgConcerns.length){
+      const tRows=tgConcerns.map(t=>{
+        const sevDot=t.severity==='red'?'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:.3rem"></span>':'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f97316;margin-right:.3rem"></span>';
+        return`<tr>
+          <td>${sevDot}</td>
+          <td>Y${t.yg}</td>
+          <td style="font-weight:500">${t.tg}</td>
+          <td style="text-align:center">${t.pupils}</td>
+          <td style="text-align:center;${parseFloat(t.absRate)>=8?'color:#ef4444;font-weight:600':''}">${t.absRate}%</td>
+          <td style="text-align:center">${t.sanPP}</td>
+          <td style="text-align:center;${t.paPupils>=3?'color:#ef4444;font-weight:600':''}">${t.paPupils}</td>
+          <td style="font-size:.68rem">${t.concerns.join(' · ')}</td>
+        </tr>`;
+      }).join('');
+
+      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Tutor Group Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${tgConcerns.length} TGs flagged</span></div>
+        <div style="overflow-x:auto"><table class="d"><thead><tr>
+          <th style="width:20px"></th><th>Year</th><th>TG</th><th style="text-align:center">Pupils</th>
+          <th style="text-align:center">Abs Rate</th><th style="text-align:center">Sanc/Pupil</th><th style="text-align:center">PA Pupils</th><th>Concerns</th>
+        </tr></thead><tbody>${tRows}</tbody></table></div></div>`;
+    }
+
+    // Teacher concerns (SLT only)
+    if(teacherConcerns.length){
+      const tcRows=teacherConcerns.map(t=>{
+        const sevDot=t.severity==='red'?'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:.3rem"></span>':'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f97316;margin-right:.3rem"></span>';
+        const pupilLinks=t.details.map(d=>`${pLink(d.px,d.pid)} (Y${d.yg})`).join(', ');
+        return`<tr>
+          <td>${sevDot}</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${t.teacher}</td>
+          <td style="font-size:.72rem">${t.subjects.join(', ')}</td>
+          <td style="text-align:center;font-weight:600;color:#ef4444">${t.pupilCount}</td>
+          <td style="font-size:.68rem">${pupilLinks}</td>
+        </tr>`;
+      }).join('');
+
+      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Teacher Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${teacherConcerns.length} teachers flagged across multiple pupils</span></div>
+        <div style="overflow-x:auto"><table class="d"><thead><tr>
+          <th style="width:20px"></th><th>Teacher</th><th>Subject(s)</th><th style="text-align:center">Pupils Affected</th><th>Pupils</th>
+        </tr></thead><tbody>${tcRows}</tbody></table></div></div>`;
+    }
+
+    if(!pupilConcerns.length&&!classConcerns.length&&!tgConcerns.length&&!teacherConcerns.length){
+      html+=`<div class="dw"><div style="color:var(--mu);font-size:.8rem;padding:1rem">No concerns identified with current thresholds.</div></div>`;
+    }
+
+    out.innerHTML=html;
+  }
+
+  window.popCNFilters=popCNFilters;
+  window.rCN=rCN;
   window.rTV=rTV;
   window.rBC=rBC;
   window.rPP=rPP;
