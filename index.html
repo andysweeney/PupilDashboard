@@ -3644,8 +3644,8 @@ function renderDistCharts(){
   // Sanctions by Type chart
   const typeCats=['Behaviour','Uniform','Equipment','Attendance'];
   const typeCatColors=['#ef4444','#f97316','#eab308','#38bdf8'];
-  const typeCounts=typeCats.map(cat=>filteredPsAY.filter(r=>r.t===0&&r.cat===cat).length);
-  const detCount=filteredPsAY.filter(r=>r.t===2).length;
+  const typeCounts=typeCats.map(cat=>filtered.filter(r=>r.t===0&&r.cat===cat).length);
+  const detCount=filtered.filter(r=>r.t===2).length;
   const typeLabels=[...typeCats,'Detentions'];
   const typeVals=[...typeCounts,detCount];
   const typeColors=[...typeCatColors,'#7c3aed'];
