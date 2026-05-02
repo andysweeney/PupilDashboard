@@ -474,7 +474,7 @@ function pLink(idx,name){const clean=name.replace(/\s*\(P\d+\)\s*$/,'');return`<
 
 // Concern thresholds (global)
 let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
-let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0;
+let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0, SA_ENGAGE=3;
 function applyCT(){
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
@@ -486,7 +486,8 @@ function applyCT(){
   SA_MIN_TOTAL=parseInt(document.getElementById('sa-min-total').value)||6;
   SA_MIN_TEACHER=parseInt(document.getElementById('sa-min-teacher').value)||3;
   SA_RATIO=parseFloat(document.getElementById('sa-ratio').value)||2.0;
-  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×</b>`;
+  SA_ENGAGE=parseInt(document.getElementById('sa-engage').value)||3;
+  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b>`;
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×</b>`;
@@ -5770,6 +5771,108 @@ function rPeer(){
     return results.sort((a,b)=>parseFloat(b.ratio)-parseFloat(a.ratio));
   }
 
+  // Subject Engagement Concern — checks if absences correlate with sanctions
+  function getSubjectEngagement(px){
+    const scFlags=getSanctionsConcentration(px);
+    if(!scFlags.length) return[];
+
+    const SAN2=DD.sanctions||[];
+    const grid=TT_DATA[String(px)];
+    if(!grid) return[];
+
+    const subjLPW={};
+    for(let d2=0;d2<5;d2++) for(let p2=0;p2<5;p2++){
+      const cell=grid[d2]?.[p2];
+      if(cell){const subj=_SKR2[cell[0]]||cell[0];subjLPW[subj]=(subjLPW[subj]||0)+1}
+    }
+    const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0)||25;
+
+    // P1 subjects per day
+    const p1Subjs={};
+    for(let d2=0;d2<5;d2++){
+      const cell=grid[d2]?.[0];
+      if(cell) p1Subjs[d2]=_SKR2[cell[0]]||cell[0];
+    }
+
+    const pSanAll=SAN2.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null).map(s=>({s,date:s[2],subj:s[3]}));
+    const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
+    const DI2=DD.dateIndex||[];
+
+    // Build present-days from attAbsSubj + suppressedAbsences
+    // A day is "whole-day absent" if the pupil has NO suppressed slots and NO present marks
+    // We approximate: if all 5 periods have absence records, it's a whole day
+    const absByDate={};
+    pAbsSubj.forEach(r=>{
+      if(!absByDate[r[0]]) absByDate[r[0]]={periods:new Set(),subjects:{}};
+      absByDate[r[0]].periods.add(r[2]);
+      absByDate[r[0]].subjects[r[2]]=r[1];
+    });
+
+    const results=[];
+    const _supp=getSuppressed(px);
+
+    scFlags.filter(f=>f.teacher!=='Unknown').forEach(f=>{
+      const subj=f.subjects[0]; // Primary subject
+      if(!subj) return;
+
+      let corrPartial=0, corrP1Whole=0;
+
+      // Find all dates absent from this subject
+      const subjAbsDates=new Set();
+      pAbsSubj.forEach(r=>{
+        if(r[1]===subj){
+          const key=r[0]+'|'+r[2];
+          if(!_supp.has(key)) subjAbsDates.add(r[0]);
+        }
+      });
+
+      subjAbsDates.forEach(absDate=>{
+        // Check if partial day (any non-suppressed absence + present elsewhere)
+        const dayInfo=absByDate[absDate];
+        if(!dayInfo) return;
+        const totalPeriodsAbsent=dayInfo.periods.size;
+
+        // Count prior sanctions
+        const prior=pSanAll.filter(p=>p.date<absDate);
+        const priorTotal=prior.length;
+        const priorSubj=prior.filter(p=>p.subj===subj).length;
+        if(priorTotal<SA_MIN_TOTAL||priorSubj<SA_MIN_TEACHER) return;
+        const priorExpected=subjLPW[subj]?subjLPW[subj]/totalLPW:0;
+        const priorActual=priorSubj/priorTotal;
+        const priorRatio=priorExpected>0?priorActual/priorExpected:0;
+        if(priorRatio<SA_RATIO) return;
+
+        if(totalPeriodsAbsent<5){
+          // Partial day
+          corrPartial++;
+        }else{
+          // Whole day — check if P1 is this subject
+          const dt=new Date(absDate+'T12:00:00');
+          const dow=dt.getDay()-1;
+          if(dow>=0&&dow<5&&p1Subjs[dow]===subj){
+            corrP1Whole++;
+          }
+        }
+      });
+
+      const totalCorr=corrPartial+corrP1Whole;
+      if(totalCorr>=SA_ENGAGE){
+        results.push({
+          subj,
+          teacher:f.teacher,
+          corrPartial,
+          corrP1Whole,
+          totalCorr,
+          codes:f.codes,
+          totalCodes:f.totalCodes,
+          ratio:f.ratio
+        });
+      }
+    });
+
+    return results.sort((a,b)=>b.totalCorr-a.totalCorr);
+  }
+
   function rSA(){
     const ygVal=document.getElementById('sa-yg').value;
     const out=document.getElementById('sa-out');
@@ -5886,14 +5989,20 @@ function rPeer(){
   // Pupil-level sanctions concentration alert (for use in rP)
   function pupilSanctionsAlert(px){
     const flags=getSanctionsConcentration(px);
+    const engFlags=getSubjectEngagement(px);
     if(!flags.length) return'';
-    const rows=flags.map(f=>`<div style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;border-bottom:1px solid rgba(38,45,68,.2)">
+    const allCodes=(DD.sanctions||[]).filter(s=>s[0]===px&&s[1]===0).length;
+    const rows=flags.map(f=>{
+      const allNote=allCodes!==f.totalCodes?` <span style="font-size:.6rem;color:var(--mu)">(${f.codes}/${allCodes} all codes)</span>`:'';
+      const eng=engFlags.find(e=>e.subj===f.subjects[0]);
+      const engLine=eng?`<div style="font-size:.62rem;color:#ef4444;margin-top:.15rem">⚠ Subject Engagement Concern: ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''})</div>`:'';
+      return`<div style="padding:.25rem 0;border-bottom:1px solid rgba(38,45,68,.2)"><div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
       <span style="font-family:'JetBrains Mono',monospace;font-size:.72rem;font-weight:500">${f.teacher}</span>
       <span style="font-size:.68rem;color:var(--mu)">${f.subjects.join(', ')}</span>
-      <span style="margin-left:auto;font-size:.72rem;font-weight:600;color:#f97316">${f.codes}/${f.totalCodes} codes (${f.actualPct}%)</span>
+      <span style="margin-left:auto;font-size:.72rem;font-weight:600;color:#f97316">${f.codes}/${f.totalCodes} lesson codes (${f.actualPct}%)${allNote}</span>
       <span style="font-size:.68rem;color:var(--mu)">exp ${f.expectedPct}%</span>
       <span style="font-size:.72rem;font-weight:700;color:${parseFloat(f.ratio)>=3?'#ef4444':'#f97316'}">${f.ratio}×</span>
-    </div>`).join('');
+    </div>${engLine}</div>`}).join('');
     return`<div class="dw" style="border-left:3px solid #f97316"><div class="dwt" style="color:#f97316">Sanctions Concentration</div>${rows}</div>`;
   }
 
@@ -6030,6 +6139,7 @@ function rPeer(){
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum total codes a pupil must have before analysis applies">Min Total Codes</label><input id="sa-min-total" type="number" min="1" max="50" step="1" value="${SA_MIN_TOTAL}" style="${inputStyle}"></div>
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum codes from one teacher to trigger a flag">Min from Teacher</label><input id="sa-min-teacher" type="number" min="1" max="20" step="1" value="${SA_MIN_TEACHER}" style="${inputStyle}"></div>
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Teacher's share of codes must be this many times their timetable share">Ratio Threshold</label><input id="sa-ratio" type="number" min="1" max="10" step="0.5" value="${SA_RATIO}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum correlated partial-day or P1 whole-day absences to flag subject engagement concern">Engagement Threshold</label><input id="sa-engage" type="number" min="1" max="20" step="1" value="${SA_ENGAGE}" style="${inputStyle}"></div>
           </div>
         </div>
       </div>
@@ -6216,6 +6326,12 @@ function rPeer(){
         const worst=absAnalysis.slotFlags.sort((a,b)=>b.rate-a.rate)[0];
         concerns.push({type:'abs-pattern',severity:worst.rate>=60?'red':'amber',label:'Absence Pattern',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate)${absAnalysis.slotFlags.length>1?' + '+(absAnalysis.slotFlags.length-1)+' more':''}`});
       }
+
+      // 6. Subject Engagement — correlated absences with sanctions
+      const engFlags=getSubjectEngagement(px);
+      engFlags.forEach(e=>{
+        concerns.push({type:'subj-engage',severity:'red',label:'Subject Engagement',detail:`${e.subj}: ${e.totalCorr} correlated absences (${e.corrPartial} partial-day${e.corrP1Whole?', '+e.corrP1Whole+' P1 whole-day':''}) — ${e.codes}/${e.totalCodes} codes, ${e.ratio}×`});
+      });
 
       if(concerns.length){
         pupilConcerns.push({px,pid,yg,tg,concerns,
