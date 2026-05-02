@@ -115,6 +115,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('pairs',this)">👥 Problem Groups</button>
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
 <button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
+<button class="tb" onclick="sw('sanctions',this)">⚖ Sanctions Analysis</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
@@ -248,6 +249,13 @@ table.d tr:hover td{background:var(--sf2)}
 </div>
 <div id="an-subj-scatter" style="margin-bottom:1.25rem"></div>
 <div id="an-class-scatter" style="margin-bottom:1.25rem"></div>
+</div>
+
+<div id="vw-sanctions" class="vw">
+<div class="ctl">
+<div class="cg"><label>Year Group</label><select id="sa-yg" onchange="rSA()"></select></div>
+</div>
+<div id="sa-out"></div>
 </div>
 
 <div id="vw-admin" class="vw">
@@ -455,6 +463,7 @@ function pLink(idx,name){const clean=name.replace(/\s*\(P\d+\)\s*$/,'');return`<
 
 // Concern thresholds (global)
 let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
+let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0;
 function applyCT(){
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
@@ -463,6 +472,9 @@ function applyCT(){
   AP_MIN=parseInt(document.getElementById('ct-ap-min').value)||3;
   AP_PCT=parseInt(document.getElementById('ct-ap-pct').value)||40;
   AP_SLOT=parseInt(document.getElementById('ct-ap-slot').value)||30;
+  SA_MIN_TOTAL=parseInt(document.getElementById('sa-min-total').value)||6;
+  SA_MIN_TEACHER=parseInt(document.getElementById('sa-min-teacher').value)||3;
+  SA_RATIO=parseFloat(document.getElementById('sa-ratio').value)||2.0;
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
 }
@@ -1423,8 +1435,9 @@ function rP(){
     if(_bc10>_bc100*CT_SC&&_bc100>0&&_bcSanCount10>=CT_MN) bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.4);font-size:.7rem;font-weight:600;color:#f97316">⚠ Graduated Behavioural Concern</span>`;
   }
   const bcLine=bcBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${bcBadges}</div>`:'';
+  const scAlert=pupilSanctionsAlert(x);
 
-  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${summaryLine}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
+  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${scAlert}${summaryLine}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
   renderTimetable(x);
@@ -4216,7 +4229,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='admin')rAdmin();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='sanctions')rSA();else if(v==='admin')rAdmin();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -4979,7 +4992,8 @@ function rCC(){
     'bc-yg':{hasAll:true,onChange:'popBCTG();rBC()'},
     'pp-yg':{hasAll:true,onChange:'rPP()'},
     'send-yg':{hasAll:true,onChange:'rSEND()'},
-    'an-yg':{hasAll:false,onChange:'rAnalytics()'}
+    'an-yg':{hasAll:false,onChange:'rAnalytics()'},
+    'sa-yg':{hasAll:true,onChange:'rSA()'}
   };
   for(const[id,cfg2]of Object.entries(ygDropdowns)){
     const sel=document.getElementById(id);
@@ -5663,6 +5677,157 @@ function rPeer(){
 
   window.popTG=popTG;
   window.rTG=rTG;
+  // ── SANCTIONS ANALYSIS ──
+  // Compute disproportionate sanctions for a pupil
+  function getSanctionsConcentration(px){
+    const SAN=DD.sanctions||[];
+    const pSan=SAN.filter(s=>s[0]===px&&s[1]===0); // Codes only
+    if(pSan.length<SA_MIN_TOTAL) return[];
+
+    // Get pupil's timetable to compute expected teacher share
+    const grid=TT_DATA[String(px)];
+    if(!grid) return[];
+
+    // Count lessons per subject from timetable
+    const subjLPW={};
+    for(let d=0;d<5;d++){
+      for(let p=0;p<5;p++){
+        const cell=grid[d]?.[p];
+        if(cell){
+          const subj=SKR[cell[0]]||cell[0];
+          subjLPW[subj]=(subjLPW[subj]||0)+1;
+        }
+      }
+    }
+    const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0)||25;
+
+    // Get teacher per sanction from slotTeachers
+    // Each sanction has [px, type, date, subject, period]
+    // Match to slotTeachers to find which teacher(s) teach that slot
+    const _st=(DD.slotTeachers||{})[String(px)];
+
+    // Group sanctions by subject, then use enrolment to find teacher
+    const teacherCodes={};// teacherId -> {count, subjects: Set}
+    const enrols=[];
+    for(const[ik,e]of Object.entries(ENR)){
+      enrols.push(...e.filter(r=>r.t==='cls'&&r.x===px));
+    }
+
+    pSan.forEach(s=>{
+      const subj=s[3]||'Non-Lesson';
+      // Find teacher from enrolment
+      const cls=enrols.find(e=>e.s===subj&&e.u===null);
+      const teacherId=cls?cls.tc:'Unknown';
+      if(!teacherCodes[teacherId]) teacherCodes[teacherId]={count:0,subjects:new Set()};
+      teacherCodes[teacherId].count++;
+      teacherCodes[teacherId].subjects.add(subj);
+    });
+
+    // Compute expected share per teacher (based on lessons they teach)
+    const teacherLPW={};
+    enrols.filter(e=>e.u===null).forEach(e=>{
+      const lpw=subjLPW[e.s]||0;
+      if(!teacherLPW[e.tc]) teacherLPW[e.tc]=0;
+      teacherLPW[e.tc]+=lpw;
+    });
+
+    const results=[];
+    for(const[tid,data]of Object.entries(teacherCodes)){
+      if(data.count<SA_MIN_TEACHER) continue;
+      const expectedShare=(teacherLPW[tid]||0)/totalLPW;
+      const actualShare=data.count/pSan.length;
+      const ratio=expectedShare>0?actualShare/expectedShare:actualShare>0?Infinity:0;
+      if(ratio>=SA_RATIO){
+        results.push({
+          teacher:tid,
+          subjects:[...data.subjects].sort(),
+          codes:data.count,
+          totalCodes:pSan.length,
+          expectedPct:(expectedShare*100).toFixed(0),
+          actualPct:(actualShare*100).toFixed(0),
+          ratio:ratio.toFixed(1),
+          lpw:teacherLPW[tid]||0,
+          totalLPW
+        });
+      }
+    }
+    return results.sort((a,b)=>parseFloat(b.ratio)-parseFloat(a.ratio));
+  }
+
+  function rSA(){
+    const ygVal=document.getElementById('sa-yg').value;
+    const out=document.getElementById('sa-out');
+    out.innerHTML='<div style="color:var(--mu);padding:1rem">Analysing...</div>';
+
+    const ygs=ygVal==='all'?CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)):[parseInt(ygVal)];
+
+    // Collect all pupils
+    let allLR=[];
+    ygs.forEach(yg=>{
+      const pp=ygPeriods(yg);
+      if(!pp.length) return;
+      const lp=pp[pp.length-1];
+      const lr=ygRows(yg,lp);
+      lr.forEach(r=>r._yg=yg);
+      allLR.push(...lr);
+    });
+
+    const allFlags=[];
+    allLR.forEach(r=>{
+      const px=r[0],pid=r[1],yg=r._yg;
+      const flags=getSanctionsConcentration(px);
+      flags.forEach(f=>{
+        const en2=getEn(CFG.intakes.find(i=>curYG(i)===yg),px);
+        const tg=curTG(en2);
+        allFlags.push({px,pid,yg,tg,...f});
+      });
+    });
+
+    allFlags.sort((a,b)=>parseFloat(b.ratio)-parseFloat(a.ratio));
+
+    const filterLabel=ygVal==='all'?'All Years':`Y${ygVal}`;
+
+    if(!allFlags.length){
+      out.innerHTML=`<div class="dw"><div class="dwt">Sanctions Concentration Analysis — ${filterLabel}</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No disproportionate patterns found (Min ${SA_MIN_TOTAL} codes, ${SA_MIN_TEACHER} from one teacher, ${SA_RATIO}× ratio)</div></div>`;
+      return;
+    }
+
+    const renderRow=f=>`<tr>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(f.px,f.pid)}${senPillShort(f.px)}</td>
+      <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${f.yg}</td>
+      <td style="font-size:.72rem;color:var(--mu)">${f.tg}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:.72rem">${f.teacher}</td>
+      <td style="font-size:.72rem">${f.subjects.join(', ')}</td>
+      <td style="text-align:center;font-weight:600;color:#f97316">${f.codes}</td>
+      <td style="text-align:center;color:var(--mu)">${f.totalCodes}</td>
+      <td style="text-align:center;font-weight:600;color:#ef4444">${f.actualPct}%</td>
+      <td style="text-align:center;color:var(--mu)">${f.expectedPct}%</td>
+      <td style="text-align:center;font-weight:700;color:${parseFloat(f.ratio)>=3?'#ef4444':'#f97316'}">${f.ratio}×</td>
+    </tr>`;
+
+    out.innerHTML=`<div class="dw"><div class="dwt">Sanctions Concentration Analysis — ${filterLabel} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${allFlags.length} flagged · Min ${SA_MIN_TOTAL} codes, ${SA_MIN_TEACHER}+ from teacher, ${SA_RATIO}× timetable share</span></div>
+    <div style="overflow-x:auto"><table class="d"><thead><tr>
+      <th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Teacher</th><th>Subject(s)</th>
+      <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center">Total</th>
+      <th style="text-align:center;color:#ef4444">Actual %</th><th style="text-align:center">Expected %</th>
+      <th style="text-align:center">Ratio</th>
+    </tr></thead><tbody>${allFlags.map(renderRow).join('')}</tbody></table></div></div>`;
+  }
+
+  // Pupil-level sanctions concentration alert (for use in rP)
+  function pupilSanctionsAlert(px){
+    const flags=getSanctionsConcentration(px);
+    if(!flags.length) return'';
+    const rows=flags.map(f=>`<div style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;border-bottom:1px solid rgba(38,45,68,.2)">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:.72rem;font-weight:500">${f.teacher}</span>
+      <span style="font-size:.68rem;color:var(--mu)">${f.subjects.join(', ')}</span>
+      <span style="margin-left:auto;font-size:.72rem;font-weight:600;color:#f97316">${f.codes}/${f.totalCodes} codes (${f.actualPct}%)</span>
+      <span style="font-size:.68rem;color:var(--mu)">exp ${f.expectedPct}%</span>
+      <span style="font-size:.72rem;font-weight:700;color:${parseFloat(f.ratio)>=3?'#ef4444':'#f97316'}">${f.ratio}×</span>
+    </div>`).join('');
+    return`<div class="dw" style="border-left:3px solid #f97316"><div class="dwt" style="color:#f97316">Sanctions Concentration</div>${rows}</div>`;
+  }
+
   // ── ADMIN TAB ──
   function rAdmin(){
     const out=document.getElementById('admin-out');
@@ -5790,6 +5955,14 @@ function rPeer(){
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Weight for Detention sanctions">Detention Weight</label><input id="sw-det" type="number" min="0" max="20" step="1" value="${SW_DET}" style="${inputStyle}"></div>
           </div>
         </div>
+        <div>
+          <div style="font-size:.75rem;font-weight:600;color:var(--tx);margin-bottom:.6rem">Sanctions Concentration</div>
+          <div style="display:flex;flex-direction:column;gap:.6rem">
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum total codes a pupil must have before analysis applies">Min Total Codes</label><input id="sa-min-total" type="number" min="1" max="50" step="1" value="${SA_MIN_TOTAL}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum codes from one teacher to trigger a flag">Min from Teacher</label><input id="sa-min-teacher" type="number" min="1" max="20" step="1" value="${SA_MIN_TEACHER}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Teacher's share of codes must be this many times their timetable share">Ratio Threshold</label><input id="sa-ratio" type="number" min="1" max="10" step="0.5" value="${SA_RATIO}" style="${inputStyle}"></div>
+          </div>
+        </div>
       </div>
       <div style="margin-top:.8rem"><button onclick="applyCT();applySW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;cursor:pointer">Apply Changes</button></div>
     </div>`;
@@ -5844,6 +6017,7 @@ function rPeer(){
 
   window.rAnalytics=rAnalytics;
   window.rAdmin=rAdmin;
+  window.rSA=rSA;
   window.rTV=rTV;
   window.rBC=rBC;
   window.rPP=rPP;
