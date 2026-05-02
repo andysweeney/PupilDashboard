@@ -1691,7 +1691,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   }
   const allAttVals=[...(attP||[]).filter(v=>v!=null),...(grpAttP||[]).filter(v=>v!=null),...(unauthP||[]).filter(v=>v!=null)];
   const y1Min=allAttVals.length?Math.max(0,Math.min(80,Math.min(...allAttVals)-5)):80;
-  sc2(sancKey,new Chart(document.getElementById(cSancId),{type:'bar',data:{labels:wl,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:7,padding:6}},tooltip:{callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',label:c=>{if(c.dataset.yAxisID==='y1')return` ${c.dataset.label}: ${c.parsed.y}%`;return` ${c.dataset.label}: ${c.parsed.y}`},afterBody:c=>{if(!c?.length)return'';const wi=c[0].dataIndex;const wk=wks[wi];const cat=wmCat[wk];if(!cat)return'';const total=cat.b+cat.u+cat.e+cat.a;if(!total&&!cat.d)return'';const lines=[];if(cat.b)lines.push(`  B: ${cat.b}`);if(cat.u)lines.push(`  U: ${cat.u}`);if(cat.e)lines.push(`  E: ${cat.e}`);if(cat.a)lines.push(`  A: ${cat.a}`);if(cat.d)lines.push(`  Det: ${cat.d}`);return lines}}}},scales:{x:{stacked:true,offset:true,ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},y:{stacked:true,position:'left',beginAtZero:true,ticks:{color:'#666666',stepSize:1,font:{size:7}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}},y1:{position:'right',min:y1Min,max:100,ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'},afterFit:a=>{a.width=35}}}}}));
+  sc2(sancKey,new Chart(document.getElementById(cSancId),{type:'bar',data:{labels:wl,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:7,padding:6}},tooltip:{mode:'index',intersect:false,callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',label:c=>{if(c.dataset.yAxisID==='y1')return` ${c.dataset.label}: ${c.parsed.y}%`;return` ${c.dataset.label}: ${c.parsed.y}`},afterBody:c=>{if(!c?.length)return'';const wi=c[0].dataIndex;const wk=wks[wi];const cat=wmCat[wk];if(!cat)return'';const total=cat.b+cat.u+cat.e+cat.a;if(!total&&!cat.d)return'';const lines=['───────'];if(cat.b)lines.push(`  Behaviour: ${cat.b}`);if(cat.u)lines.push(`  Uniform: ${cat.u}`);if(cat.e)lines.push(`  Equipment: ${cat.e}`);if(cat.a)lines.push(`  Attendance: ${cat.a}`);if(cat.d)lines.push(`  Detentions: ${cat.d}`);return lines}}}},scales:{x:{stacked:true,offset:true,ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},y:{stacked:true,position:'left',beginAtZero:true,ticks:{color:'#666666',stepSize:1,font:{size:7}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}},y1:{position:'right',min:y1Min,max:100,ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'},afterFit:a=>{a.width=35}}}}}));
 
   // Flag bars (only on overall chart)
   if(!subjFilter){
@@ -2050,7 +2050,7 @@ function rHeatmaps(x,ink,subjFilter){
     hmWrap.style.position='relative';
     const hmTip=document.createElement('div');
     hmTip.id='hm-tip';
-    hmTip.style.cssText='display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:350px;z-index:50;font-size:.72rem';
+    hmTip.style.cssText='display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:350px;z-index:999;font-size:.72rem';
     hmWrap.appendChild(hmTip);
 
     hmWrap.addEventListener('mousemove',ev=>{
@@ -2096,7 +2096,7 @@ function rHeatmaps(x,ink,subjFilter){
     <div class="ch-g" style="position:relative">
       <div class="chc"><div class="cht">Sanctions by Day of Week & Period Number</div><div id="dist-dow-legend"></div><div style="display:flex;gap:2rem;flex-wrap:wrap" id="dist-dow-les"></div></div>
       <div class="chc"><div class="cht">Sanctions by Subject</div><div id="dist-subj"></div></div>
-      <div id="dist-tip" style="display:none;position:fixed;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:50"></div>
+      <div id="dist-tip" style="display:none;position:fixed;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:999"></div>
     </div>`;
 
   renderDistCharts();
@@ -3939,7 +3939,7 @@ function renderPupilNet(){
 
   container.innerHTML=`<div style="position:relative">
     <svg id="pnet-svg" viewBox="0 0 ${W2} ${H2}" style="width:100%;max-height:500px;display:block;background:var(--sf2);border-radius:8px">${edgeSvg2}${centerSvg}${satSvg}</svg>
-    <div id="pnet-tip" style="display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:50"></div>
+    <div id="pnet-tip" style="display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:999"></div>
   </div>
   <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.5rem;font-size:.65rem;color:var(--mu)">
     <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6488ff22;border:1.5px solid #6488ff;vertical-align:middle;margin-right:.25rem"></span>This pupil</span>
@@ -4094,7 +4094,7 @@ function renderNet(){
 
   container.innerHTML=`<div style="position:relative">
     <svg id="net-svg" viewBox="0 0 ${W} ${H}" style="width:100%;max-height:675px;display:block;background:var(--sf2);border-radius:8px">${edgeSvg}${nodeSvg}</svg>
-    <div id="net-tip" style="display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:50"></div>
+    <div id="net-tip" style="display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:999"></div>
   </div>${legend}<div style="font-size:.6rem;color:var(--mu);margin-top:.3rem">${edges.length} pair${edges.length!==1?'s':''} · ${SAN2.length} sanctions in ${selAY}-${selAY+1}</div>`;
 
   const svgEl=document.getElementById('net-svg'),tipEl=document.getElementById('net-tip');
