@@ -122,6 +122,7 @@ table.d tr:hover td{background:var(--sf2)}
   <span id="ct-display" style="font-size:.72rem;color:#ffffff"></span>
   <span id="sw-display" style="font-size:.72rem;color:#ffffff"></span>
   <span id="ap-display" style="font-size:.72rem;color:#ffffff"></span>
+  <span id="sa-display" style="font-size:.72rem;color:#ffffff"></span>
 </div>
 </header>
 
@@ -475,8 +476,10 @@ function applyCT(){
   SA_MIN_TOTAL=parseInt(document.getElementById('sa-min-total').value)||6;
   SA_MIN_TEACHER=parseInt(document.getElementById('sa-min-teacher').value)||3;
   SA_RATIO=parseFloat(document.getElementById('sa-ratio').value)||2.0;
+  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×</b>`;
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
+  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×</b>`;
 }
 function showCTModal(){}
 function hideCTModal(){}
@@ -5021,6 +5024,7 @@ function rCC(){
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
+  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×</b>`;
 })();
 
   // Expose functions called from HTML attributes to global scope
@@ -5683,7 +5687,7 @@ function rPeer(){
   // Compute disproportionate sanctions for a pupil
   function getSanctionsConcentration(px){
     const SAN=DD.sanctions||[];
-    const pSan=SAN.filter(s=>s[0]===px&&s[1]===0); // Codes only
+    const pSan=SAN.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null); // Codes with subject only
     if(pSan.length<SA_MIN_TOTAL) return[];
 
     // Get pupil's timetable to compute expected teacher share
@@ -5775,17 +5779,44 @@ function rPeer(){
     });
 
     const allFlags=[];
+    const SAN_SA=DD.sanctions||[];
     allLR.forEach(r=>{
       const px=r[0],pid=r[1],yg=r._yg;
       const flags=getSanctionsConcentration(px);
       flags.forEach(f=>{
+        if(f.teacher==='Unknown') return; // Exclude unknown teachers
         const en2=getEn(CFG.intakes.find(i=>curYG(i)===yg),px);
         const tg=curTG(en2);
-        allFlags.push({px,pid,yg,tg,...f});
+        // Compute category breakdown for this teacher's codes
+        const pSanT=SAN_SA.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null);
+        const tEnrols=[];
+        for(const[ik,e]of Object.entries(ENR)) tEnrols.push(...e.filter(er=>er.t==='cls'&&er.x===px));
+        const cats={b:0,u:0,e:0,a:0,d:0};
+        pSanT.forEach((s,si)=>{
+          const subj=s[3];
+          const cls=tEnrols.find(e2=>e2.s===subj&&e2.u===null);
+          if(!cls||cls.tc!==f.teacher) return;
+          const gsi=SAN_SA.indexOf(s);
+          const cat=SANC_DET[gsi]?SANC_DET[gsi][1]:'Other';
+          if(cat==='Behaviour')cats.b++;else if(cat==='Uniform')cats.u++;else if(cat==='Equipment')cats.e++;else if(cat==='Attendance')cats.a++;else cats.b++;
+        });
+        // Detentions from this teacher
+        const pDet=SAN_SA.filter(s=>s[0]===px&&s[1]===2&&s[3]!=null);
+        pDet.forEach(s=>{
+          const cls=tEnrols.find(e2=>e2.s===s[3]&&e2.u===null);
+          if(cls&&cls.tc===f.teacher) cats.d++;
+        });
+        allFlags.push({px,pid,yg,tg,...f,cats,
+          ratioNum:parseFloat(f.ratio),
+          codesNum:f.codes,
+          totalNum:f.totalCodes,
+          actualNum:parseInt(f.actualPct),
+          expectedNum:parseInt(f.expectedPct)
+        });
       });
     });
 
-    allFlags.sort((a,b)=>parseFloat(b.ratio)-parseFloat(a.ratio));
+    allFlags.sort((a,b)=>b.ratioNum-a.ratioNum);
 
     const filterLabel=ygVal==='all'?'All Years':`Y${ygVal}`;
 
@@ -5800,20 +5831,46 @@ function rPeer(){
       <td style="font-size:.72rem;color:var(--mu)">${f.tg}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:.72rem">${f.teacher}</td>
       <td style="font-size:.72rem">${f.subjects.join(', ')}</td>
-      <td style="text-align:center;font-weight:600;color:#f97316">${f.codes}</td>
+      <td style="text-align:center;font-weight:600;color:#f97316;${sancTipAttrs(f.codesNum,f.cats.d,f.cats)}">${f.codes}</td>
       <td style="text-align:center;color:var(--mu)">${f.totalCodes}</td>
       <td style="text-align:center;font-weight:600;color:#ef4444">${f.actualPct}%</td>
       <td style="text-align:center;color:var(--mu)">${f.expectedPct}%</td>
-      <td style="text-align:center;font-weight:700;color:${parseFloat(f.ratio)>=3?'#ef4444':'#f97316'}">${f.ratio}×</td>
+      <td style="text-align:center;font-weight:700;color:${f.ratioNum>=3?'#ef4444':'#f97316'}">${f.ratio}×</td>
     </tr>`;
 
     out.innerHTML=`<div class="dw"><div class="dwt">Sanctions Concentration Analysis — ${filterLabel} <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${allFlags.length} flagged · Min ${SA_MIN_TOTAL} codes, ${SA_MIN_TEACHER}+ from teacher, ${SA_RATIO}× timetable share</span></div>
     <div style="overflow-x:auto"><table class="d"><thead><tr>
-      <th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Teacher</th><th>Subject(s)</th>
-      <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center">Total</th>
-      <th style="text-align:center;color:#ef4444">Actual %</th><th style="text-align:center">Expected %</th>
-      <th style="text-align:center">Ratio</th>
-    </tr></thead><tbody>${allFlags.map(renderRow).join('')}</tbody></table></div></div>`;
+      <th style="cursor:pointer" onclick="window._saSort.setSort('pid')">Pupil ↕</th>
+      <th style="text-align:center;cursor:pointer" onclick="window._saSort.setSort('yg')">Year ↕</th>
+      <th style="cursor:pointer" onclick="window._saSort.setSort('tg')">TG ↕</th>
+      <th style="cursor:pointer" onclick="window._saSort.setSort('teacher')">Teacher ↕</th>
+      <th style="cursor:pointer" onclick="window._saSort.setSort('subjects')">Subject(s) ↕</th>
+      <th style="text-align:center;color:#f97316;cursor:pointer" onclick="window._saSort.setSort('codesNum')">Codes ↕</th>
+      <th style="text-align:center;cursor:pointer" onclick="window._saSort.setSort('totalNum')">Total ↕</th>
+      <th style="text-align:center;color:#ef4444;cursor:pointer" onclick="window._saSort.setSort('actualNum')">Actual % ↕</th>
+      <th style="text-align:center;cursor:pointer" onclick="window._saSort.setSort('expectedNum')">Expected % ↕</th>
+      <th style="text-align:center;cursor:pointer" onclick="window._saSort.setSort('ratioNum')">Ratio ↕</th>
+    </tr></thead><tbody id="sa-tbody"></tbody></table></div></div>`;
+
+    // Sortable table
+    let saSortField='ratioNum',saSortDir='desc';
+    function saRender(){
+      const sorted=[...allFlags].sort((a,b)=>{
+        let va=a[saSortField],vb=b[saSortField];
+        if(saSortField==='subjects'){va=va.join(',');vb=vb.join(',')}
+        if(va==null&&vb==null)return 0;
+        if(va==null)return 1;if(vb==null)return-1;
+        const cmp=typeof va==='string'?va.localeCompare(vb):va-vb;
+        return saSortDir==='asc'?cmp:-cmp;
+      });
+      const tb=document.getElementById('sa-tbody');
+      if(tb) tb.innerHTML=sorted.map(renderRow).join('');
+    }
+    window._saSort={
+      setSort:(field)=>{if(saSortField===field)saSortDir=saSortDir==='asc'?'desc':'asc';else{saSortField=field;saSortDir='desc'}saRender()},
+      render:saRender
+    };
+    saRender();
   }
 
   // Pupil-level sanctions concentration alert (for use in rP)
