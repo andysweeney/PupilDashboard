@@ -510,6 +510,8 @@ const TT_COLORS={'Non-Lesson':'#94a3b8'};
 
 // Read timetables from data.json (generated with school-wide teacher clash prevention)
 const TT_DATA=DD.timetables||{};
+const _SKR2={};
+if(DD.subjectKeys) Object.entries(DD.subjectKeys).forEach(([name,key])=>{_SKR2[key]=name});
 const SANC_DET=DD.sanctionDetails||[];
 const SEN_STATUS=DD.senStatus||{};
 const SEN_LABELS={'K':'SEN Support','E':'EHCP','Add':'Additional Help','add':'Additional Help','Strat':'Strategies Applied','strat':'Strategies Applied','N':'SEN Monitoring'};
@@ -5677,10 +5679,6 @@ function rPeer(){
 
   window.popTG=popTG;
   window.rTG=rTG;
-  // Reverse subject key map for timetable lookups
-  const _SKR2={};
-  if(DD.subjectKeys) Object.entries(DD.subjectKeys).forEach(([name,key])=>{_SKR2[key]=name});
-
   // ── SANCTIONS ANALYSIS ──
   // Compute disproportionate sanctions for a pupil
   function getSanctionsConcentration(px){
