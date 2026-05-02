@@ -588,6 +588,47 @@ function sancCatsFor(pxOrSet,sanArr,sanDetArr){
 }
 function isUnauth(mark){return UNAUTH_MARKS.has(mark)}
 
+// Period-level absence counting (deduplicated by date+period)
+function countAbsPeriods(px, startDate, endDate){
+  const aas=(DD.attAbsSubj||{})[String(px)]||[];
+  const seen=new Set();
+  let total=0, unauth=0;
+  aas.forEach(r=>{
+    // r = [date, subject, period, mark]
+    if(startDate && r[0]<startDate) return;
+    if(endDate && r[0]>endDate) return;
+    const key=r[0]+'|'+r[2];
+    if(seen.has(key)) return;
+    seen.add(key);
+    total++;
+    if(r[3]&&isUnauth(r[3])) unauth++;
+  });
+  return{total,unauth};
+}
+
+// Count periods absent in a specific week (Monday ISO date)
+function countAbsPeriodsWeek(px, weekMon){
+  const aas=(DD.attAbsSubj||{})[String(px)]||[];
+  const seen=new Set();
+  let total=0, unauth=0;
+  // Week runs Mon to Fri (5 days from weekMon)
+  const monDate=new Date(weekMon+'T12:00:00');
+  const dates=new Set();
+  for(let i=0;i<5;i++){
+    const d2=new Date(monDate);d2.setDate(d2.getDate()+i);
+    dates.add(`${d2.getFullYear()}-${String(d2.getMonth()+1).padStart(2,'0')}-${String(d2.getDate()).padStart(2,'0')}`);
+  }
+  aas.forEach(r=>{
+    if(!dates.has(r[0])) return;
+    const key=r[0]+'|'+r[2];
+    if(seen.has(key)) return;
+    seen.add(key);
+    total++;
+    if(r[3]&&isUnauth(r[3])) unauth++;
+  });
+  return{total,unauth};
+}
+
 // Global sortable table helper
 function sortableTable(tableId,data,renderRow,defaultSortFn){
   let sortFn=defaultSortFn,sortDir='desc';
@@ -612,11 +653,12 @@ function analyseAbsencePattern(px){
   const pMarks=(DD.attendanceMarks||{})[String(px)]||{};
   const DAYS=['Mon','Tue','Wed','Thu','Fri'];
 
-  // Count absences per slot (day x period)
+  // Count absences per slot (day x period) — deduplicate by date+slot for split cells
   const slotAbs=Array.from({length:5},()=>Array(5).fill(0));
   const slotUnauth=Array.from({length:5},()=>Array(5).fill(0));
   const dayAbs=[0,0,0,0,0];
   let totalAbs=0;
+  const _seenSlots=new Set();
 
   pAbsSubj.forEach(r=>{
     // r = [date, subject, period, mark]
@@ -624,6 +666,9 @@ function analyseAbsencePattern(px){
     const dow=dt.getDay()-1; // 0=Mon
     const per=(r[2]||1)-1; // 0-indexed
     if(dow>=0&&dow<5&&per>=0&&per<5){
+      const slotKey=r[0]+'|'+dow+'|'+per;
+      if(_seenSlots.has(slotKey)) return;
+      _seenSlots.add(slotKey);
       slotAbs[dow][per]++;
       dayAbs[dow]++;
       totalAbs++;
@@ -745,11 +790,15 @@ function renderTGAbsencePattern(tgPupilPxSet,containerId){
 
   tgPupilPxSet.forEach(px=>{
     const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
+    const _seen2=new Set();
     pAbsSubj.forEach(r=>{
       const dt=new Date(r[0]+'T12:00:00');
       const dow=dt.getDay()-1;
       const per=(r[2]||1)-1;
       if(dow>=0&&dow<5&&per>=0&&per<5){
+        const sk=r[0]+'|'+dow+'|'+per;
+        if(_seen2.has(sk)) return;
+        _seen2.add(sk);
         slotAbs[dow][per]++;
         totalAbs++;
         if(!slotPupils[dow][per][px]) slotPupils[dow][per][px]={count:0,unauth:0};
@@ -1277,7 +1326,6 @@ function rP(){
 
   // Current academic year attendance & sanctions
   const curAY=CAY;
-  const pAbsAll=(DD.attendance||{})[String(x)]||[];
   const pAbsSubjAll=(DD.attAbsSubj||{})[String(x)]||[];
   const SAN_ALL=DD.sanctions||[];
 
@@ -1285,13 +1333,13 @@ function rP(){
   const _today2=new Date();
   const _today2ISO=`${_today2.getFullYear()}-${String(_today2.getMonth()+1).padStart(2,'0')}-${String(_today2.getDate()).padStart(2,'0')}`;
   const ayStart=`${curAY}-09-01`,ayEnd=_today2ISO;
-  const ayAbs=pAbsAll.filter(d=>(typeof d==='string'?d:d)>=ayStart&&(typeof d==='string'?d:d)<=ayEnd);
+  const ayAbsCounts=countAbsPeriods(x,ayStart,ayEnd);
   
   // Total lessons this academic year from weekLessons
   const WLK2=DD.weekLessons||{};
   let ayTotalLessons=0;
   for(const[w,tl]of Object.entries(WLK2)){if(w>=ayStart&&w<=ayEnd)ayTotalLessons+=tl}
-  const ayAttPct=ayTotalLessons>0?((ayTotalLessons-ayAbs.length)/ayTotalLessons*100).toFixed(1):'—';
+  const ayAttPct=ayTotalLessons>0?((ayTotalLessons-ayAbsCounts.total)/ayTotalLessons*100).toFixed(1):'—';
   const ayAttCol=ayAttPct==='—'?'var(--mu)':parseFloat(ayAttPct)>=95?'#34d399':parseFloat(ayAttPct)>=90?'#eab308':'#ef4444';
 
   // Subject-specific attendance for current AY
@@ -1617,18 +1665,18 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   const monthSeen={};
   wks.forEach((w,i)=>{const d2=new Date(w+'T12:00:00');const mk=d2.getFullYear()+'-'+d2.getMonth();if(!monthSeen[mk]&&!wl[i]){wl[i]=d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'})}monthSeen[mk]=true});
 
-  // Attendance overlay
-  const pAbsRaw=(DD.attendance||{})[String(x)]||[];
-  const abw={};
-  pAbsRaw.forEach(r=>{const d2=typeof r==='string'?r:r[0];const m=localISO(gm(new Date(d2+'T12:00:00')));abw[m]=(abw[m]||0)+1});
-
-  // Unauthorised absence per week
-  const uAbw={};
-  const pMarks=(DD.attendanceMarks||{})[String(x)]||{};
-  Object.entries(pMarks).forEach(([dt,marks])=>{
-    const m=localISO(gm(new Date(dt+'T12:00:00')));
-    const uCount=marks.filter(mk=>isUnauth(mk)).length;
-    if(uCount) uAbw[m]=(uAbw[m]||0)+uCount;
+  // Attendance overlay — period-level counting (deduplicated)
+  const abw={};// periods absent per week
+  const uAbw={};// unauthorised periods absent per week
+  const pAbsSubjAll2=(DD.attAbsSubj||{})[String(x)]||[];
+  const _attSeen=new Set();
+  pAbsSubjAll2.forEach(r=>{
+    const key=r[0]+'|'+r[2];
+    if(_attSeen.has(key)) return;
+    _attSeen.add(key);
+    const m=localISO(gm(new Date(r[0]+'T12:00:00')));
+    abw[m]=(abw[m]||0)+1;
+    if(r[3]&&isUnauth(r[3])) uAbw[m]=(uAbw[m]||0)+1;
   });
 
   let attP,unauthP;
@@ -1687,8 +1735,15 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
     const WLK2=DD.weekLessons||{};
     const grpAbsAll={};
     groupPupils.forEach(px2=>{
-      const abs2=(DD.attendance||{})[String(px2)]||[];
-      abs2.forEach(d2=>{const wk2=localISO(gm(new Date(d2+'T12:00:00')));grpAbsAll[wk2]=(grpAbsAll[wk2]||0)+1});
+      const aas2=(DD.attAbsSubj||{})[String(px2)]||[];
+      const _gs=new Set();
+      aas2.forEach(r=>{
+        const key=r[0]+'|'+r[2];
+        if(_gs.has(key)) return;
+        _gs.add(key);
+        const wk2=localISO(gm(new Date(r[0]+'T12:00:00')));
+        grpAbsAll[wk2]=(grpAbsAll[wk2]||0)+1;
+      });
     });
     const n=groupPupils.length;
     grpAttP=wks.map(w=>{
@@ -3078,8 +3133,8 @@ function rSEND(){
         const ytdDets=pSanc.filter(s=>s[1]===2).length;
 
         // YTD Attendance (all subjects)
-        const pAbsAll=(DD.attendance||{})[String(px)]||[];
-        const ytdAbs=pAbsAll.filter(d=>d>=ayStart&&d<=_sTodayISO).length;
+        const _sAbsCounts=countAbsPeriods(px,ayStart,_sTodayISO);
+        const ytdAbs=_sAbsCounts.total;
         let ytdTotalLessons=0;
         for(const[w,tl]of Object.entries(WLK)){if(w>=ayStart&&w<=_sTodayISO)ytdTotalLessons+=tl}
         const ytdAttPct=ytdTotalLessons>0?((ytdTotalLessons-ytdAbs)/ytdTotalLessons*100).toFixed(1):'—';
@@ -5038,9 +5093,9 @@ function peerFilterPupils(filters){
     if(attband!=='any'){
       let attPct;
       if(subject==='all'){
-        // Overall YTD attendance
-        const pAbs=(DD.attendance||{})[String(px)]||[];
-        const ytdAbs=pAbs.filter(d=>d>=ayStart&&d<=_pTodayISO).length;
+        // Overall YTD attendance (period-level, deduplicated)
+        const _peerAbs=countAbsPeriods(px,ayStart,_pTodayISO);
+        const ytdAbs=_peerAbs.total;
         let ytdTotal=0;
         for(const[w,tl] of Object.entries(WLK)){if(w>=ayStart&&w<=_pTodayISO)ytdTotal+=tl}
         attPct=ytdTotal>0?((ytdTotal-ytdAbs)/ytdTotal*100):100;
@@ -5112,8 +5167,8 @@ function peerComputeSeries(result){
     if(!tl){attData.push(null);return}
     let totalAbs=0;
     pupils.forEach(r=>{
-      const abs2=(DD.attendance||{})[String(r[0])]||[];
-      totalAbs+=abs2.filter(d=>d>=ps2&&d<=peCap).length;
+      const _tgAbs3=countAbsPeriods(r[0],ps2,peCap);
+      totalAbs+=_tgAbs3.total;
     });
     const totalL=tl*pupils.length;
     attData.push(totalL>0?parseFloat(((totalL-totalAbs)/totalL*100).toFixed(1)):null);
@@ -5272,9 +5327,8 @@ function rPeer(){
   let tgYtdAtt='—',tgTtdAtt='—';
   let totalLessons=0,totalAbs=0;
   tgRows.forEach(r=>{
-    const pAbs=(DD.attendance||{})[String(r[0])]||[];
-    const ytdAbs=pAbs.filter(d=>d>=ayStart&&d<=_tgTodayISO).length;
-    totalAbs+=ytdAbs;
+    const _tgAbs=countAbsPeriods(r[0],ayStart,_tgTodayISO);
+    totalAbs+=_tgAbs.total;
   });
   let ytdTotalL=0;
   for(const[w,tl]of Object.entries(WLK)){if(w>=ayStart&&w<=_tgTodayISO)ytdTotalL+=tl}
@@ -5307,8 +5361,8 @@ function rPeer(){
   // ── PUPIL TABLE ──
   const pupilRows=tgRows.map(r=>{
     const px=r[0],pid=r[1];
-    const pAbs=(DD.attendance||{})[String(px)]||[];
-    const ytdAbs=pAbs.filter(d=>d>=ayStart&&d<=_tgTodayISO).length;
+    const _tgPAbs=countAbsPeriods(px,ayStart,_tgTodayISO);
+    const ytdAbs=_tgPAbs.total;
     const pAttPct=ytdTotalL>0?((ytdTotalL-ytdAbs)/ytdTotalL*100).toFixed(1):'—';
     const pSanc=SAN.filter(s=>s[0]===px&&s[2]>=ayStart&&s[2]<=_tgTodayISO);
     const pCodes=pSanc.filter(s=>s[1]===0).length;
