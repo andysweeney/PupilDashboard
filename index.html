@@ -528,11 +528,19 @@ function sancCatsFor(pxOrSet,sanArr,sanDetArr){
 }
 function isUnauth(mark){return UNAUTH_MARKS.has(mark)}
 
+// Pre-compute suppressed absence sets for performance
+const _SUPP_CACHE={};
+function getSuppressed(px){
+  const k=String(px);
+  if(!_SUPP_CACHE[k])_SUPP_CACHE[k]=new Set((DD.suppressedAbsences||{})[k]||[]);
+  return _SUPP_CACHE[k];
+}
+
 // Period-level absence counting (deduplicated by date+period)
 function countAbsPeriods(px, startDate, endDate){
   const aas=(DD.attAbsSubj||{})[String(px)]||[];
   const seen=new Set();
-  const _supp=new Set((DD.suppressedAbsences||{})[String(px)]||[]);
+  const _supp=getSuppressed(px);
   let total=0, unauth=0;
   aas.forEach(r=>{
     if(startDate && r[0]<startDate) return;
@@ -551,7 +559,7 @@ function countAbsPeriods(px, startDate, endDate){
 function countAbsPeriodsWeek(px, weekMon){
   const aas=(DD.attAbsSubj||{})[String(px)]||[];
   const seen=new Set();
-  const _supp2=new Set((DD.suppressedAbsences||{})[String(px)]||[]);
+  const _supp2=getSuppressed(px);
   let total=0, unauth=0;
   const monDate=new Date(weekMon+'T12:00:00');
   const dates=new Set();
@@ -601,7 +609,7 @@ function analyseAbsencePattern(px){
   const dayAbs=[0,0,0,0,0];
   let totalAbs=0;
   const _seenSlots=new Set();
-  const _suppAP=new Set((DD.suppressedAbsences||{})[String(px)]||[]);
+  const _suppAP=getSuppressed(px);
 
   pAbsSubj.forEach(r=>{
     // r = [date, subject, period, mark]
@@ -3741,7 +3749,7 @@ function renderAttTable(){
   const subjAbsCount={};
   const subjUnauthCount={};
   const _subjSeen={};
-  const _suppressed=new Set((DD.suppressedAbsences||{})[String(x)]||[]);
+  const _suppressed=getSuppressed(x);
   pAbsSubj.forEach(r=>{
     // r = [date, subject, period, mark]
     if(r[0]>=ayStart&&r[0]<=ayEnd){
