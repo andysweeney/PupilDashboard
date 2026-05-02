@@ -631,11 +631,13 @@ function analyseAbsencePattern(px){
 
   // Slot-level flags
   const slotFlags=[];
+  const _slotDenom2=DD.slotDenominators||[[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29]];
   for(let d=0;d<5;d++){
     for(let p=0;p<5;p++){
-      if(slotAbs[d][p]>=AP_MIN&&weekCount>0){
-        const rate=(slotAbs[d][p]/weekCount*100);
-        if(rate>=AP_SLOT) slotFlags.push({day:DAYS[d],dayIdx:d,per:p+1,perIdx:p,count:slotAbs[d][p],weeks:weekCount,rate,unauth:slotUnauth[d][p]});
+      const denom2=_slotDenom2[d][p];
+      if(slotAbs[d][p]>=AP_MIN&&denom2>0){
+        const rate=(slotAbs[d][p]/denom2*100);
+        if(rate>=AP_SLOT) slotFlags.push({day:DAYS[d],dayIdx:d,per:p+1,perIdx:p,count:slotAbs[d][p],weeks:denom2,rate,unauth:slotUnauth[d][p]});
       }
     }
   }
@@ -667,12 +669,15 @@ function renderAbsencePattern(px,containerId){
     return'background:rgba(147,51,234,0.4)';
   }
 
-  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${weekCount} weeks${dayFlags.length||slotFlags.length?' · <span style=color:#ef4444>'+( dayFlags.length+slotFlags.length)+' pattern'+(dayFlags.length+slotFlags.length!==1?'s':'')+' detected</span>':''}</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
+  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${Object.values(DD.schoolDayCounts||{}).reduce((a,b)=>a+b,138)} school days${dayFlags.length||slotFlags.length?' · <span style=color:#ef4444>'+( dayFlags.length+slotFlags.length)+' pattern'+(dayFlags.length+slotFlags.length!==1?'s':'')+' detected</span>':''}</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
   html+=`<div style="padding:.5rem 1rem .75rem">`;
 
   // Heatmap grid
   html+=`<div class="tt-grid">`;
   html+=`<div class="tt-per"></div>`;DAYS.forEach(d=>{html+=`<div class="tt-day">${d}</div>`});
+
+  // Per-slot denominators (day × period) for accurate percentages
+  const _slotDenom=DD.slotDenominators||[[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29]];
 
   for(let p=0;p<5;p++){
     html+=`<div class="tt-per">P${p+1}</div>`;
@@ -680,13 +685,14 @@ function renderAbsencePattern(px,containerId){
       const count=slotAbs[d][p];
       const unauth=slotUnauth[d][p];
       const heat=absHeat(count);
-      const rate=weekCount>0?(count/weekCount*100).toFixed(0):'0';
+      const denom=_slotDenom[d][p];
+      const rate=denom>0?(count/denom*100).toFixed(0):'0';
       const isFlagged=slotFlags.some(f=>f.dayIdx===d&&f.perIdx===p);
       const subj=grid[d]?.[p]?grid[d][p][0]:'';
       const border=isFlagged?'border:2px solid #ef4444;':'border-left:2px solid '+(subj?'var(--bd)':'transparent')+';';
       
       if(count){
-        html+=`<div class="tt-cell" style="${border}${heat}" data-tip="1" onmouseenter="this._tip=document.createElement('div');this._tip.className='abs-tip';this._tip.innerHTML='<b>${DAYS[d]} P${p+1}</b><br>${count} absence${count!==1?'s':''} (${rate}% of weeks)${unauth?'<br><span style=color:#c62828>'+unauth+' unauthorised</span>':''}${subj?'<br>Subject: '+subj:''}';this._tip.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.7rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);pointer-events:none;white-space:nowrap';const _r=this.getBoundingClientRect();this._tip.style.left=(_r.left+_r.width/2)+'px';this._tip.style.top=(_r.top-4)+'px';this._tip.style.transform='translate(-50%,-100%)';document.body.appendChild(this._tip)" onmouseleave="if(this._tip)this._tip.remove()">`;
+        html+=`<div class="tt-cell" style="${border}${heat}" data-tip="1" onmouseenter="this._tip=document.createElement('div');this._tip.className='abs-tip';this._tip.innerHTML='<b>${DAYS[d]} P${p+1}</b><br>${count} of ${denom} ${DAYS[d]}s (${rate}%)${unauth?'<br><span style=color:#c62828>'+unauth+' unauthorised</span>':''}${subj?'<br>Subject: '+subj:''}';this._tip.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.7rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);pointer-events:none;white-space:nowrap';const _r=this.getBoundingClientRect();this._tip.style.left=(_r.left+_r.width/2)+'px';this._tip.style.top=(_r.top-4)+'px';this._tip.style.transform='translate(-50%,-100%)';document.body.appendChild(this._tip)" onmouseleave="if(this._tip)this._tip.remove()">`;
         html+=`<span style="font-size:.8rem;font-weight:700;color:var(--tx)">${count}</span>`;
         html+=`<span style="font-size:.6rem;font-weight:500;color:#1a1a1a">${rate}% missed</span>`;
         if(unauth) html+=`<span style="font-size:.6rem;font-weight:600;color:#c62828">${unauth}u</span>`;
