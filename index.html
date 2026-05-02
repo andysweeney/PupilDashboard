@@ -532,12 +532,13 @@ function isUnauth(mark){return UNAUTH_MARKS.has(mark)}
 function countAbsPeriods(px, startDate, endDate){
   const aas=(DD.attAbsSubj||{})[String(px)]||[];
   const seen=new Set();
+  const _supp=new Set((DD.suppressedAbsences||{})[String(px)]||[]);
   let total=0, unauth=0;
   aas.forEach(r=>{
-    // r = [date, subject, period, mark]
     if(startDate && r[0]<startDate) return;
     if(endDate && r[0]>endDate) return;
     const key=r[0]+'|'+r[2];
+    if(_supp.has(key)) return; // Present in another subject
     if(seen.has(key)) return;
     seen.add(key);
     total++;
@@ -550,8 +551,8 @@ function countAbsPeriods(px, startDate, endDate){
 function countAbsPeriodsWeek(px, weekMon){
   const aas=(DD.attAbsSubj||{})[String(px)]||[];
   const seen=new Set();
+  const _supp2=new Set((DD.suppressedAbsences||{})[String(px)]||[]);
   let total=0, unauth=0;
-  // Week runs Mon to Fri (5 days from weekMon)
   const monDate=new Date(weekMon+'T12:00:00');
   const dates=new Set();
   for(let i=0;i<5;i++){
@@ -561,6 +562,7 @@ function countAbsPeriodsWeek(px, weekMon){
   aas.forEach(r=>{
     if(!dates.has(r[0])) return;
     const key=r[0]+'|'+r[2];
+    if(_supp2.has(key)) return;
     if(seen.has(key)) return;
     seen.add(key);
     total++;
@@ -599,9 +601,12 @@ function analyseAbsencePattern(px){
   const dayAbs=[0,0,0,0,0];
   let totalAbs=0;
   const _seenSlots=new Set();
+  const _suppAP=new Set((DD.suppressedAbsences||{})[String(px)]||[]);
 
   pAbsSubj.forEach(r=>{
     // r = [date, subject, period, mark]
+    const slotKeyS=r[0]+'|'+r[2];
+    if(_suppAP.has(slotKeyS)) return; // Present in another subject
     const dt=new Date(r[0]+'T12:00:00');
     const dow=dt.getDay()-1; // 0=Mon
     const per=(r[2]||1)-1; // 0-indexed
@@ -3732,14 +3737,23 @@ function renderAttTable(){
   }
   const pupilSubjects=Object.keys(subjLPW).sort();
 
-  // Count absences per subject in range (split by auth/unauth)
+  // Count absences per subject in range — deduplicate by date+period, skip suppressed slots
   const subjAbsCount={};
   const subjUnauthCount={};
+  const _subjSeen={};
+  const _suppressed=new Set((DD.suppressedAbsences||{})[String(x)]||[]);
   pAbsSubj.forEach(r=>{
     // r = [date, subject, period, mark]
     if(r[0]>=ayStart&&r[0]<=ayEnd){
-      subjAbsCount[r[1]]=(subjAbsCount[r[1]]||0)+1;
-      if(r[3]&&isUnauth(r[3])) subjUnauthCount[r[1]]=(subjUnauthCount[r[1]]||0)+1;
+      const slotKey=r[0]+'|'+r[2];
+      if(_suppressed.has(slotKey)) return; // Present in another subject — skip
+      const subj=r[1];
+      const key=r[0]+'|'+r[2];
+      if(!_subjSeen[subj]) _subjSeen[subj]=new Set();
+      if(_subjSeen[subj].has(key)) return;
+      _subjSeen[subj].add(key);
+      subjAbsCount[subj]=(subjAbsCount[subj]||0)+1;
+      if(r[3]&&isUnauth(r[3])) subjUnauthCount[subj]=(subjUnauthCount[subj]||0)+1;
     }
   });
 
@@ -3797,7 +3811,7 @@ function renderAttTable(){
     const lpw=subjLPW[s]||0;
     const totalLessons=totalSchoolWeeks*lpw;
     const abs=subjAbsCount[s]||0;
-    const attended=totalLessons-abs;
+    const attended=Math.max(0, totalLessons-abs);
     const attPct=totalLessons>0?((attended/totalLessons)*100):null;
     const clsAtt=clsAvgAtt[s]!=null?clsAvgAtt[s]:null;
     const tgAtt=tgAvgAtt[s]!=null?tgAvgAtt[s]:null;
