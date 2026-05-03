@@ -6791,15 +6791,17 @@ function rPeer(){
           if(tgAbsRate>yrAbsRate+TG_ABS_DELTA) concerns.push(`Absence ${tgAbsRate.toFixed(1)}% vs year avg ${yrAbsRate.toFixed(1)}%`);
           if(tgSanPP>yrSanPP*TG_SAN_RATIO&&tgSan.length>=TG_SAN_MIN) concerns.push(`Sanctions ${tgSanPP.toFixed(1)}/pupil vs year avg ${yrSanPP.toFixed(1)}`);
 
-          // Count PA pupils — uses same rolling-window rule as the pupil PA flag
-          const paPupils=info.pupils.filter(px2=>{
+          // Identify PA pupils — uses same rolling-window rule as the pupil PA flag
+          const paPupilList=info.pupils.map(px2=>{
             const a=attRA(px2,CT_PA_WIN);
-            return a.rate>=CT_PA_PCT;
-          }).length;
+            return{px:px2,rate:a.rate,absent:a.absent};
+          }).filter(p=>p.rate>=CT_PA_PCT)
+            .sort((a,b)=>b.rate-a.rate);
+          const paPupils=paPupilList.length;
           if(paPupils>=TG_PA_MIN) concerns.push(`${paPupils} persistently absent pupils`);
 
           if(concerns.length){
-            tgConcerns.push({yg:info.yg,tg,pupils:info.pupils.length,absRate:tgAbsRate.toFixed(1),sanPP:tgSanPP.toFixed(1),paPupils,concerns,severity:concerns.length>=2?'red':'amber'});
+            tgConcerns.push({yg:info.yg,tg,pupils:info.pupils.length,absRate:tgAbsRate.toFixed(1),sanPP:tgSanPP.toFixed(1),paPupils,paPupilList,concerns,severity:concerns.length>=2?'red':'amber'});
           }
         }
       });
@@ -6920,8 +6922,19 @@ function rPeer(){
 
     // TG concerns
     if(tgConcerns.length){
-      const tRows=tgConcerns.map(t=>{
+      const tRows=tgConcerns.map((t,idx)=>{
         const sevDot=t.severity==='red'?'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:.3rem"></span>':'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f97316;margin-right:.3rem"></span>';
+        // Build PA pupil list (clickable names + their rolling absence rate)
+        let paDetailRow='';
+        if(t.paPupilList && t.paPupilList.length){
+          const paLinks=t.paPupilList.map(p=>{
+            const name=((DD.registry||{})[String(p.px)]?.id||String(p.px)).replace(/\s*\([^)]+\)\s*$/,'');
+            return `${pLink(p.px,name)} <span style="color:#ef4444;font-weight:600">${p.rate.toFixed(1)}%</span>`;
+          }).join(' · ');
+          paDetailRow=`<tr><td colspan="8" style="padding:.3rem .8rem .6rem 2rem;background:rgba(38,45,68,.15);font-size:.7rem;color:var(--mu)">
+            <span style="color:var(--mu);text-transform:uppercase;letter-spacing:.04em;font-size:.62rem;margin-right:.5rem">Persistently absent (${CT_PA_WIN}sd):</span>${paLinks}
+          </td></tr>`;
+        }
         return`<tr>
           <td>${sevDot}</td>
           <td>Y${t.yg}</td>
@@ -6929,9 +6942,9 @@ function rPeer(){
           <td style="text-align:center">${t.pupils}</td>
           <td style="text-align:center;${parseFloat(t.absRate)>=8?'color:#ef4444;font-weight:600':''}">${t.absRate}%</td>
           <td style="text-align:center">${t.sanPP}</td>
-          <td style="text-align:center;${t.paPupils>=3?'color:#ef4444;font-weight:600':''}">${t.paPupils}</td>
+          <td style="text-align:center;${t.paPupils>=TG_PA_MIN?'color:#ef4444;font-weight:600':''}">${t.paPupils}</td>
           <td style="font-size:.68rem">${t.concerns.join(' · ')}</td>
-        </tr>`;
+        </tr>${paDetailRow}`;
       }).join('');
 
       html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Tutor Group Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${tgConcerns.length} TGs flagged</span></div>
