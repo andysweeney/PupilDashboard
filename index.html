@@ -124,6 +124,8 @@ table.d tr:hover td{background:var(--sf2)}
   <span id="sw-display" style="font-size:.72rem;color:#ffffff"></span>
   <span id="ap-display" style="font-size:.72rem;color:#ffffff"></span>
   <span id="sa-display" style="font-size:.72rem;color:#ffffff"></span>
+  <span id="cl-display" style="font-size:.72rem;color:#ffffff"></span>
+  <span id="tg-display" style="font-size:.72rem;color:#ffffff"></span>
 </div>
 </header>
 
@@ -301,6 +303,24 @@ table.d tr:hover td{background:var(--sf2)}
     return;
   }
 
+  // ── Validate enrichment fields ──
+  // Each of these must be present for the dashboard to compute concerns correctly.
+  // If any are missing, the data file was produced by an out-of-date import script.
+  (function validateData(){
+    const required=['slotDenominators','slotTeachers','schoolDayCounts','suppressedAbsences','weekLessons','attendanceMarks','attAbsSubj','timetables'];
+    const missing=required.filter(k=>DD[k]===undefined||DD[k]===null);
+    if(missing.length){
+      console.error('[data.json] Missing required enrichment fields:',missing);
+    }
+    // Shape check: slotDenominators must be 5×5
+    if(DD.slotDenominators){
+      const sd=DD.slotDenominators;
+      if(!Array.isArray(sd)||sd.length!==5||!sd.every(row=>Array.isArray(row)&&row.length===5)){
+        console.error('[data.json] slotDenominators has wrong shape — expected 5×5 array, got:',sd);
+      }
+    }
+  })();
+
   // ── Decompress data ──
   (function(){
     const SK=DD.subjectKeys,PK=DD.periodKeys;
@@ -439,7 +459,78 @@ function inkKey(ink){return'I'+ink}
 // Lookups
 function getEn(ink,x){return(ENR[inkKey(ink)]||[]).filter(r=>r.x===x)}
 function curTG(en){const t=en.filter(r=>r.t==='tg'&&r.u===null);return t.length?t[t.length-1].v:en.filter(r=>r.t==='tg').pop()?.v||'—'}
-function pDate(p){const[t,a]=p.split(' ');const y=parseInt(a);return t==='T1'?y+'-10-01':t==='T2'?(y+1)+'-02-01':(y+1)+'-05-01'}
+// Term boundary detection — driven by weekLessons gaps.
+// Returns up to 3 term objects { label:'T1'|'T2'|'T3', start:ISO Mon, end:ISO Fri }.
+// A term break is any ≥14-day gap between consecutive weekLessons Mondays.
+// The 3-term split uses the breaks that contain Christmas (crosses Dec 25)
+// and Easter (first ≥14-day gap after Feb 1). Other 14-day gaps (Oct/Feb half-term)
+// are ignored. Terms with no lesson weeks are dropped.
+function getTerms(ay){
+  const wl=DD&&DD.weekLessons||{};
+  const ayStart=`${ay}-09-01`,ayEnd=`${ay+1}-07-31`;
+  const weeks=Object.keys(wl).filter(w=>w>=ayStart&&w<=ayEnd).sort();
+  if(!weeks.length) return[];
+  // Identify ≥14-day gaps
+  const breaks=[];
+  for(let i=1;i<weeks.length;i++){
+    const prev=new Date(weeks[i-1]+'T12:00:00');
+    const cur=new Date(weeks[i]+'T12:00:00');
+    const days=Math.round((cur-prev)/86400000);
+    if(days>=14){
+      breaks.push({beforeIdx:i-1,afterIdx:i,prev:weeks[i-1],next:weeks[i],days});
+    }
+  }
+  // Christmas break = gap whose span contains Dec 25 of ay
+  const xmas=`${ay}-12-25`;
+  const xmasBreak=breaks.find(b=>b.prev<xmas&&b.next>xmas);
+  // Easter break = gap whose span contains any day in 15 Mar–30 Apr of ay+1
+  // (covers all UK school Easter holidays regardless of when Easter Sunday falls).
+  // Excludes Feb half-term (which falls in mid-February) and May half-term
+  // (which falls in late May, after this window).
+  const easterRangeStart=`${ay+1}-03-15`;
+  const easterRangeEnd=`${ay+1}-04-30`;
+  const easterBreak=breaks.find(b=>b.prev<easterRangeEnd&&b.next>easterRangeStart);
+  const terms=[];
+  // T1: start of weeks → Friday of week before Christmas break (or last week if no Christmas)
+  const t1EndIdx=xmasBreak?xmasBreak.beforeIdx:weeks.length-1;
+  terms.push({label:'T1',start:weeks[0],end:_friOf(weeks[t1EndIdx])});
+  // T2: only if Christmas break exists
+  if(xmasBreak){
+    const t2StartIdx=xmasBreak.afterIdx;
+    const t2EndIdx=easterBreak?easterBreak.beforeIdx:weeks.length-1;
+    if(t2StartIdx<=t2EndIdx){
+      terms.push({label:'T2',start:weeks[t2StartIdx],end:_friOf(weeks[t2EndIdx])});
+    }
+  }
+  // T3: only if Easter break exists
+  if(easterBreak){
+    const t3StartIdx=easterBreak.afterIdx;
+    const t3EndIdx=weeks.length-1;
+    if(t3StartIdx<=t3EndIdx){
+      terms.push({label:'T3',start:weeks[t3StartIdx],end:_friOf(weeks[t3EndIdx])});
+    }
+  }
+  return terms;
+}
+function _friOf(monISO){
+  const d=new Date(monISO+'T12:00:00');d.setDate(d.getDate()+4);
+  return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function pDate(p){
+  // Convert "T1 2025"-style period label into a sortable midpoint ISO date.
+  // Uses real term boundaries from getTerms; falls back to fixed midpoints if data unavailable.
+  const[t,a]=p.split(' ');const y=parseInt(a);
+  const terms=getTerms(y);
+  const tm=terms.find(x=>x.label===t);
+  if(tm){
+    // Midpoint between term start and end
+    const s=new Date(tm.start+'T12:00:00'),e=new Date(tm.end+'T12:00:00');
+    const mid=new Date((s.getTime()+e.getTime())/2);
+    return`${mid.getFullYear()}-${String(mid.getMonth()+1).padStart(2,'0')}-${String(mid.getDate()).padStart(2,'0')}`;
+  }
+  return t==='T1'?y+'-10-01':t==='T2'?(y+1)+'-02-01':(y+1)+'-05-01';
+}
 function clAt(en,s,p){const d=pDate(p);return en.filter(r=>r.t==='cls'&&r.s===s).reverse().find(r=>r.f<=d&&(r.u===null||r.u>d))||null}
 function sDrop(en,s){const r=en.find(e=>e.t==='subj'&&e.s===s);return r?r.u:null}
 function getProg(ink,x){const a=PRG[inkKey(ink)]||{};const o={};for(const[p,rs]of Object.entries(a)){const r=rs.find(r=>r[0]===x);if(r)o[p]={x:r[0],pid:r[1],tg:r[2],sc:r[3],send:r[4],ehcp:r[5],fsm:r[6]}}return o}
@@ -474,12 +565,21 @@ function pLink(idx,name){const clean=name.replace(/\s*\(P\d+\)\s*$/,'');return`<
 
 // Concern thresholds (global)
 let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
+let CT_AT=1.3, CT_AM=3;
+let CT_PA_WIN=20, CT_PA_PCT=10;
 let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0, SA_ENGAGE=3;
+let SAV_RATIO=2.0, SAV_MIN=3;
+let CL_MIN_PUPILS=5, CL_MIN_CODES=5, CL_RATIO_AMBER=2.0, CL_RATIO_RED=3.0;
+let TG_MIN_SIZE=5, TG_ABS_DELTA=2, TG_SAN_RATIO=1.5, TG_SAN_MIN=5, TG_PA_MIN=3;
 function applyCT(){
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
   CT_SC=parseFloat(document.getElementById('ct-sc').value)||1.5;
   CT_MN=parseInt(document.getElementById('ct-mn').value)||3;
+  CT_AT=parseFloat(document.getElementById('ct-at').value)||1.3;
+  CT_AM=parseInt(document.getElementById('ct-am').value)||3;
+  CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
+  CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
   AP_MIN=parseInt(document.getElementById('ct-ap-min').value)||3;
   AP_PCT=parseInt(document.getElementById('ct-ap-pct').value)||40;
   AP_SLOT=parseInt(document.getElementById('ct-ap-slot').value)||30;
@@ -487,10 +587,22 @@ function applyCT(){
   SA_MIN_TEACHER=parseInt(document.getElementById('sa-min-teacher').value)||3;
   SA_RATIO=parseFloat(document.getElementById('sa-ratio').value)||2.0;
   SA_ENGAGE=parseInt(document.getElementById('sa-engage').value)||3;
-  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b>`;
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
+  SAV_RATIO=parseFloat(document.getElementById('sav-ratio').value)||2.0;
+  SAV_MIN=parseInt(document.getElementById('sav-min').value)||3;
+  CL_MIN_PUPILS=parseInt(document.getElementById('cl-min-pupils').value)||5;
+  CL_MIN_CODES=parseInt(document.getElementById('cl-min-codes').value)||5;
+  CL_RATIO_AMBER=parseFloat(document.getElementById('cl-ratio-amber').value)||2.0;
+  CL_RATIO_RED=parseFloat(document.getElementById('cl-ratio-red').value)||3.0;
+  TG_MIN_SIZE=parseInt(document.getElementById('tg-min-size').value)||5;
+  TG_ABS_DELTA=parseFloat(document.getElementById('tg-abs-delta').value)||2;
+  TG_SAN_RATIO=parseFloat(document.getElementById('tg-san-ratio').value)||1.5;
+  TG_SAN_MIN=parseInt(document.getElementById('tg-san-min').value)||5;
+  TG_PA_MIN=parseInt(document.getElementById('tg-pa-min').value)||3;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
-  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×</b>`;
+  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
+  document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
+  document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
 }
 function showCTModal(){}
 function hideCTModal(){}
@@ -672,7 +784,8 @@ function analyseAbsencePattern(px){
 
   // Slot-level flags
   const slotFlags=[];
-  const _slotDenom2=DD.slotDenominators||[[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29]];
+  const _slotDenom2=DD.slotDenominators;
+  if(!_slotDenom2||!Array.isArray(_slotDenom2)||_slotDenom2.length!==5) return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags};
   for(let d=0;d<5;d++){
     for(let p=0;p<5;p++){
       const denom2=_slotDenom2[d][p];
@@ -3105,16 +3218,13 @@ function rSEND(){
       for(const k of Object.keys(clsAbRanks)) clsAbRanks[k].sort((a,b)=>b.score-a.score);
       for(const k of Object.keys(clsEfRanks)) clsEfRanks[k].sort((a,b)=>a.score-b.score);
 
-      // Current term date range for TTD attendance — based on TODAY not lp
-      const todayMonth=_sToday.getMonth();// 0-11
-      let curTermLbl,ttdStart,ttdEnd;
-      if(todayMonth>=8){// Sep-Dec = T1
-        curTermLbl='T1';ttdStart=`${CAY}-09-01`;ttdEnd=`${CAY}-12-31`;
-      }else if(todayMonth>=0&&todayMonth<=2){// Jan-Mar = T2
-        curTermLbl='T2';ttdStart=`${CAY+1}-01-01`;ttdEnd=`${CAY+1}-03-31`;
-      }else{// Apr-Jul = T3
-        curTermLbl='T3';ttdStart=`${CAY+1}-04-01`;ttdEnd=`${CAY+1}-07-31`;
-      }
+      // Current term date range for TTD attendance — data-driven from getTerms
+      const _sTerms=getTerms(CAY);
+      // Current term = the latest term whose start is <= today (terms are ordered)
+      const _curTermObj=_sTerms.filter(t=>t.start<=_sTodayISO).pop()||{label:'T1',start:`${CAY}-09-01`,end:`${CAY}-12-31`};
+      const curTermLbl=_curTermObj.label;
+      const ttdStart=_curTermObj.start;
+      const ttdEnd=_curTermObj.end;
       const ttdEndCap=ttdEnd<_sTodayISO?ttdEnd:_sTodayISO;
       // The matching period key for current term
       const curTermP=`${curTermLbl} ${CAY}`;
@@ -5032,10 +5142,12 @@ function rCC(){
   SUBS.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;prgSub.appendChild(o)});
   rP();
   // Initialise concern threshold display
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
-  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×</b>`;
+  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
+  document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
+  document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
 })();
 
   // Expose functions called from HTML attributes to global scope
@@ -5716,7 +5828,8 @@ function rPeer(){
         }
       }
     }
-    const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0)||25;
+    const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0);
+    if(totalLPW===0) return[]; // Pupil has a timetable but no actual lessons recorded — cannot compute expected share
 
     // Get teacher per sanction from slotTeachers
     // Each sanction has [px, type, date, subject, period]
@@ -5785,7 +5898,8 @@ function rPeer(){
       const cell=grid[d2]?.[p2];
       if(cell){const subj=_SKR2[cell[0]]||cell[0];subjLPW[subj]=(subjLPW[subj]||0)+1}
     }
-    const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0)||25;
+    const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0);
+    if(totalLPW===0) return[]; // Pupil has a timetable but no actual lessons recorded — cannot compute expected share
 
     // P1 subjects per day
     const p1Subjs={};
@@ -5871,6 +5985,101 @@ function rPeer(){
     });
 
     return results.sort((a,b)=>b.totalCorr-a.totalCorr);
+  }
+
+  // Subject Avoidance — flags pupils with disproportionate partial-day + P1 whole-day
+  // absences from a specific subject. Independent of sanctions: catches "quiet avoiders".
+  function getSubjectAvoidance(px){
+    const grid=TT_DATA[String(px)];
+    if(!grid) return[];
+
+    // Lessons per subject from timetable (per week)
+    const subjLPW={};
+    for(let d2=0;d2<5;d2++) for(let p2=0;p2<5;p2++){
+      const cell=grid[d2]?.[p2];
+      if(cell){const subj=_SKR2[cell[0]]||cell[0];subjLPW[subj]=(subjLPW[subj]||0)+1}
+    }
+    const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0);
+    if(totalLPW===0) return[];
+
+    // P1 subjects per day (Mon..Fri)
+    const p1Subjs={};
+    for(let d2=0;d2<5;d2++){
+      const cell=grid[d2]?.[0];
+      if(cell) p1Subjs[d2]=_SKR2[cell[0]]||cell[0];
+    }
+
+    const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
+    const _supp=getSuppressed(px);
+
+    // Bucket absences per date to determine partial vs whole day
+    const absByDate={};
+    pAbsSubj.forEach(r=>{
+      if(!absByDate[r[0]]) absByDate[r[0]]={periods:new Set(),subjects:new Set()};
+      absByDate[r[0]].periods.add(r[2]);
+      absByDate[r[0]].subjects.add(r[1]);
+    });
+
+    // Per-subject qualifying absence counts (partial-day + P1-whole-day)
+    // Total qualifying absences across all subjects = denominator for "actual share"
+    const subjAbs={}; // subj -> {partial, p1Whole}
+    let totalQualifying=0;
+
+    pAbsSubj.forEach(r=>{
+      const date=r[0],subj=r[1],per=r[2];
+      if(!subj) return;
+      const slotKey=date+'|'+per;
+      if(_supp.has(slotKey)) return; // pupil was actually present in another subject — exclude
+      const dayInfo=absByDate[date];
+      if(!dayInfo) return;
+      const totalPeriodsAbsent=dayInfo.periods.size;
+
+      let qualifies=false;
+      if(totalPeriodsAbsent<5){
+        // Partial day — every (subject × date) absence record qualifies
+        qualifies=true;
+      }else{
+        // Whole day — only the P1 slot for that day qualifies, and only if it matches this subject
+        const dt=new Date(date+'T12:00:00');
+        const dow=dt.getDay()-1;
+        if(dow>=0&&dow<5&&p1Subjs[dow]===subj&&per===1){
+          qualifies=true;
+        }
+      }
+
+      if(qualifies){
+        if(!subjAbs[subj]) subjAbs[subj]={partial:0,p1Whole:0};
+        if(totalPeriodsAbsent<5) subjAbs[subj].partial++;
+        else subjAbs[subj].p1Whole++;
+        totalQualifying++;
+      }
+    });
+
+    if(totalQualifying===0) return[];
+
+    const results=[];
+    for(const[subj,counts] of Object.entries(subjAbs)){
+      const total=counts.partial+counts.p1Whole;
+      if(total<SAV_MIN) continue;
+      const lpw=subjLPW[subj]||0;
+      if(lpw===0) continue; // Subject not on pupil's timetable — cannot be "avoiding" it
+      const expectedShare=lpw/totalLPW;
+      const actualShare=total/totalQualifying;
+      const ratio=actualShare/expectedShare;
+      if(ratio>=SAV_RATIO){
+        results.push({
+          subj,
+          absences:total,
+          partial:counts.partial,
+          p1Whole:counts.p1Whole,
+          totalQualifying,
+          expectedPct:(expectedShare*100).toFixed(0),
+          actualPct:(actualShare*100).toFixed(0),
+          ratio:ratio.toFixed(1)
+        });
+      }
+    }
+    return results.sort((a,b)=>parseFloat(b.ratio)-parseFloat(a.ratio));
   }
 
   function rSA(){
@@ -6115,6 +6324,10 @@ function rPeer(){
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="How many Effort Grades Change is a concern">Effort Trigger</label><input id="ct-ef" type="number" min="1" max="4" step="1" value="${CT_EF}" style="${inputStyle}"></div>
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Multiple of Previous Rolling Average that becomes a concern">Sanctions Multiplier</label><input id="ct-sc" type="number" min="0.5" max="5" step="0.1" value="${CT_SC}" style="${inputStyle}"></div>
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum Number of Sanctions that become a concern">Min Sanctions</label><input id="ct-mn" type="number" min="0" max="50" step="1" value="${CT_MN}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Multiplier for recent (20sd) vs older (60sd) absence rate to flag attendance decline">Att Decline Multiplier</label><input id="ct-at" type="number" min="1.0" max="3.0" step="0.05" value="${CT_AT}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum absent periods in recent 20sd window before flagging attendance decline">Min Absent Periods</label><input id="ct-am" type="number" min="0" max="50" step="1" value="${CT_AM}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Rolling window (school days) for Persistent Absence flag">PA Window (sd)</label><input id="ct-pa-win" type="number" min="5" max="100" step="1" value="${CT_PA_WIN}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Absence rate (%) over PA window that triggers Persistent Absence flag">PA Threshold (%)</label><input id="ct-pa-pct" type="number" min="1" max="50" step="0.5" value="${CT_PA_PCT}" style="${inputStyle}"></div>
           </div>
         </div>
         <div>
@@ -6140,6 +6353,27 @@ function rPeer(){
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum codes from one teacher to trigger a flag">Min from Teacher</label><input id="sa-min-teacher" type="number" min="1" max="20" step="1" value="${SA_MIN_TEACHER}" style="${inputStyle}"></div>
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Teacher's share of codes must be this many times their timetable share">Ratio Threshold</label><input id="sa-ratio" type="number" min="1" max="10" step="0.5" value="${SA_RATIO}" style="${inputStyle}"></div>
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum correlated partial-day or P1 whole-day absences to flag subject engagement concern">Engagement Threshold</label><input id="sa-engage" type="number" min="1" max="20" step="1" value="${SA_ENGAGE}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Subject avoidance: actual share of partial-day + P1 whole-day absences from subject must be this many times the timetable share">Avoidance Ratio</label><input id="sav-ratio" type="number" min="1" max="10" step="0.5" value="${SAV_RATIO}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum number of partial-day + P1 whole-day absences from one subject to flag subject avoidance">Min Avoidance Absences</label><input id="sav-min" type="number" min="1" max="20" step="1" value="${SAV_MIN}" style="${inputStyle}"></div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:.75rem;font-weight:600;color:var(--tx);margin-bottom:.6rem">Class Concerns</div>
+          <div style="display:flex;flex-direction:column;gap:.6rem">
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum pupils in a class before it can be flagged">Min Class Size</label><input id="cl-min-pupils" type="number" min="1" max="40" step="1" value="${CL_MIN_PUPILS}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum total codes in the class before flagging">Min Total Codes</label><input id="cl-min-codes" type="number" min="1" max="100" step="1" value="${CL_MIN_CODES}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Class codes-per-pupil must be this many times the average across other classes of the same subject in the year to fire amber">Amber Ratio</label><input id="cl-ratio-amber" type="number" min="1" max="10" step="0.1" value="${CL_RATIO_AMBER}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Class codes-per-pupil must be this many times the average across other classes of the same subject in the year to fire red">Red Ratio</label><input id="cl-ratio-red" type="number" min="1" max="10" step="0.1" value="${CL_RATIO_RED}" style="${inputStyle}"></div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:.75rem;font-weight:600;color:var(--tx);margin-bottom:.6rem">Tutor Group Concerns</div>
+          <div style="display:flex;flex-direction:column;gap:.6rem">
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum pupils in a tutor group before it can be flagged">Min TG Size</label><input id="tg-min-size" type="number" min="1" max="40" step="1" value="${TG_MIN_SIZE}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="TG absence rate must exceed the year average by this many percentage points to fire">Absence Delta (pp)</label><input id="tg-abs-delta" type="number" min="0.5" max="20" step="0.5" value="${TG_ABS_DELTA}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="TG codes-per-pupil must be this many times the year average to fire">Sanctions Ratio</label><input id="tg-san-ratio" type="number" min="1" max="10" step="0.1" value="${TG_SAN_RATIO}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum total codes in the TG before sanctions trigger fires">Min TG Codes</label><input id="tg-san-min" type="number" min="1" max="100" step="1" value="${TG_SAN_MIN}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum number of persistently-absent pupils to flag PA cluster">Min PA Pupils</label><input id="tg-pa-min" type="number" min="1" max="20" step="1" value="${TG_PA_MIN}" style="${inputStyle}"></div>
           </div>
         </div>
       </div>
@@ -6245,6 +6479,35 @@ function rPeer(){
     let ytdTotalL=0;
     for(const[w,tl]of Object.entries(WLK)){if(w>=ayStart&&w<=todayISO)ytdTotalL+=tl}
 
+    // Build school-day list within current AY for rolling attendance windows
+    const _cnSD=[];
+    Object.keys(WLK).sort().forEach(wk=>{
+      if(wk<ayStart) return;
+      for(let off=0;off<5;off++){
+        const d=new Date(wk+'T12:00:00');d.setDate(d.getDate()+off);
+        const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        if(iso<=todayISO) _cnSD.push(iso);
+      }
+    });
+    _cnSD.sort();
+    // periods per school day (best estimate: WLK is per-week lesson count divided by 5)
+    const _wkVals=Object.values(WLK);
+    const _avgPerDay=_wkVals.length?(_wkVals.reduce((s,v)=>s+v,0)/_wkVals.length)/5:5;
+
+    // attRA(px,nSD) → {rate, absent, periods}
+    // rate = absence rate (%) over the last nSD school days, periods = total scheduled periods in window
+    function attRA(px,nSD){
+      if(!_cnSD.length) return{rate:0,absent:0,periods:0};
+      const cutIdx=Math.max(0,_cnSD.length-nSD);
+      const startISO=_cnSD[cutIdx];
+      const endISO=_cnSD[_cnSD.length-1];
+      const a=countAbsPeriods(px,startISO,endISO);
+      const days=_cnSD.length-cutIdx;
+      const periods=days*_avgPerDay;
+      const rate=periods>0?(a.total/periods*100):0;
+      return{rate,absent:a.total,periods};
+    }
+
     // Determine which year groups and TGs to scan
     let targetYGs=[];
     let targetTG=null;
@@ -6276,43 +6539,107 @@ function rPeer(){
     // ── INDIVIDUAL PUPIL CONCERNS ──
     const pupilConcerns=[];
 
+    // Year-group sanction anchors (latest sanction date per yg, capped at today) — mirrors BC tab.
+    const _cnPxYg={};
+    allPupils.forEach(p=>{_cnPxYg[p.px]=p.yg});
+    const _cnYgLatest={};
+    SAN.forEach(s=>{
+      const yg=_cnPxYg[s[0]];
+      if(yg===undefined) return;
+      if(s[2]>todayISO) return;
+      if(!_cnYgLatest[yg]||s[2]>_cnYgLatest[yg]) _cnYgLatest[yg]=s[2];
+    });
+    // Per-yg school-day list (subset of _cnSD up to that yg's latest sanction date)
+    const _cnYgSD={};
+    Object.keys(_cnYgLatest).forEach(yg=>{
+      const cap=_cnYgLatest[yg];
+      _cnYgSD[yg]=_cnSD.filter(d=>d<=cap);
+    });
+
+    // sanRA(px,yg,nSD) → weighted sanction score over last nSD school days, scaled per 10sd.
+    // Anchored at the year group's latest sanction date (matches BC tab semantics).
+    function sanRA(px,yg,nSD){
+      const sd=_cnYgSD[yg]||_cnSD;
+      const endDate=_cnYgLatest[yg]||todayISO;
+      if(!sd.length) return 0;
+      const cutIdx=Math.max(0,sd.length-nSD);
+      const cutISO=sd[cutIdx]||endDate;
+      let score=0;
+      for(let i=0;i<SAN.length;i++){
+        const r=SAN[i];
+        if(r[0]!==px) continue;
+        if(r[2]<cutISO||r[2]>endDate) continue;
+        score+=sancWeight(r[1]);
+      }
+      return score/(nSD/10);
+    }
+    // sanCountIn(px,yg,nSD) → raw sanction count (any type) in last nSD school days
+    function sanCountIn(px,yg,nSD){
+      const sd=_cnYgSD[yg]||_cnSD;
+      const endDate=_cnYgLatest[yg]||todayISO;
+      if(!sd.length) return 0;
+      const cutIdx=Math.max(0,sd.length-nSD);
+      const cutISO=sd[cutIdx]||endDate;
+      let n=0;
+      for(let i=0;i<SAN.length;i++){
+        const r=SAN[i];
+        if(r[0]!==px) continue;
+        if(r[2]<cutISO||r[2]>endDate) continue;
+        n++;
+      }
+      return n;
+    }
+
     allPupils.forEach(p=>{
       const px=p.px,pid=p.pid,yg=p.yg,tg=p.tg;
       const concerns=[];
 
-      // 1. Attendance trajectory — compare T1 vs T2 vs T3
-      const t1Start=`${CAY}-09-01`,t1End=`${CAY}-12-31`;
-      const t2Start=`${CAY+1}-01-01`,t2End=`${CAY+1}-03-31`;
-      const t3Start=`${CAY+1}-04-01`,t3End=todayISO;
-      const t1Abs=countAbsPeriods(px,t1Start,t1End);
-      const t2Abs=countAbsPeriods(px,t2Start,t2End);
-      const t3Abs=countAbsPeriods(px,t3Start,t3End);
-      let t1L=0,t2L=0,t3L=0;
-      for(const[w,tl]of Object.entries(WLK)){
-        if(w>=t1Start&&w<=t1End) t1L+=tl;
-        if(w>=t2Start&&w<=t2End) t2L+=tl;
-        if(w>=t3Start&&w<=t3End) t3L+=tl;
+      // 1. Attendance Declining — rolling 20sd vs 60sd absence rate
+      const a20=attRA(px,20);
+      const a60=attRA(px,60);
+      let attDeclining=false;
+      if(a20.rate>a60.rate*CT_AT && a60.rate>0 && a20.absent>=CT_AM){
+        const sev=a20.rate>a60.rate*2 ? 'red' : 'amber';
+        attDeclining=true;
+        concerns.push({
+          type:'att-rising',
+          severity:sev,
+          label:'Attendance Declining',
+          detail:`20sd ${a20.rate.toFixed(1)}% absent vs 60sd ${a60.rate.toFixed(1)}% (${a20.absent} absent periods in last 20sd, ${(a20.rate/a60.rate).toFixed(1)}× older window)`
+        });
       }
-      const t1Pct=t1L>0?(t1Abs.total/t1L*100):0;
-      const t2Pct=t2L>0?(t2Abs.total/t2L*100):0;
-      const t3Pct=t3L>0?(t3Abs.total/t3L*100):0;
-      // Rising absence: each term worse than the last
-      if(t2Pct>t1Pct+2&&t2L>0&&t1L>0) concerns.push({type:'att-rising',severity:t3Pct>t2Pct?'red':'amber',label:'Attendance Declining',detail:`Absence: T1 ${t1Pct.toFixed(1)}% → T2 ${t2Pct.toFixed(1)}%${t3L>0?' → T3 '+t3Pct.toFixed(1)+'%':''}`});
-      // PA threshold
-      const ytdAbs=countAbsPeriods(px,ayStart,todayISO);
-      const ytdPct=ytdTotalL>0?(ytdAbs.total/ytdTotalL*100):0;
-      if(ytdPct>=10) concerns.push({type:'att-pa',severity:'red',label:'Persistent Absence',detail:`YTD absence ${ytdPct.toFixed(1)}%`});
 
-      // 2. Sanctions acceleration
-      const pSan=SAN.filter(s=>s[0]===px&&s[1]===0);
-      const t1San=pSan.filter(s=>s[2]>=t1Start&&s[2]<=t1End).length;
-      const t2San=pSan.filter(s=>s[2]>=t2Start&&s[2]<=t2End).length;
-      const t3San=pSan.filter(s=>s[2]>=t3Start&&s[2]<=t3End).length;
-      if(t2San>t1San*CT_SC&&t1San>=CT_MN) concerns.push({type:'sanc-accel',severity:'amber',label:'Sanctions Accelerating',detail:`T1: ${t1San} → T2: ${t2San}${t3L>0?' → T3: '+t3San:''}`});
-      if(t3San>t2San*CT_SC&&t2San>=CT_MN&&t3L>0) concerns.push({type:'sanc-accel',severity:'red',label:'Sanctions Accelerating',detail:`T2: ${t2San} → T3: ${t3San}`});
+      // 2. Persistent Absence — rolling window absence rate ≥ threshold
+      const aPA=attRA(px,CT_PA_WIN);
+      if(aPA.rate>=CT_PA_PCT){
+        concerns.push({type:'att-pa',severity:'red',label:'Persistent Absence',detail:`${CT_PA_WIN}sd absence ${aPA.rate.toFixed(1)}% (${aPA.absent} absent periods)`});
+      }
 
-      // 3. Combined decline — both attendance AND behaviour worsening
-      if(t2Pct>t1Pct+1&&t2San>t1San&&t2San>=CT_MN&&t1L>0) concerns.push({type:'disengage',severity:'red',label:'Possible Disengagement',detail:`Absence ↑ (${t1Pct.toFixed(0)}%→${t2Pct.toFixed(0)}%) + Sanctions ↑ (${t1San}→${t2San})`});
+      // 3. Sanctions Accelerating — rolling 20sd vs 60sd weighted sanction score
+      const s20=sanRA(px,yg,20);
+      const s60=sanRA(px,yg,60);
+      const sanCount20=sanCountIn(px,yg,20);
+      let sancAccel=false;
+      if(s20>s60*CT_SC && s60>0 && sanCount20>=CT_MN){
+        const sev=s20>s60*2 ? 'red' : 'amber';
+        sancAccel=true;
+        concerns.push({
+          type:'sanc-accel',
+          severity:sev,
+          label:'Sanctions Accelerating',
+          detail:`20sd weighted ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)} (${sanCount20} sanctions in last 20sd, ${(s20/s60).toFixed(1)}× older window)`
+        });
+      }
+
+      // 4. Possible Disengagement — derived: both Attendance Declining AND Sanctions Accelerating fire
+      if(attDeclining && sancAccel){
+        concerns.push({
+          type:'disengage',
+          severity:'red',
+          label:'Possible Disengagement',
+          detail:`Absence ↑ (20sd ${a20.rate.toFixed(0)}% vs 60sd ${a60.rate.toFixed(0)}%) + Sanctions ↑ (20sd ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)})`
+        });
+      }
 
       // 4. Sanctions concentration
       const scFlags=getSanctionsConcentration(px);
@@ -6331,6 +6658,13 @@ function rPeer(){
       const engFlags=getSubjectEngagement(px);
       engFlags.forEach(e=>{
         concerns.push({type:'subj-engage',severity:'red',label:'Subject Engagement',detail:`${e.subj}: ${e.totalCorr} correlated absences (${e.corrPartial} partial-day${e.corrP1Whole?', '+e.corrP1Whole+' P1 whole-day':''}) — ${e.codes}/${e.totalCodes} codes, ${e.ratio}×`});
+      });
+
+      // 7. Subject Avoidance — disproportionate skipping of one subject (no sanctions required)
+      const avoidFlags=getSubjectAvoidance(px);
+      avoidFlags.forEach(a=>{
+        const sev=parseFloat(a.ratio)>=4?'red':'amber';
+        concerns.push({type:'subj-avoid',severity:sev,label:'Subject Avoidance',detail:`Avoiding ${a.subj} — ${a.absences} qualifying absences (${a.partial} partial-day${a.p1Whole?', '+a.p1Whole+' P1 whole-day':''}), ${a.actualPct}% of qualifying absences vs expected ${a.expectedPct}%, ratio ${a.ratio}×`});
       });
 
       if(concerns.length){
@@ -6366,24 +6700,50 @@ function rPeer(){
           classes[key].pupils.add(e.x);
         });
 
-        for(const[key,info]of Object.entries(classes)){
-          if(info.pupils.size<5) continue;
-          const clsSan=SAN.filter(s=>info.pupils.has(s[0])&&s[3]===info.sub&&s[2]>=ayStart&&s[2]<=todayISO&&s[1]===0);
-          const codesPerPupil=clsSan.length/info.pupils.size;
+        // Group classes by subject so we can compare each class to OTHER classes of the same subject
+        const classesBySubj={};
+        for(const[key,info] of Object.entries(classes)){
+          if(!classesBySubj[info.sub]) classesBySubj[info.sub]=[];
+          classesBySubj[info.sub].push({key,...info});
+        }
 
-          // Compare to subject average across all classes
-          const allSubjSan=SAN.filter(s=>lrIdxSet.has(s[0])&&s[3]===info.sub&&s[2]>=ayStart&&s[2]<=todayISO&&s[1]===0);
-          const subjAvgPP=allSubjSan.length/lrIdxSet.size;
+        for(const[subj,subjClasses] of Object.entries(classesBySubj)){
+          // Need at least 2 classes of this subject in the year to make a comparison meaningful
+          if(subjClasses.length<2) continue;
 
-          if(codesPerPupil>subjAvgPP*2&&clsSan.length>=5){
-            classConcerns.push({
-              yg,sub:info.sub,cls:info.cls,tc:info.tc,pupils:info.pupils.size,
-              codes:clsSan.length,codesPerPupil:codesPerPupil.toFixed(1),
-              subjAvg:subjAvgPP.toFixed(1),
-              ratio:(codesPerPupil/subjAvgPP).toFixed(1),
-              severity:codesPerPupil>subjAvgPP*3?'red':'amber'
-            });
-          }
+          // Pre-compute codes per class
+          subjClasses.forEach(c=>{
+            const clsSan=SAN.filter(s=>c.pupils.has(s[0])&&s[3]===subj&&s[2]>=ayStart&&s[2]<=todayISO&&s[1]===0);
+            c._codes=clsSan.length;
+            c._codesPerPupil=clsSan.length/c.pupils.size;
+          });
+
+          subjClasses.forEach(target=>{
+            if(target.pupils.size<CL_MIN_PUPILS) return;
+            if(target._codes<CL_MIN_CODES) return;
+
+            // Compare against OTHER classes of the same subject in this year
+            const others=subjClasses.filter(c=>c.key!==target.key);
+            if(!others.length) return;
+            const otherTotalCodes=others.reduce((s,c)=>s+c._codes,0);
+            const otherTotalPupils=others.reduce((s,c)=>s+c.pupils.size,0);
+            if(otherTotalPupils===0) return;
+            const otherAvgPP=otherTotalCodes/otherTotalPupils;
+            // If others have zero codes-per-pupil, the ratio is undefined.
+            // We require otherAvgPP > 0 so we only flag where there's a meaningful comparison.
+            if(otherAvgPP===0) return;
+            const ratio=target._codesPerPupil/otherAvgPP;
+
+            if(ratio>=CL_RATIO_AMBER){
+              classConcerns.push({
+                yg,sub:subj,cls:target.cls,tc:target.tc,pupils:target.pupils.size,
+                codes:target._codes,codesPerPupil:target._codesPerPupil.toFixed(1),
+                subjAvg:otherAvgPP.toFixed(1),
+                ratio:ratio.toFixed(1),
+                severity:ratio>=CL_RATIO_RED?'red':'amber'
+              });
+            }
+          });
         }
       });
       classConcerns.sort((a,b)=>parseFloat(b.ratio)-parseFloat(a.ratio));
@@ -6416,7 +6776,7 @@ function rPeer(){
         const yrSanPP=yrSan.length/lr.length;
 
         for(const[tg,info]of Object.entries(tgs)){
-          if(info.pupils.length<5) continue;
+          if(info.pupils.length<TG_MIN_SIZE) continue;
           // TG absence rate
           let tgTotalAbs=0;
           info.pupils.forEach(px2=>{tgTotalAbs+=countAbsPeriods(px2,ayStart,todayISO).total});
@@ -6428,15 +6788,15 @@ function rPeer(){
           const tgSanPP=tgSan.length/info.pupils.length;
 
           const concerns=[];
-          if(tgAbsRate>yrAbsRate+2) concerns.push(`Absence ${tgAbsRate.toFixed(1)}% vs year avg ${yrAbsRate.toFixed(1)}%`);
-          if(tgSanPP>yrSanPP*1.5&&tgSan.length>=5) concerns.push(`Sanctions ${tgSanPP.toFixed(1)}/pupil vs year avg ${yrSanPP.toFixed(1)}`);
+          if(tgAbsRate>yrAbsRate+TG_ABS_DELTA) concerns.push(`Absence ${tgAbsRate.toFixed(1)}% vs year avg ${yrAbsRate.toFixed(1)}%`);
+          if(tgSanPP>yrSanPP*TG_SAN_RATIO&&tgSan.length>=TG_SAN_MIN) concerns.push(`Sanctions ${tgSanPP.toFixed(1)}/pupil vs year avg ${yrSanPP.toFixed(1)}`);
 
-          // Count PA pupils
+          // Count PA pupils — uses same rolling-window rule as the pupil PA flag
           const paPupils=info.pupils.filter(px2=>{
-            const a=countAbsPeriods(px2,ayStart,todayISO);
-            return ytdTotalL>0&&(a.total/ytdTotalL*100)>=10;
+            const a=attRA(px2,CT_PA_WIN);
+            return a.rate>=CT_PA_PCT;
           }).length;
-          if(paPupils>=3) concerns.push(`${paPupils} persistently absent pupils`);
+          if(paPupils>=TG_PA_MIN) concerns.push(`${paPupils} persistently absent pupils`);
 
           if(concerns.length){
             tgConcerns.push({yg:info.yg,tg,pupils:info.pupils.length,absRate:tgAbsRate.toFixed(1),sanPP:tgSanPP.toFixed(1),paPupils,concerns,severity:concerns.length>=2?'red':'amber'});
@@ -6551,7 +6911,7 @@ function rPeer(){
         </tr>`;
       }).join('');
 
-      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Class Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${classConcerns.length} classes flagged — sanctions rate 2×+ subject average</span></div>
+      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Class Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${classConcerns.length} classes flagged — codes-per-pupil ≥ ${CL_RATIO_AMBER}× the average of other classes in the same subject + year</span></div>
         <div style="overflow-x:auto"><table class="d"><thead><tr>
           <th style="width:20px"></th><th>Year</th><th>Subject</th><th style="text-align:center">Class</th><th>Teacher</th><th style="text-align:center">Pupils</th>
           <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Subj Avg</th><th style="text-align:center">Ratio</th>
