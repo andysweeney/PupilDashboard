@@ -571,6 +571,129 @@ let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0, SA_ENGAGE=3;
 let SAV_RATIO=2.0, SAV_MIN=3;
 let CL_MIN_PUPILS=5, CL_MIN_CODES=5, CL_RATIO_AMBER=2.0, CL_RATIO_RED=3.0;
 let TG_MIN_SIZE=5, TG_ABS_DELTA=2, TG_SAN_RATIO=1.5, TG_SAN_MIN=5, TG_PA_MIN=3;
+
+// ── Threshold persistence ──
+// Saved values survive hard refreshes (per browser, per origin).
+// localStorage is appropriate here because: small payload, written only on
+// Apply (not per-keystroke), read once at boot.
+const _LS_KEY = 'pupilDashboard.thresholds.v1';
+
+// Save current globals to localStorage. Called after Apply.
+function saveThresholds(){
+  try {
+    const obj = {
+      CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT,
+      AP_MIN, AP_PCT, AP_SLOT,
+      SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
+      SAV_RATIO, SAV_MIN,
+      CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
+      TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
+      SW_CODE, SW_ONCALL, SW_DET
+    };
+    localStorage.setItem(_LS_KEY, JSON.stringify(obj));
+  } catch(e){
+    console.warn('Could not save thresholds to localStorage:', e);
+  }
+}
+
+// Apply a values object to the let-bound globals. Used by load and reset.
+// Each line is explicit because `let` bindings can't be set via window[name].
+// Missing/NaN values are skipped — globals retain whatever value they had.
+function applyThresholdValues(v){
+  if(!v) return;
+  const safeF = (x) => { const n = parseFloat(x); return isNaN(n) ? null : n; };
+  const safeI = (x) => { const n = parseInt(x); return isNaN(n) ? null : n; };
+  let n;
+  if((n=safeF(v.CT_AB))!=null) CT_AB=n;
+  if((n=safeF(v.CT_EF))!=null) CT_EF=n;
+  if((n=safeF(v.CT_SC))!=null) CT_SC=n;
+  if((n=safeI(v.CT_MN))!=null) CT_MN=n;
+  if((n=safeF(v.CT_AT))!=null) CT_AT=n;
+  if((n=safeI(v.CT_AM))!=null) CT_AM=n;
+  if((n=safeI(v.CT_PA_WIN))!=null) CT_PA_WIN=n;
+  if((n=safeF(v.CT_PA_PCT))!=null) CT_PA_PCT=n;
+  if((n=safeI(v.AP_MIN))!=null) AP_MIN=n;
+  if((n=safeI(v.AP_PCT))!=null) AP_PCT=n;
+  if((n=safeI(v.AP_SLOT))!=null) AP_SLOT=n;
+  if((n=safeI(v.SA_MIN_TOTAL))!=null) SA_MIN_TOTAL=n;
+  if((n=safeI(v.SA_MIN_TEACHER))!=null) SA_MIN_TEACHER=n;
+  if((n=safeF(v.SA_RATIO))!=null) SA_RATIO=n;
+  if((n=safeI(v.SA_ENGAGE))!=null) SA_ENGAGE=n;
+  if((n=safeF(v.SAV_RATIO))!=null) SAV_RATIO=n;
+  if((n=safeI(v.SAV_MIN))!=null) SAV_MIN=n;
+  if((n=safeI(v.CL_MIN_PUPILS))!=null) CL_MIN_PUPILS=n;
+  if((n=safeI(v.CL_MIN_CODES))!=null) CL_MIN_CODES=n;
+  if((n=safeF(v.CL_RATIO_AMBER))!=null) CL_RATIO_AMBER=n;
+  if((n=safeF(v.CL_RATIO_RED))!=null) CL_RATIO_RED=n;
+  if((n=safeI(v.TG_MIN_SIZE))!=null) TG_MIN_SIZE=n;
+  if((n=safeF(v.TG_ABS_DELTA))!=null) TG_ABS_DELTA=n;
+  if((n=safeF(v.TG_SAN_RATIO))!=null) TG_SAN_RATIO=n;
+  if((n=safeI(v.TG_SAN_MIN))!=null) TG_SAN_MIN=n;
+  if((n=safeI(v.TG_PA_MIN))!=null) TG_PA_MIN=n;
+  if((n=safeI(v.SW_CODE))!=null) SW_CODE=n;
+  if((n=safeI(v.SW_ONCALL))!=null) SW_ONCALL=n;
+  if((n=safeI(v.SW_DET))!=null) SW_DET=n;
+}
+
+// Defaults — single source of truth. Used by reset and as fallback.
+const _THRESHOLD_DEFAULTS = {
+  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:3, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10,
+  AP_MIN:3, AP_PCT:40, AP_SLOT:30,
+  SA_MIN_TOTAL:6, SA_MIN_TEACHER:3, SA_RATIO:2.0, SA_ENGAGE:3,
+  SAV_RATIO:2.0, SAV_MIN:3,
+  CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
+  TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
+  SW_CODE:1, SW_ONCALL:3, SW_DET:5
+};
+
+// Map of global name → DOM input id. Used to push values into Admin inputs after reset.
+const _THRESHOLD_INPUTS = {
+  CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
+  CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct',
+  AP_MIN:'ct-ap-min', AP_PCT:'ct-ap-pct', AP_SLOT:'ct-ap-slot',
+  SA_MIN_TOTAL:'sa-min-total', SA_MIN_TEACHER:'sa-min-teacher', SA_RATIO:'sa-ratio', SA_ENGAGE:'sa-engage',
+  SAV_RATIO:'sav-ratio', SAV_MIN:'sav-min',
+  CL_MIN_PUPILS:'cl-min-pupils', CL_MIN_CODES:'cl-min-codes', CL_RATIO_AMBER:'cl-ratio-amber', CL_RATIO_RED:'cl-ratio-red',
+  TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
+  SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det'
+};
+
+// Refresh all header display spans from current globals.
+function _refreshThresholdDisplays(){
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
+  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
+  document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
+  document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
+  document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
+  document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
+}
+
+// Load thresholds from localStorage and apply to globals. Called once at boot.
+// Silently skips malformed/missing entries so saved state can never break boot.
+function loadThresholds(){
+  try {
+    const raw = localStorage.getItem(_LS_KEY);
+    if(!raw) return;
+    const obj = JSON.parse(raw);
+    applyThresholdValues(obj);
+  } catch(e){
+    console.warn('Could not load thresholds from localStorage:', e);
+  }
+}
+
+// Reset all thresholds to hardcoded defaults, clear localStorage, refresh Admin
+// inputs and header displays.
+function resetThresholds(){
+  if(!confirm('Reset all Admin thresholds to defaults? This cannot be undone.')) return;
+  applyThresholdValues(_THRESHOLD_DEFAULTS);
+  try { localStorage.removeItem(_LS_KEY); } catch(e){}
+  // Push values back into any Admin inputs that are currently rendered
+  for(const [name, inputId] of Object.entries(_THRESHOLD_INPUTS)){
+    const el = document.getElementById(inputId);
+    if(el) el.value = _THRESHOLD_DEFAULTS[name];
+  }
+  _refreshThresholdDisplays();
+}
 function applyCT(){
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
@@ -603,6 +726,7 @@ function applyCT(){
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
   document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
+  saveThresholds();
 }
 function showCTModal(){}
 function hideCTModal(){}
@@ -615,6 +739,7 @@ function applySW(){
   SW_ONCALL=parseInt(document.getElementById('sw-oncall').value)||3;
   SW_DET=parseInt(document.getElementById('sw-det').value)||5;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
+  saveThresholds();
 }
 function showSWModal(){}
 function hideSWModal(){}
@@ -5141,6 +5266,8 @@ function rCC(){
   const ao3=document.createElement('option');ao3.value='all';ao3.textContent='All Subjects';prgSub.appendChild(ao3);
   SUBS.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;prgSub.appendChild(o)});
   rP();
+  // Load saved thresholds (from a previous session) BEFORE refreshing the displays
+  loadThresholds();
   // Initialise concern threshold display
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
@@ -6377,7 +6504,7 @@ function rPeer(){
           </div>
         </div>
       </div>
-      <div style="margin-top:.8rem"><button onclick="applyCT();applySW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;cursor:pointer">Apply Changes</button></div>
+      <div style="margin-top:.8rem;display:flex;gap:.5rem;align-items:center"><button onclick="applyCT();applySW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;cursor:pointer">Apply Changes</button><button onclick="resetThresholds()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.4rem .8rem;border-radius:6px;cursor:pointer" title="Restore all thresholds to factory defaults and clear saved values">Reset to Defaults</button><span style="font-size:.65rem;color:var(--mu);margin-left:.5rem">Saved values persist across hard refreshes (this browser only).</span></div>
     </div>`;
 
     out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml;
@@ -6464,6 +6591,60 @@ function rPeer(){
       [...tgs].sort().forEach(tg=>{const o=document.createElement('option');o.value=tg;o.textContent=tg;tgSel.appendChild(o)});
       if([...tgs].includes(prev)) tgSel.value=prev;
     }
+  }
+
+  // ── Concerns tab UI state ──
+  // Collapse state per section. Default: all expanded. Persists across rCN() re-renders within a session.
+  const _cnCollapsed = {pupil:false, class:false, tg:false, teacher:false};
+  // Pupil concern type filter — empty Set means "show all".
+  const _cnTypeFilter = new Set();
+
+  // Concern type definitions (for filter chips and human labels)
+  const CN_TYPES = [
+    {id:'att-rising',   label:'Attendance Declining'},
+    {id:'att-pa',       label:'Persistent Absence'},
+    {id:'sanc-accel',   label:'Sanctions Accelerating'},
+    {id:'disengage',    label:'Possible Disengagement'},
+    {id:'sanc-conc',    label:'Sanctions Concentration'},
+    {id:'abs-pattern',  label:'Absence Pattern'},
+    {id:'subj-engage',  label:'Subject Engagement'},
+    {id:'subj-avoid',   label:'Subject Avoidance'}
+  ];
+
+  // Toggle a card's collapsed state and re-render
+  function cnToggleCard(section){
+    _cnCollapsed[section] = !_cnCollapsed[section];
+    rCN();
+  }
+
+  // Toggle a concern type filter chip and re-render
+  function cnFilterToggle(typeId){
+    if(_cnTypeFilter.has(typeId)) _cnTypeFilter.delete(typeId);
+    else _cnTypeFilter.add(typeId);
+    rCN();
+  }
+  function cnFilterClear(){
+    _cnTypeFilter.clear();
+    rCN();
+  }
+
+  // Build a collapsible card. body is included only when expanded.
+  function _cnCard(section, titleHtml, subtitleHtml, bodyHtml){
+    const collapsed = _cnCollapsed[section];
+    const arrow = collapsed ? '▶' : '▼';
+    return `<div class="dw" style="margin-bottom:1.25rem">
+      <div class="dwt" style="cursor:pointer;display:flex;align-items:center;gap:.5rem" onclick="cnToggleCard('${section}')">
+        <span style="font-size:.7rem;color:var(--mu);width:.8rem">${arrow}</span>
+        <span>${titleHtml}</span>
+        ${subtitleHtml ? `<span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${subtitleHtml}</span>` : ''}
+      </div>
+      ${collapsed ? '' : bodyHtml}
+    </div>`;
+  }
+
+  // Small italic explainer block shown at the top of a card's body.
+  function _cnExplainer(text){
+    return `<div style="font-size:.68rem;color:var(--mu);font-style:italic;padding:.5rem .25rem .75rem;line-height:1.5">${text}</div>`;
   }
 
   function rCN(){
@@ -6872,7 +7053,32 @@ function rPeer(){
 
     // Pupil concerns table
     if(pupilConcerns.length){
-      const pRows=pupilConcerns.map(p=>{
+      // Apply concern type filter
+      const filterActive = _cnTypeFilter.size > 0;
+      const filteredPupils = filterActive
+        ? pupilConcerns
+            .map(p => ({...p, concerns: p.concerns.filter(c => _cnTypeFilter.has(c.type))}))
+            .filter(p => p.concerns.length > 0)
+        : pupilConcerns;
+
+      // Build chip strip
+      const chipsHtml = CN_TYPES.map(t => {
+        const active = _cnTypeFilter.has(t.id);
+        const bg = active ? 'var(--ac)' : 'var(--sf2)';
+        const col = active ? '#fff' : 'var(--mu)';
+        const bd = active ? 'var(--ac)' : 'var(--bd)';
+        return `<button onclick="cnFilterToggle('${t.id}')" style="background:${bg};color:${col};border:1px solid ${bd};padding:.2rem .55rem;border-radius:14px;font-family:inherit;font-size:.65rem;cursor:pointer;transition:all .15s">${t.label}</button>`;
+      }).join('');
+      const clearBtn = filterActive
+        ? `<button onclick="cnFilterClear()" style="background:transparent;border:none;color:var(--ac);font-family:inherit;font-size:.65rem;cursor:pointer;text-decoration:underline;padding:.2rem .4rem">Clear filter</button>`
+        : '';
+      const filterRow = `<div style="display:flex;flex-wrap:wrap;gap:.3rem;align-items:center;padding:.25rem 0 .75rem">
+        <span style="font-size:.62rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;margin-right:.4rem">Filter by type:</span>
+        ${chipsHtml}${clearBtn}
+      </div>`;
+
+      // Build rows from filtered pupils
+      const pRows = filteredPupils.map(p=>{
         const n=p.concerns.length;
         return p.concerns.map((c,ci)=>{
           const col=c.severity==='red'?'#ef4444':'#f97316';
@@ -6889,10 +7095,17 @@ function rPeer(){
         }).join('');
       }).join('');
 
-      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Pupil Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${pupilConcerns.length} pupils flagged</span></div>
-        <div style="overflow-x:auto"><table class="d"><thead><tr>
-          <th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concern</th><th>Detail</th>
-        </tr></thead><tbody>${pRows}</tbody></table></div></div>`;
+      const subtitle = filterActive
+        ? `${filteredPupils.length}/${pupilConcerns.length} pupils match filter`
+        : `${pupilConcerns.length} pupils flagged`;
+
+      const tableHtml = filteredPupils.length
+        ? `<div style="overflow-x:auto"><table class="d"><thead><tr>
+            <th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concern</th><th>Detail</th>
+          </tr></thead><tbody>${pRows}</tbody></table></div>`
+        : `<div style="color:var(--mu);font-size:.75rem;padding:1rem;font-style:italic">No pupils match the selected concern types.</div>`;
+
+      html += _cnCard('pupil', 'Pupil Concerns', subtitle, filterRow + tableHtml);
     }
 
     // Class concerns
@@ -6913,11 +7126,15 @@ function rPeer(){
         </tr>`;
       }).join('');
 
-      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Class Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${classConcerns.length} classes flagged — codes-per-pupil ≥ ${CL_RATIO_AMBER}× the average of other classes in the same subject + year</span></div>
-        <div style="overflow-x:auto"><table class="d"><thead><tr>
+      const explainerCl = _cnExplainer(`A class is flagged when its codes-per-pupil rate exceeds the average of the <b>other classes</b> in the same subject and year group. The flagged class is excluded from the comparison cohort, so the ratio is genuinely "this class versus its peers" — not against an average that includes itself. A subject must have at least 2 classes for any of them to be assessed.<br><br>
+        <b>Currently in force:</b> Min class size <b>${CL_MIN_PUPILS}</b> pupils · Min total codes in class <b>${CL_MIN_CODES}</b> · Amber from ratio <b>${CL_RATIO_AMBER}×</b> · Red from ratio <b>${CL_RATIO_RED}×</b>. Adjust in Admin tab.`);
+
+      const tableCl = `<div style="overflow-x:auto"><table class="d"><thead><tr>
           <th style="width:20px"></th><th>Year</th><th>Subject</th><th style="text-align:center">Class</th><th>Teacher</th><th style="text-align:center">Pupils</th>
-          <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Subj Avg</th><th style="text-align:center">Ratio</th>
-        </tr></thead><tbody>${cRows}</tbody></table></div></div>`;
+          <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center">Codes/Pupil</th><th style="text-align:center">Other Classes Avg</th><th style="text-align:center">Ratio</th>
+        </tr></thead><tbody>${cRows}</tbody></table></div>`;
+
+      html += _cnCard('class', 'Class Concerns', `${classConcerns.length} classes flagged`, explainerCl + tableCl);
     }
 
     // TG concerns
@@ -6947,11 +7164,18 @@ function rPeer(){
         </tr>${paDetailRow}`;
       }).join('');
 
-      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Tutor Group Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${tgConcerns.length} TGs flagged</span></div>
-        <div style="overflow-x:auto"><table class="d"><thead><tr>
+      const explainerTg = _cnExplainer(`A tutor group is flagged when one or more of three signals fire. <b>Amber</b> = one signal; <b>red</b> = two or more.<br>
+        <b>1. Absence:</b> TG absence rate exceeds the year-group average by more than the configured delta.<br>
+        <b>2. Sanctions:</b> TG codes-per-pupil exceeds the year-group average by the configured ratio, with at least the minimum number of codes in the TG.<br>
+        <b>3. PA cluster:</b> at least the minimum number of pupils in the TG meet the rolling persistent-absence threshold (same definition as the pupil-level PA flag).<br><br>
+        <b>Currently in force:</b> Min TG size <b>${TG_MIN_SIZE}</b> · Absence delta <b>+${TG_ABS_DELTA}pp</b> vs year avg · Sanctions ratio <b>${TG_SAN_RATIO}×</b> with min <b>${TG_SAN_MIN}</b> codes · Min PA cluster <b>${TG_PA_MIN}</b> pupils (PA defined as <b>≥${CT_PA_PCT}%</b> absent over last <b>${CT_PA_WIN}sd</b>). Adjust in Admin tab.`);
+
+      const tableTg = `<div style="overflow-x:auto"><table class="d"><thead><tr>
           <th style="width:20px"></th><th>Year</th><th>TG</th><th style="text-align:center">Pupils</th>
           <th style="text-align:center">Abs Rate</th><th style="text-align:center">Sanc/Pupil</th><th style="text-align:center">PA Pupils</th><th>Concerns</th>
-        </tr></thead><tbody>${tRows}</tbody></table></div></div>`;
+        </tr></thead><tbody>${tRows}</tbody></table></div>`;
+
+      html += _cnCard('tg', 'Tutor Group Concerns', `${tgConcerns.length} TGs flagged`, explainerTg + tableTg);
     }
 
     // Teacher concerns (SLT only)
@@ -6968,10 +7192,15 @@ function rPeer(){
         </tr>`;
       }).join('');
 
-      html+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Teacher Concerns <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${teacherConcerns.length} teachers flagged across multiple pupils</span></div>
-        <div style="overflow-x:auto"><table class="d"><thead><tr>
+      const explainerRel = _cnExplainer(`A teacher is flagged when the same individual triggers <b>Sanctions Concentration</b> alerts on multiple different pupils — suggesting the issue may sit in the teacher–pupil dynamic rather than purely with one pupil. <b>Amber</b> = 2 pupils affected; <b>red</b> = 3 or more.<br><br>
+        Each underlying Sanctions Concentration trigger requires the pupil to have at least the minimum total codes, the minimum number from this specific teacher, and a disproportionality ratio above threshold (the teacher's share of the pupil's codes versus their timetable share).<br><br>
+        <b>Currently in force:</b> Min total codes per pupil <b>${SA_MIN_TOTAL}</b> · Min from one teacher <b>${SA_MIN_TEACHER}</b> · Concentration ratio <b>${SA_RATIO}×</b> · Teacher must appear for <b>2+</b> pupils to flag here. Adjust in Admin tab.`);
+
+      const tableRel = `<div style="overflow-x:auto"><table class="d"><thead><tr>
           <th style="width:20px"></th><th>Teacher</th><th>Subject(s)</th><th style="text-align:center">Pupils Affected</th><th>Pupils</th>
-        </tr></thead><tbody>${tcRows}</tbody></table></div></div>`;
+        </tr></thead><tbody>${tcRows}</tbody></table></div>`;
+
+      html += _cnCard('teacher', 'Relationship Concerns', `${teacherConcerns.length} teachers flagged across multiple pupils`, explainerRel + tableRel);
     }
 
     if(!pupilConcerns.length&&!classConcerns.length&&!tgConcerns.length&&!teacherConcerns.length){
@@ -6997,6 +7226,10 @@ function rPeer(){
   window.popBCTG=popBCTG;
   window.goP=goP;
   window.applyCT=applyCT;
+  window.resetThresholds=resetThresholds;
+  window.cnToggleCard=cnToggleCard;
+  window.cnFilterToggle=cnFilterToggle;
+  window.cnFilterClear=cnFilterClear;
   window.showCTModal=showCTModal;
   window.hideCTModal=hideCTModal;
   window.applySW=applySW;
