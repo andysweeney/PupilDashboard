@@ -565,6 +565,7 @@ function pLink(idx,name){const clean=name.replace(/\s*\(P\d+\)\s*$/,'');return`<
 
 // Concern thresholds (global)
 let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
+let AP_MULT=2.0, AP_HIGH_ABS=40;
 let CT_AT=1.3, CT_AM=3;
 let CT_PA_WIN=20, CT_PA_PCT=10;
 let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0, SA_ENGAGE=3;
@@ -583,7 +584,7 @@ function saveThresholds(){
   try {
     const obj = {
       CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT,
-      AP_MIN, AP_PCT, AP_SLOT,
+      AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
       SAV_RATIO, SAV_MIN,
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
@@ -615,6 +616,8 @@ function applyThresholdValues(v){
   if((n=safeI(v.AP_MIN))!=null) AP_MIN=n;
   if((n=safeI(v.AP_PCT))!=null) AP_PCT=n;
   if((n=safeI(v.AP_SLOT))!=null) AP_SLOT=n;
+  if((n=safeF(v.AP_MULT))!=null) AP_MULT=n;
+  if((n=safeF(v.AP_HIGH_ABS))!=null) AP_HIGH_ABS=n;
   if((n=safeI(v.SA_MIN_TOTAL))!=null) SA_MIN_TOTAL=n;
   if((n=safeI(v.SA_MIN_TEACHER))!=null) SA_MIN_TEACHER=n;
   if((n=safeF(v.SA_RATIO))!=null) SA_RATIO=n;
@@ -638,7 +641,7 @@ function applyThresholdValues(v){
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
   CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:3, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10,
-  AP_MIN:3, AP_PCT:40, AP_SLOT:30,
+  AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
   SA_MIN_TOTAL:6, SA_MIN_TEACHER:3, SA_RATIO:2.0, SA_ENGAGE:3,
   SAV_RATIO:2.0, SAV_MIN:3,
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
@@ -650,7 +653,7 @@ const _THRESHOLD_DEFAULTS = {
 const _THRESHOLD_INPUTS = {
   CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
   CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct',
-  AP_MIN:'ct-ap-min', AP_PCT:'ct-ap-pct', AP_SLOT:'ct-ap-slot',
+  AP_MIN:'ct-ap-min', AP_PCT:'ct-ap-pct', AP_SLOT:'ct-ap-slot', AP_MULT:'ap-mult', AP_HIGH_ABS:'ap-high-abs',
   SA_MIN_TOTAL:'sa-min-total', SA_MIN_TEACHER:'sa-min-teacher', SA_RATIO:'sa-ratio', SA_ENGAGE:'sa-engage',
   SAV_RATIO:'sav-ratio', SAV_MIN:'sav-min',
   CL_MIN_PUPILS:'cl-min-pupils', CL_MIN_CODES:'cl-min-codes', CL_RATIO_AMBER:'cl-ratio-amber', CL_RATIO_RED:'cl-ratio-red',
@@ -661,7 +664,7 @@ const _THRESHOLD_INPUTS = {
 // Refresh all header display spans from current globals.
 function _refreshThresholdDisplays(){
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
-  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
+  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
   document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
@@ -706,6 +709,8 @@ function applyCT(){
   AP_MIN=parseInt(document.getElementById('ct-ap-min').value)||3;
   AP_PCT=parseInt(document.getElementById('ct-ap-pct').value)||40;
   AP_SLOT=parseInt(document.getElementById('ct-ap-slot').value)||30;
+  AP_MULT=parseFloat(document.getElementById('ap-mult').value)||2.0;
+  AP_HIGH_ABS=parseFloat(document.getElementById('ap-high-abs').value)||40;
   SA_MIN_TOTAL=parseInt(document.getElementById('sa-min-total').value)||6;
   SA_MIN_TEACHER=parseInt(document.getElementById('sa-min-teacher').value)||3;
   SA_RATIO=parseFloat(document.getElementById('sa-ratio').value)||2.0;
@@ -722,7 +727,7 @@ function applyCT(){
   TG_SAN_MIN=parseInt(document.getElementById('tg-san-min').value)||5;
   TG_PA_MIN=parseInt(document.getElementById('tg-pa-min').value)||3;
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
-  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
+  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
   document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
@@ -898,6 +903,16 @@ function analyseAbsencePattern(px){
   const WLK=DD.weekLessons||{};
   const weekCount=Object.keys(WLK).length;
 
+  // Compute pupil's overall absence rate against the same denominator base used per slot.
+  // Total scheduled slots = sum of slotDenominators[d][p] across all 5×5 cells.
+  const _slotDenomFull=DD.slotDenominators;
+  let pupilOverallRate=null;
+  if(_slotDenomFull && Array.isArray(_slotDenomFull) && _slotDenomFull.length===5){
+    let totalScheduled=0;
+    for(let d=0;d<5;d++) for(let p=0;p<5;p++) totalScheduled+=(_slotDenomFull[d][p]||0);
+    if(totalScheduled>0) pupilOverallRate=(totalAbs/totalScheduled*100);
+  }
+
   // Day-level flags
   const dayFlags=[];
   DAYS.forEach((d,i)=>{
@@ -909,19 +924,29 @@ function analyseAbsencePattern(px){
 
   // Slot-level flags
   const slotFlags=[];
-  const _slotDenom2=DD.slotDenominators;
-  if(!_slotDenom2||!Array.isArray(_slotDenom2)||_slotDenom2.length!==5) return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags};
+  if(!_slotDenomFull||!Array.isArray(_slotDenomFull)||_slotDenomFull.length!==5) return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags,pupilOverallRate};
+
+  // Suppress entire slot analysis for very high-absence pupils.
+  // They're already caught by Persistent Absence and Attendance Declining;
+  // mathematically every slot will look "patterned" because they're ~always absent.
+  if(pupilOverallRate!==null && pupilOverallRate>=AP_HIGH_ABS){
+    return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags,pupilOverallRate,suppressedHighAbs:true};
+  }
+
   for(let d=0;d<5;d++){
     for(let p=0;p<5;p++){
-      const denom2=_slotDenom2[d][p];
+      const denom2=_slotDenomFull[d][p];
       if(slotAbs[d][p]>=AP_MIN&&denom2>0){
         const rate=(slotAbs[d][p]/denom2*100);
-        if(rate>=AP_SLOT) slotFlags.push({day:DAYS[d],dayIdx:d,per:p+1,perIdx:p,count:slotAbs[d][p],weeks:denom2,rate,unauth:slotUnauth[d][p]});
+        // Two-stage check: absolute slot rate AND multiple of pupil's overall rate.
+        // Multiplier check: when pupilOverallRate is 0 (no other absences), multiplier is satisfied.
+        const meetsMult = (pupilOverallRate===null) || (pupilOverallRate===0) || (rate >= pupilOverallRate*AP_MULT);
+        if(rate>=AP_SLOT && meetsMult) slotFlags.push({day:DAYS[d],dayIdx:d,per:p+1,perIdx:p,count:slotAbs[d][p],weeks:denom2,rate,unauth:slotUnauth[d][p],pupilOverallRate});
       }
     }
   }
 
-  return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags};
+  return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags,pupilOverallRate};
 }
 
 // Render pupil absence pattern heatmap
@@ -5271,7 +5296,7 @@ function rCC(){
   // Initialise concern threshold display
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
-  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%</b>`;
+  document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
   document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
@@ -6463,6 +6488,8 @@ function rPeer(){
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Minimum absences in a single slot before flagging">Min Absences/Slot</label><input id="ct-ap-min" type="number" min="1" max="20" step="1" value="${AP_MIN}" style="${inputStyle}"></div>
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Min % of total absences in one day">Min % Conc. (Day)</label><input id="ct-ap-pct" type="number" min="10" max="100" step="5" value="${AP_PCT}" style="${inputStyle}"></div>
             <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Min absence rate for a specific slot">Min % Rate (Slot)</label><input id="ct-ap-slot" type="number" min="10" max="100" step="5" value="${AP_SLOT}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Slot pattern only fires if slot rate ≥ this multiplier × pupil's overall absence rate. Stops generally-absent pupils triggering on every slot.">Slot Pattern Multiplier</label><input id="ap-mult" type="number" min="1.0" max="5.0" step="0.1" value="${AP_MULT}" style="${inputStyle}"></div>
+            <div style="display:flex;align-items:center;gap:.6rem"><label style="${labelStyle};min-width:10rem;margin:0" title="Pupils whose overall absence rate is above this %  skip Absence Pattern entirely (they're already flagged by other concerns).">Skip if Overall Abs ≥ (%)</label><input id="ap-high-abs" type="number" min="10" max="100" step="5" value="${AP_HIGH_ABS}" style="${inputStyle}"></div>
           </div>
         </div>
         <div>
@@ -6832,7 +6859,8 @@ function rPeer(){
       const absAnalysis=analyseAbsencePattern(px);
       if(absAnalysis.slotFlags.length){
         const worst=absAnalysis.slotFlags.sort((a,b)=>b.rate-a.rate)[0];
-        concerns.push({type:'abs-pattern',severity:worst.rate>=60?'red':'amber',label:'Absence Pattern',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate)${absAnalysis.slotFlags.length>1?' + '+(absAnalysis.slotFlags.length-1)+' more':''}`});
+        const overallTxt = worst.pupilOverallRate!=null ? ` vs ${worst.pupilOverallRate.toFixed(0)}% overall` : '';
+        concerns.push({type:'abs-pattern',severity:worst.rate>=60?'red':'amber',label:'Absence Pattern',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate${overallTxt})${absAnalysis.slotFlags.length>1?' + '+(absAnalysis.slotFlags.length-1)+' more':''}`});
       }
 
       // 6. Subject Engagement — correlated absences with sanctions
