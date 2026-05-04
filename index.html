@@ -1819,8 +1819,9 @@ function rP(){
   }
   const bcLine=bcBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${bcBadges}</div>`:'';
   const scAlert=pupilSanctionsAlert(x);
+  const otherConcernsAlert=pupilOtherConcernsAlert(x);
 
-  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${scAlert}${summaryLine}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
+  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${otherConcernsAlert}${scAlert}${summaryLine}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
   renderTimetable(x);
@@ -6513,6 +6514,150 @@ function rPeer(){
       render:saRender
     };
     saRender();
+  }
+
+  // Module-scope school-day list and per-day period count, computed once and cached.
+  // Used by attendance/sanction rolling-window calculations outside the Concerns tab scope.
+  let _cnSDMod=null,_avgPerDayMod=null,_cnYgLatestMod=null,_cnYgSDMod=null;
+  function _ensureCnContext(){
+    if(_cnSDMod) return;
+    const todayD=new Date();
+    const todayISO=`${todayD.getFullYear()}-${String(todayD.getMonth()+1).padStart(2,'0')}-${String(todayD.getDate()).padStart(2,'0')}`;
+    const ayStart=`${CAY}-09-01`;
+    const WLK=DD.weekLessons||{};
+    _cnSDMod=[];
+    Object.keys(WLK).sort().forEach(wk=>{
+      if(wk<ayStart) return;
+      for(let off=0;off<5;off++){
+        const d=new Date(wk+'T12:00:00');d.setDate(d.getDate()+off);
+        const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        if(iso<=todayISO) _cnSDMod.push(iso);
+      }
+    });
+    _cnSDMod.sort();
+    const _wkVals=Object.values(WLK);
+    _avgPerDayMod=_wkVals.length?(_wkVals.reduce((s,v)=>s+v,0)/_wkVals.length)/5:5;
+    // Year-group latest sanction date (cap at today)
+    _cnYgLatestMod={};
+    const SAN_=DD.sanctions||[];
+    SAN_.forEach(s=>{
+      const yg=curYG(REG[String(s[0])]?.intake);
+      if(!yg) return;
+      if(s[2]>todayISO) return;
+      if(!_cnYgLatestMod[yg]||s[2]>_cnYgLatestMod[yg]) _cnYgLatestMod[yg]=s[2];
+    });
+    _cnYgSDMod={};
+    Object.keys(_cnYgLatestMod).forEach(yg=>{
+      const cap=_cnYgLatestMod[yg];
+      _cnYgSDMod[yg]=_cnSDMod.filter(d=>d<=cap);
+    });
+  }
+  // Standalone attRA — rolling absence rate over last nSD school days
+  function attRAMod(px,nSD){
+    _ensureCnContext();
+    if(!_cnSDMod.length) return{rate:0,absent:0,periods:0};
+    const cutIdx=Math.max(0,_cnSDMod.length-nSD);
+    const startISO=_cnSDMod[cutIdx];
+    const endISO=_cnSDMod[_cnSDMod.length-1];
+    const a=countAbsPeriods(px,startISO,endISO);
+    const days=_cnSDMod.length-cutIdx;
+    const periods=days*_avgPerDayMod;
+    const rate=periods>0?(a.total/periods*100):0;
+    return{rate,absent:a.total,periods};
+  }
+  // Standalone sanRA — weighted sanction score per 10sd over the last nSD school days
+  function sanRAMod(px,yg,nSD){
+    _ensureCnContext();
+    const sd=_cnYgSDMod[yg]||_cnSDMod;
+    const endDate=_cnYgLatestMod[yg]||(_cnSDMod[_cnSDMod.length-1]);
+    if(!sd.length) return 0;
+    const cutIdx=Math.max(0,sd.length-nSD);
+    const cutISO=sd[cutIdx]||endDate;
+    const SAN_=DD.sanctions||[];
+    let score=0;
+    for(let i=0;i<SAN_.length;i++){
+      const r=SAN_[i];
+      if(r[0]!==px) continue;
+      if(r[2]<cutISO||r[2]>endDate) continue;
+      score+=sancWeight(r[1]);
+    }
+    return score/(nSD/10);
+  }
+  // Standalone sanCountIn — raw sanction count over the last nSD school days
+  function sanCountInMod(px,yg,nSD){
+    _ensureCnContext();
+    const sd=_cnYgSDMod[yg]||_cnSDMod;
+    const endDate=_cnYgLatestMod[yg]||(_cnSDMod[_cnSDMod.length-1]);
+    if(!sd.length) return 0;
+    const cutIdx=Math.max(0,sd.length-nSD);
+    const cutISO=sd[cutIdx]||endDate;
+    const SAN_=DD.sanctions||[];
+    let n=0;
+    for(let i=0;i<SAN_.length;i++){
+      const r=SAN_[i];
+      if(r[0]!==px) continue;
+      if(r[2]<cutISO||r[2]>endDate) continue;
+      n++;
+    }
+    return n;
+  }
+  // Combined alert for the 5 pupil-level concerns (Attendance Declining, Persistent
+  // Absence, Sanctions Accelerating, Absence Pattern, Subject Avoidance). Renders a
+  // single bordered panel listing each one that has fired, with severity colour and
+  // brief detail. Mirrors the Concerns tab logic so the same triggers apply.
+  function pupilOtherConcernsAlert(px){
+    const yg=curYG(REG[String(px)]?.intake);
+    if(!yg) return'';
+    const items=[];
+    
+    // 1. Attendance Declining
+    const a20=attRAMod(px,20),a60=attRAMod(px,60);
+    if(a20.rate>a60.rate*CT_AT && a60.rate>0 && a20.absent>=CT_AM){
+      const sev=a20.rate>a60.rate*2?'red':'amber';
+      items.push({label:'Attendance Declining',severity:sev,detail:`20sd ${a20.rate.toFixed(1)}% absent vs 60sd ${a60.rate.toFixed(1)}% (${a20.absent} absent periods, ${(a20.rate/a60.rate).toFixed(1)}× older window)`});
+    }
+    // 2. Persistent Absence
+    const aPA=attRAMod(px,CT_PA_WIN);
+    if(aPA.rate>=CT_PA_PCT){
+      items.push({label:'Persistent Absence',severity:'red',detail:`${CT_PA_WIN}sd absence ${aPA.rate.toFixed(1)}% (${aPA.absent} absent periods)`});
+    }
+    // 3. Sanctions Accelerating
+    const s20=sanRAMod(px,yg,20),s60=sanRAMod(px,yg,60);
+    const sCount20=sanCountInMod(px,yg,20);
+    if(s20>s60*CT_SC && s60>0 && sCount20>=CT_MN){
+      const sev=s20>s60*2?'red':'amber';
+      items.push({label:'Sanctions Accelerating',severity:sev,detail:`20sd weighted ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)} (${sCount20} sanctions in last 20sd, ${(s20/s60).toFixed(1)}× older)`});
+    }
+    // 4. Absence Pattern (slot-level)
+    const absAnalysis=analyseAbsencePattern(px);
+    if(absAnalysis&&absAnalysis.slotFlags&&absAnalysis.slotFlags.length){
+      const sortedFlags=absAnalysis.slotFlags.slice().sort((a,b)=>b.rate-a.rate);
+      const worst=sortedFlags[0];
+      const overallTxt=worst.pupilOverallRate!=null?` vs ${worst.pupilOverallRate.toFixed(0)}% overall`:'';
+      const more=sortedFlags.length>1?` + ${sortedFlags.length-1} more`:'';
+      items.push({label:'Absence Pattern',severity:worst.rate>=60?'red':'amber',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate${overallTxt})${more}`});
+    }
+    // 5. Subject Avoidance
+    const avoidFlags=getSubjectAvoidance(px);
+    avoidFlags.forEach(a=>{
+      const sev=parseFloat(a.ratio)>=4?'red':'amber';
+      items.push({label:'Subject Avoidance',severity:sev,detail:`Avoiding ${a.subj} — ${a.absences} qualifying absences (${a.partial} partial-day${a.p1Whole?', '+a.p1Whole+' P1 whole-day':''}), ${a.actualPct}% of qualifying absences vs expected ${a.expectedPct}%, ratio ${a.ratio}×`});
+    });
+    
+    if(!items.length) return'';
+    
+    // Highest severity drives the panel border colour
+    const maxSev=items.some(i=>i.severity==='red')?'red':'amber';
+    const borderCol=maxSev==='red'?'#ef4444':'#f97316';
+    const rows=items.map(it=>{
+      const col=it.severity==='red'?'#ef4444':'#f97316';
+      return`<div style="padding:.25rem 0;border-bottom:1px solid rgba(38,45,68,.2);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <span style="font-size:.72rem;font-weight:600;color:${col};min-width:9rem">${it.label}</span>
+        <span style="font-size:.68rem;color:var(--mu);flex:1">${it.detail}</span>
+        <span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${col};padding:.05rem .35rem;border:1px solid ${col}55;border-radius:3px">${it.severity}</span>
+      </div>`;
+    }).join('');
+    return`<div class="dw" style="border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${items.length} active</span></div>${rows}</div>`;
   }
 
   // Pupil-level sanctions concentration alert (for use in rP)
