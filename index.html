@@ -2122,7 +2122,7 @@ function rAttSpark(x, wrapId){
         }
       },
       scales:{
-        x:{ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},
+        x:{offset:true,ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},
         y:{min:yMin,max:100,ticks:{color:'#666666',font:{size:7},callback:v=>v+'%',stepSize:5},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}}
       }
     },
