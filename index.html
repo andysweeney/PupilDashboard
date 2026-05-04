@@ -170,6 +170,7 @@ table.d tr:hover td{background:var(--sf2)}
 <span id="sv-flags" style="font-size:.72rem;color:var(--mu);display:flex;align-items:center;gap:.6rem"></span>
 </div>
 <div id="sv-title" style="margin-bottom:.5rem"></div>
+<div id="sv-summary" style="margin-bottom:1.25rem"></div>
 <div id="sv-alerts" style="margin-bottom:1.25rem"></div>
 <div class="crd-g" id="sv-cards"></div>
 <div class="ch-g" id="sv-charts-top"></div>
@@ -186,6 +187,7 @@ table.d tr:hover td{background:var(--sf2)}
 <div id="cl-flags" style="font-size:.72rem;display:flex;align-items:center"></div>
 </div>
 <div id="cl-title" style="margin-bottom:.5rem"></div>
+<div id="cl-summary" style="margin-bottom:1.25rem"></div>
 <div id="cl-alerts" style="margin-bottom:1.25rem"></div>
 <div id="cl-network" style="margin-bottom:1.25rem"></div>
 <div style="page-break-before:always"></div>
@@ -1268,6 +1270,54 @@ function sendBreakdownFromSet(pupils){
   if(senCounts['N'])subParts.push(`${senCounts['N']}N`);
   const subStr=subParts.length?` (${subParts.join(' · ')})`:'';
   return`<span style="color:#f97316;font-weight:600">${sendCount}</span> SEND${subStr}`;
+}
+
+// Generate summary cards (Population/SEN + Attendance/Sanctions) for a group of pupils.
+// pupils: array of pupil rows [px, pid, ...row data]. Same shape as ygRows() returns.
+// Used by Tutor Group, Class, Subject tabs.
+function makeSummaryCards(pupils, opts){
+  opts = opts || {};
+  const titleLabel = opts.titleLabel || 'Cohort';
+  const ay = opts.ay || (DD.config && DD.config.current_acad_year) || 2025;
+  const ayStart = `${ay}-09-01`;
+  const todayISO = (new Date()).toISOString().slice(0,10);
+  const endDate = todayISO < `${ay+1}-07-31` ? todayISO : `${ay+1}-07-31`;
+  const pupilPx = new Set(pupils.map(r=>r[0]));
+  const sendN = pupils.filter(r=>r[4]).length;
+  const ehcpN = pupils.filter(r=>r[5]).length;
+  const fsmN = pupils.filter(r=>r[6]).length;
+  
+  // YTD attendance — total absences across all pupils ÷ total scheduled lessons
+  const WLK = DD.weekLessons || {};
+  let totalAbs = 0;
+  pupils.forEach(r=>{
+    const a = countAbsPeriods(r[0], ayStart, endDate);
+    totalAbs += a.total;
+  });
+  let totalLessons = 0;
+  for(const [w,tl] of Object.entries(WLK)) {
+    if(w >= ayStart && w <= endDate) totalLessons += tl;
+  }
+  const expectedTotal = totalLessons * pupils.length;
+  const attPct = expectedTotal > 0 ? ((expectedTotal - totalAbs) / expectedTotal * 100).toFixed(1) : '—';
+  const attCol = attPct === '—' ? 'var(--mu)' : parseFloat(attPct) >= 95 ? '#34d399' : parseFloat(attPct) >= 90 ? 'var(--tx)' : '#ef4444';
+  
+  // Sanctions YTD
+  const sanc = (typeof SAN !== 'undefined' ? SAN : []).filter(s => pupilPx.has(s[0]) && s[2] >= ayStart && s[2] <= endDate);
+  const codesN = sanc.filter(s => s[1] === 0).length;
+  const detsN = sanc.filter(s => s[1] === 2).length;
+  
+  return `<div class="crd-g">
+    <div class="crd"><div class="ct2">${titleLabel}</div>
+      <div style="font-size:1.5rem;font-weight:700;color:var(--ac)">${pupils.length}</div>
+      <div style="font-size:.72rem;color:var(--mu)">pupils</div>
+      <div style="margin-top:.4rem">${flagsStr(sendN,ehcpN,fsmN,pupils)}</div>
+    </div>
+    <div class="crd"><div class="ct2">YTD Attendance</div>
+      <div style="font-size:1.5rem;font-weight:700;color:${attCol}">${attPct}%</div>
+      <div style="font-size:.72rem;color:var(--mu)">Codes: <span style="color:#f97316;font-weight:600">${codesN}</span> · Detentions: <span style="color:#7c3aed;font-weight:600">${detsN}</span></div>
+    </div>
+  </div>`;
 }
 
 // Standard flags string with breakdown
@@ -2575,9 +2625,22 @@ function rCmp(){
       const nCodes=coSanc.filter(s=>s[1]===0).length;
       const nOnCalls=coSanc.filter(s=>s[1]===1).length;
       const nDetentions=coSanc.filter(s=>s[1]===2).length;
+      // YTD attendance — only available for current academic year (weekLessons + attAbsSubj)
+      let ytdAtt=null;
+      if(ay===CAY){
+        const _todayD=new Date();
+        const _todayISO=`${_todayD.getFullYear()}-${String(_todayD.getMonth()+1).padStart(2,'0')}-${String(_todayD.getDate()).padStart(2,'0')}`;
+        const _endDate=_todayISO<ayEnd?_todayISO:ayEnd;
+        let totalAbs=0;
+        rows.forEach(r=>{const a=countAbsPeriods(r[0],ayStart,_endDate);totalAbs+=a.total});
+        let totalLessons=0;
+        for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=ayStart&&w<=_endDate)totalLessons+=tl}
+        const expectedTotal=totalLessons*rows.length;
+        if(expectedTotal>0)ytdAtt=parseFloat(((expectedTotal-totalAbs)/expectedTotal*100).toFixed(1));
+      }
       cohorts.push({ink,ay,label:`${ay}-${ay+1}`,pupils:rows.length,avg,avgE,send,ehcp,fsm,senCats2,gb,_codeTip:sancTipAttrs(gb[0],gb[2],sancCatsFor(new Set(rows.map(r=>r[0])),DD.sanctions||[],SANC_DET),'Codes'),
         sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
-        nCodes,nOnCalls,nDetentions,
+        nCodes,nOnCalls,nDetentions,ytdAtt,
         status:ay+1<=CAY?'complete':(ay===CAY?'current':'future'),
         left:curYG(ink)>11});
     }
@@ -2595,6 +2658,7 @@ function rCmp(){
       <td style="font-weight:500">${c.label}${c.left?' <span class="left-tag">LEFT</span>':c.status==='current'?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
       <td>Intake ${c.ink}</td>
       <td>${c.pupils}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:#34d399;font-weight:600':c.ytdAtt>=90?'':'color:#ef4444;font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
       <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${fV(c.avg,2)}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${fV(c.avgE,2)}</td>
       <td>${c.gb.map(x=>{const tip=`${x.g}: ${x.n}${x.sendN?`&#10;SEND: ${x.sendN}`:''}${x.ehcpN?`&#10;EHCP: ${x.ehcpN}`:''}${x.fsmN?`&#10;FSM: ${x.fsmN}`:''}`;return`<span style="display:inline-block;margin:.1rem;padding:.08rem .3rem;border-radius:3px;font-size:.65rem;background:${GC[x.g]}22;color:${GC[x.g]};cursor:help" title="${tip}">${x.g.slice(0,3)} ${x.n}</span>`}).join('')}</td>
@@ -2611,7 +2675,7 @@ function rCmp(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Year ${targetYG} ${subLabel} \u2014 Cohort Comparison Over Time</div>
-    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpef"></canvas></div></div></div>`;
 
@@ -2764,11 +2828,25 @@ function rPrg(){
     const nOnCalls=coSanc.filter(s=>s[1]===1).length;
     const nDetentions=coSanc.filter(s=>s[1]===2).length;
 
+    // YTD attendance — only available for current academic year
+    let ytdAtt=null;
+    if(ay===CAY){
+      const _todayD=new Date();
+      const _todayISO=`${_todayD.getFullYear()}-${String(_todayD.getMonth()+1).padStart(2,'0')}-${String(_todayD.getDate()).padStart(2,'0')}`;
+      const _endDate=_todayISO<ayEnd?_todayISO:ayEnd;
+      let totalAbs=0;
+      rows.forEach(r=>{const a=countAbsPeriods(r[0],ayStart,_endDate);totalAbs+=a.total});
+      let totalLessons=0;
+      for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=ayStart&&w<=_endDate)totalLessons+=tl}
+      const expectedTotal=totalLessons*rows.length;
+      if(expectedTotal>0)ytdAtt=parseFloat(((expectedTotal-totalAbs)/expectedTotal*100).toFixed(1));
+    }
+
     const isCurrent=ay===CAY;
     const isFuture=ay>CAY;
     years.push({yg,ay,ayLabel,pupils:rows.length,avg,avgE,gb,
       send,ehcp,fsm,senCats2,_codeTip:sancTipAttrs(gb[0],gb[2],sancCatsFor(new Set(rows.map(r=>r[0])),DD.sanctions||[],SANC_DET),'Codes'),sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
-      nCodes,nOnCalls,nDetentions,isCurrent,isFuture});
+      nCodes,nOnCalls,nDetentions,ytdAtt,isCurrent,isFuture});
   }
 
   const out=document.getElementById('prg-out');
@@ -2780,6 +2858,7 @@ function rPrg(){
     return`<tr>
       <td style="font-weight:500">Y${c.yg} — ${c.ayLabel}${c.isCurrent?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
       <td>${c.pupils}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:#34d399;font-weight:600':c.ytdAtt>=90?'':'color:#ef4444;font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
       <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${fV(c.avg,2)}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${fV(c.avgE,2)}</td>
       <td>${c.gb.map(x=>{const tip=`${x.g}: ${x.n}${x.sendN?`&#10;SEND: ${x.sendN}`:''}${x.ehcpN?`&#10;EHCP: ${x.ehcpN}`:''}${x.fsmN?`&#10;FSM: ${x.fsmN}`:''}`;return`<span style="display:inline-block;margin:.1rem;padding:.08rem .3rem;border-radius:3px;font-size:.65rem;background:${GC[x.g]}22;color:${GC[x.g]};cursor:help" title="${tip}">${x.g.slice(0,3)} ${x.n}</span>`}).join('')}</td>
@@ -2796,7 +2875,7 @@ function rPrg(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Intake ${ink} — ${subLabel} Progression</div>
-    <table class="d ctr"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">${isAll?'':'In-lesson '}Codes</th><th style="color:#ef4444">${isAll?'':'In-lesson '}On-Calls</th><th style="color:#7c3aed">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgef"></canvas></div></div></div>
     <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">${subLabel} Grade Distribution Over Time — Intake ${ink}</div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prggrade"></canvas></div></div>
@@ -4595,7 +4674,7 @@ function rSV(){
   const yearGroup=parseInt(document.getElementById('sv-yg').value);
   const sub=document.getElementById('sv-sub').value;
   if(!yearGroup||!sub)return;
-  const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('sv-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('sv-charts-top').innerHTML='';document.getElementById('sv-charts-bottom').innerHTML='';document.getElementById('sv-alerts').innerHTML='';document.getElementById('sv-title').innerHTML='';document.getElementById('sv-dist-title').innerHTML='';return}
+  const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('sv-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('sv-charts-top').innerHTML='';document.getElementById('sv-charts-bottom').innerHTML='';document.getElementById('sv-alerts').innerHTML='';document.getElementById('sv-title').innerHTML='';document.getElementById('sv-dist-title').innerHTML='';const ss=document.getElementById('sv-summary');if(ss)ss.innerHTML='';return}
   const nP=pp.length;
   const lp=pp[nP-1],labs=pp.map(p=>PL[PER.indexOf(p)]);
   const lr=ygRows(yearGroup,lp);
@@ -4773,6 +4852,9 @@ function rSV(){
 
   // Section title
   document.getElementById('sv-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} ${sub} Report Breakdown</div>`;
+  
+  // Summary cards (population/SEN + attendance/sanctions)
+  document.getElementById('sv-summary').innerHTML=makeSummaryCards(lrSubj, {titleLabel:`Y${yearGroup} ${sub}`, ay:CAY});
 
   if(!hasGradesSV){
     document.getElementById('sv-cards').innerHTML='<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported.</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lrSubj)} · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils</div></div>';
@@ -4871,7 +4953,7 @@ function rCL(){
   const sub=document.getElementById('cl-sub').value;
   const cl=parseInt(document.getElementById('cl-cls').value);
   if(!yearGroup||!sub||isNaN(cl))return;
-  const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('cl-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('cl-charts').innerHTML='';document.getElementById('cl-alerts').innerHTML='';document.getElementById('cl-network').innerHTML='';document.getElementById('cl-title').innerHTML='';document.getElementById('cl-send-title').innerHTML='';document.getElementById('cl-send').innerHTML='';document.getElementById('cl-perf-title').innerHTML='';return}
+  const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('cl-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('cl-charts').innerHTML='';document.getElementById('cl-alerts').innerHTML='';document.getElementById('cl-network').innerHTML='';document.getElementById('cl-title').innerHTML='';document.getElementById('cl-send-title').innerHTML='';document.getElementById('cl-send').innerHTML='';document.getElementById('cl-perf-title').innerHTML='';const cs=document.getElementById('cl-summary');if(cs)cs.innerHTML='';return}
   const nP=pp.length;
   const lp=pp[nP-1],labs=pp.map(p=>PL[PER.indexOf(p)]);
 
@@ -5052,7 +5134,14 @@ function rCL(){
     const pctCol=aySubjPct<lessonPct?'#34d399':aySubjPct>lessonPct?'#ef4444':'var(--tx)';
     const lastYr=dhLastYearTotal[px]||0;
     const lyCol=ayTotal>lastYr?'#ef4444':ayTotal<lastYr?'#34d399':'var(--mu)';
-    return{px,pid,flags:r||null,...c,ayTotal,aySubjTotal,aySubjPct,weighted,pctCol,lastYr,lyCol};
+    // YTD attendance (across all subjects)
+    const _dhAbs=countAbsPeriods(px,dhAyStart,dhTodayISO);
+    let _dhTotalL=0;
+    for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=dhAyStart&&w<=dhTodayISO)_dhTotalL+=tl}
+    const attPctRaw=_dhTotalL>0?((_dhTotalL-_dhAbs.total)/_dhTotalL*100):null;
+    const attPct=attPctRaw!=null?attPctRaw.toFixed(1):'—';
+    const attCol=attPctRaw==null?'var(--mu)':attPctRaw>=95?'#34d399':attPctRaw>=90?'var(--tx)':'#ef4444';
+    return{px,pid,flags:r||null,...c,ayTotal,aySubjTotal,aySubjPct,weighted,pctCol,lastYr,lyCol,attPct,attCol};
   }).sort((a,b)=>b.weighted-a.weighted);
 
   let expDisciplineHtml='';
@@ -5066,6 +5155,7 @@ function rCL(){
         <td style="font-family:'JetBrains Mono',monospace;font-weight:500">${pLink(p.px,p.pid)}</td>
         <td style="font-size:.65rem;color:var(--mu)">${pupilTG(p.px)}</td>
         <td>${flags?`<span style="display:flex;gap:.25rem">${flags}</span>`:''}</td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:${p.attCol};font-weight:500">${p.attPct}${p.attPct!=='—'?'%':''}</td>
         <td style="text-align:center;color:#f97316;font-weight:600;cursor:help;position:relative" onmouseenter="const t=document.createElement('div');t.innerHTML='<div style=font-weight:600;margin-bottom:.2rem>All Subjects: ${p.codes} Codes</div><div>${catTip}</div><div style=margin-top:.3rem;font-weight:600>${sub}: ${p.sCodes} Codes</div><div>${sCatTip}</div><div style=margin-top:.3rem>${p.dets} Detentions</div>';t.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;pointer-events:none';const r2=this.getBoundingClientRect();t.style.left=(r2.left+r2.width/2)+'px';t.style.top=(r2.top-4)+'px';t.style.transform='translate(-50%,-100%)';document.body.appendChild(t);this._t=t" onmouseleave="if(this._t){this._t.remove();this._t=null}">${p.codes} <span style="font-weight:400;font-size:.6rem;color:var(--mu)">(${p.sCodes})</span></td>
         <td style="text-align:center;color:#ef4444;font-weight:600">${p.oncalls} <span style="font-weight:400;font-size:.6rem;color:var(--mu)">(${p.sOncalls})</span></td>
         <td style="text-align:center;color:#7c3aed;font-weight:600">${p.dets} <span style="font-weight:400;font-size:.6rem;color:var(--mu)">(${p.sDets})</span></td>
@@ -5082,6 +5172,7 @@ function rCL(){
         <th>Pupil</th>
         <th>TG</th>
         <th>Flags</th>
+        <th style="text-align:center">YTD Att.</th>
         <th style="text-align:center;color:#f97316">Codes <span style="font-size:.55rem;font-weight:400">(in ${sub})</span></th>
         <th style="text-align:center;color:#ef4444">On-Calls <span style="font-size:.55rem;font-weight:400">(in ${sub})</span></th>
         <th style="text-align:center;color:#7c3aed">Detentions <span style="font-size:.55rem;font-weight:400">(in ${sub})</span></th>
@@ -5147,6 +5238,9 @@ function rCL(){
 
   // Section title
   document.getElementById('cl-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} ${sub} Class ${cl} — ${teacherDisplay} Overview</div>`;
+  
+  // Summary cards (population/SEN + attendance/sanctions) for the class
+  document.getElementById('cl-summary').innerHTML=makeSummaryCards(lr, {titleLabel:`Y${yearGroup} ${sub} Class ${cl}`, ay:CAY});
 
   document.getElementById('cl-alerts').innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.85rem;align-items:stretch">${alertBox('Term-on-Term Ability Concern','#ef4444',abTT,i=>concernRow(i,'ab'))}${alertBox('Year-on-Year Ability Concern','#ef4444',abYoY,i=>concernRow(i,'ab'))}${alertBox('Term-on-Term Effort Concern','#f97316',efTT,i=>concernRow(i,'ef'))}${alertBox('Year-on-Year Effort Concern','#f97316',efYoY,i=>concernRow(i,'ef'))}${alertBox('Academic Year Discipline Issues','#7c3aed',top5Sanc,sancRow,true)}</div>${expDisciplineHtml}`;
 
@@ -5243,6 +5337,17 @@ function rCC(){
 
   const rows=Object.entries(cm).sort(([a],[b])=>a-b).map(([c,info])=>{
     const lr=ygRows(yearGroup,lp).filter(r=>info.pups.has(r[0]));
+    // YTD attendance for this class
+    const _ccTodayD2=new Date();
+    const _ccTodayISO2=`${_ccTodayD2.getFullYear()}-${String(_ccTodayD2.getMonth()+1).padStart(2,'0')}-${String(_ccTodayD2.getDate()).padStart(2,'0')}`;
+    const _ccAyStart=`${CAY}-09-01`;
+    let _ccTotalAbs=0;
+    info.pups.forEach(px=>{const a=countAbsPeriods(px,_ccAyStart,_ccTodayISO2);_ccTotalAbs+=a.total});
+    let _ccTotalL=0;
+    for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=_ccAyStart&&w<=_ccTodayISO2)_ccTotalL+=tl}
+    const _ccExpected=_ccTotalL*info.pups.size;
+    const ytdAttCC=_ccExpected>0?parseFloat(((_ccExpected-_ccTotalAbs)/_ccExpected*100).toFixed(1)):null;
+    const ytdAttCol=ytdAttCC==null?'color:var(--mu)':ytdAttCC>=95?'color:#34d399;font-weight:600':ytdAttCC>=90?'':'color:#ef4444;font-weight:600';
     const sc2r=lr.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);
     const avg=sc2r.length?sc2r.reduce((a,b)=>a+b,0)/sc2r.length:null;
     const ev=lr.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);
@@ -5301,9 +5406,9 @@ function rCC(){
     const dotD=clsDetentions>eDets?'#ef4444':clsDetentions<eDets?'#34d399':'var(--mu)';
     const dot=(col)=>`<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${col};vertical-align:middle;margin-left:.3rem"></span>`;
 
-    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}</td><td style="font-weight:600;color:${aC(avg)}">${fV(avg,2)}</td><td style="font-weight:600;color:${eC(avgE)}">${fV(avgE,2)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:#f97316;font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:#f97316;font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
+    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}</td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${ytdAttCol}">${ytdAttCC!=null?ytdAttCC+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${fV(avg,2)}</td><td style="font-weight:600;color:${eC(avgE)}">${fV(avgE,2)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:#f97316;font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:#f97316;font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
 
-  document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">Codes</th><th style="color:#f97316">Exp.</th><th style="color:#ef4444">On-Calls</th><th style="color:#ef4444">Exp.</th><th style="color:#7c3aed">Det.</th><th style="color:#7c3aed">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">Codes</th><th style="color:#f97316">Exp.</th><th style="color:#ef4444">On-Calls</th><th style="color:#ef4444">Exp.</th><th style="color:#7c3aed">Det.</th><th style="color:#7c3aed">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 (function(){
@@ -5707,7 +5812,6 @@ function rPeer(){
       <div style="font-size:1.5rem;font-weight:700;color:var(--ac)">${tgRows.length}</div>
       <div style="font-size:.72rem;color:var(--mu)">pupils</div>
       <div style="margin-top:.4rem">${flagsStr(sendN,ehcpN,fsmN,tgRows)}</div>
-      <div style="margin-top:.2rem;font-size:.65rem;color:var(--mu)">SEN: ${(()=>{const counts=tgRows.map(r=>SEN_STATUS[String(r[0])]).filter(Boolean).reduce((m,c)=>{m[c]=(m[c]||0)+1;return m},{});const parts=[];for(const[k,v]of Object.entries(counts))parts.push(k+':'+v);return parts.join(' · ')||'None'})()}</div>
     </div>
     <div class="crd"><div class="ct2">YTD Attendance</div>
       <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?'#34d399':parseFloat(tgYtdAtt)>=90?'var(--tx)':'#ef4444'}">${tgYtdAtt}%</div>
