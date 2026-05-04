@@ -1818,10 +1818,9 @@ function rP(){
     if(_bc10>_bc100*CT_SC&&_bc100>0&&_bcSanCount10>=CT_MN) bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.4);font-size:.7rem;font-weight:600;color:#f97316">⚠ Graduated Behavioural Concern</span>`;
   }
   const bcLine=bcBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${bcBadges}</div>`:'';
-  const scAlert=pupilSanctionsAlert(x);
   const otherConcernsAlert=pupilOtherConcernsAlert(x);
 
-  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${otherConcernsAlert}${scAlert}${summaryLine}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
+  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${otherConcernsAlert}${summaryLine}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
   renderTimetable(x);
@@ -6643,6 +6642,21 @@ function rPeer(){
     avoidFlags.forEach(a=>{
       const sev=parseFloat(a.ratio)>=4?'red':'amber';
       items.push({label:'Subject Avoidance',severity:sev,detail:`Avoiding ${a.subj} — ${a.absences} qualifying absences (${a.partial} partial-day${a.p1Whole?', '+a.p1Whole+' P1 whole-day':''}), ${a.actualPct}% of qualifying absences vs expected ${a.expectedPct}%, ratio ${a.ratio}×`});
+    });
+    // 6. Sanctions Concentration (per-teacher)
+    const scFlags=getSanctionsConcentration(px);
+    const engFlags=getSubjectEngagement(px);
+    const allCodes=(DD.sanctions||[]).filter(s=>s[0]===px&&s[1]===0).length;
+    scFlags.forEach(f=>{
+      const sev=parseFloat(f.ratio)>=4?'red':'amber';
+      const allNote=allCodes!==f.totalCodes?` (${f.codes}/${allCodes} all codes)`:'';
+      let detail=`${f.teacher} (${f.subjects.join(', ')}): ${f.codes}/${f.totalCodes} lesson codes — ${f.actualPct}% vs expected ${f.expectedPct}%, ratio ${f.ratio}×${allNote}`;
+      // Append Subject Engagement sub-detail if it correlates
+      const eng=engFlags.find(e=>e.subj===f.subjects[0]);
+      if(eng){
+        detail+=` · Engagement: ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''})`;
+      }
+      items.push({label:'Sanctions Concentration',severity:sev,detail});
     });
     
     if(!items.length) return'';
