@@ -142,6 +142,7 @@ table.d tr:hover td{background:var(--sf2)}
 <div id="p-behav-title" style="margin-bottom:.5rem"></div>
 <div id="p-tt" style="margin-bottom:1.25rem"></div>
 <div id="p-abs-pattern" style="margin-bottom:1.25rem"></div>
+<div id="p-att-spark" style="margin-bottom:1.25rem"></div>
 <div id="p-sanc"></div>
 <div id="p-sanc-subj"></div>
 <div id="p-heatmaps"></div>
@@ -1946,6 +1947,9 @@ function rP(){
     document.getElementById('p-ch').innerHTML='';
   }
 
+  // Attendance sparkline — standalone, independent of sanctions
+  rAttSpark(x,'p-att-spark');
+
   // Sanctions charts — compute group attendance for overlay
   // For All Subjects: TG average attendance
   // For Individual Subject: class average attendance
@@ -2000,6 +2004,132 @@ function rP(){
   }
 }
 
+// ── ATTENDANCE SPARKLINE (Pupil tab) ──
+// Standalone weekly attendance % visualisation with target/PA reference bands.
+// Sits above the sanctions chart on the Pupil tab. Independent of sanctions —
+// no implied correlation between the two metrics.
+function rAttSpark(x, wrapId){
+  dc('p-att-spark-chart');
+  const wrap=document.getElementById(wrapId);
+  if(!wrap) return;
+  const WLK=DD.weekLessons||{};
+  const wlKeys=Object.keys(WLK).sort();
+  if(!wlKeys.length){wrap.innerHTML='';return}
+
+  // Local ISO date helper (timezone-safe)
+  function localISO(d){const y=d.getFullYear(),m=d.getMonth()+1,dd=d.getDate();return`${y}-${m<10?'0'+m:m}-${dd<10?'0'+dd:dd}`}
+  const gm=d=>{const dt=new Date(d);dt.setHours(12,0,0,0);dt.setDate(dt.getDate()-(dt.getDay()+6)%7);return dt};
+
+  // Build week list
+  const fm=gm(new Date(wlKeys[0]+'T12:00:00'));
+  const lm=gm(new Date(wlKeys[wlKeys.length-1]+'T12:00:00'));
+  const wks=[];let cur=new Date(fm);
+  while(cur<=lm){wks.push(localISO(cur));cur.setDate(cur.getDate()+7)}
+
+  // Period-level absence count per week (deduplicated)
+  const abw={};
+  const aas=(DD.attAbsSubj||{})[String(x)]||[];
+  const seen=new Set();
+  aas.forEach(r=>{
+    const key=r[0]+'|'+r[2];
+    if(seen.has(key))return;
+    seen.add(key);
+    const wk=localISO(gm(new Date(r[0]+'T12:00:00')));
+    abw[wk]=(abw[wk]||0)+1;
+  });
+
+  // Weekly attendance % series (null where no lessons that week — holidays)
+  const attP=wks.map(w=>{
+    const tl=WLK[w];if(!tl)return null;
+    const abs=abw[w]||0;
+    return Math.max(0,Math.min(100,parseFloat(((tl-abs)/tl*100).toFixed(1))));
+  });
+
+  // YTD attendance for headline
+  let totalLessons=0,totalAbs=0;
+  wks.forEach(w=>{const tl=WLK[w];if(tl){totalLessons+=tl;totalAbs+=(abw[w]||0)}});
+  const ytdAtt=totalLessons>0?((totalLessons-totalAbs)/totalLessons*100).toFixed(1):null;
+  const ytdCol=ytdAtt==null?'var(--mu)':parseFloat(ytdAtt)>=95?'#34d399':parseFloat(ytdAtt)>=90?'var(--tx)':'#ef4444';
+
+  // Lowest weekly value to anchor y-axis (with floor/headroom)
+  const realVals=attP.filter(v=>v!=null);
+  const minVal=realVals.length?Math.min(...realVals):85;
+  const yMin=Math.max(0,Math.floor(minVal/5)*5-5);
+
+  // Month labels along x
+  const wl=wks.map((w,i)=>{const d2=new Date(w+'T12:00:00');const day=d2.getDate();if(day<=7)return d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'});return''});
+  const monthSeen={};
+  wks.forEach((w,i)=>{const d2=new Date(w+'T12:00:00');const mk=d2.getFullYear()+'-'+d2.getMonth();if(!monthSeen[mk]&&!wl[i]){wl[i]=d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'})}monthSeen[mk]=true});
+
+  wrap.innerHTML=`<div class="dw"><div class="dwt">Attendance <span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:${ytdCol};font-weight:600">${ytdAtt!=null?ytdAtt+'%':'—'}</span> <span style="color:var(--mu)">YTD</span> <span style="color:#34d399;margin-left:.5rem">▬</span> 95% target <span style="color:#ef4444;margin-left:.3rem">▬</span> 90% Persistent Absence</span></div><div style="position:relative;height:90px"><canvas id="p-att-spark-chart"></canvas></div></div>`;
+
+  // Reference-band plugin: shade 90-95 (amber) and below 90 (red faint)
+  const refBands={
+    id:'refBands',
+    beforeDatasetsDraw(chart){
+      const{ctx,chartArea:{left,right},scales:{y}}=chart;
+      // Below 90 — pale red
+      const y90=y.getPixelForValue(90);
+      const yBottom=y.getPixelForValue(yMin);
+      ctx.save();
+      ctx.fillStyle='rgba(239,68,68,0.06)';
+      ctx.fillRect(left,y90,right-left,yBottom-y90);
+      // 90-95 — pale amber
+      const y95=y.getPixelForValue(95);
+      ctx.fillStyle='rgba(249,115,22,0.05)';
+      ctx.fillRect(left,y95,right-left,y90-y95);
+      // 95-100 — pale green
+      const yTop=y.getPixelForValue(100);
+      ctx.fillStyle='rgba(52,211,153,0.04)';
+      ctx.fillRect(left,yTop,right-left,y95-yTop);
+      // Reference lines
+      ctx.strokeStyle='#34d399';ctx.lineWidth=1;ctx.setLineDash([3,3]);
+      ctx.beginPath();ctx.moveTo(left,y95);ctx.lineTo(right,y95);ctx.stroke();
+      ctx.strokeStyle='#ef4444';
+      ctx.beginPath();ctx.moveTo(left,y90);ctx.lineTo(right,y90);ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  sc2('p-att-spark-chart',new Chart(document.getElementById('p-att-spark-chart'),{
+    type:'line',
+    data:{labels:wl,datasets:[{
+      label:'Attendance',
+      data:attP,
+      borderColor:'#34d399',
+      backgroundColor:'rgba(52,211,153,0.18)',
+      borderWidth:1.5,
+      pointRadius:0,
+      pointHoverRadius:4,
+      tension:.25,
+      fill:true,
+      spanGaps:false
+    }]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          mode:'index',intersect:false,
+          callbacks:{
+            title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',
+            label:c=>{
+              const wk=wks[c.dataIndex];const tl=WLK[wk];const abs=abw[wk]||0;
+              if(c.parsed.y==null) return ' No lessons this week';
+              return [` ${c.parsed.y}% present`, ` ${abs} absent of ${tl} periods`];
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},
+        y:{min:yMin,max:100,ticks:{color:'#666666',font:{size:7},callback:v=>v+'%',stepSize:5},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}}
+      }
+    },
+    plugins:[refBands]
+  }));
+}
+
 // ── SANCTIONS CHART ──
 function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,fixedRange,groupPupils,groupLabel){
   dc(sancKey);dc(flgKey);
@@ -2009,7 +2139,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   const psAll=SAN.filter(r=>r[0]===x);
   const ps=subjFilter?psAll.filter(r=>r[3]===subjFilter):psAll;
   const wrap=document.getElementById(wrapId);
-  const title=subjFilter?`${subjFilter} Sanctions & Attendance`:'Overall Sanctions & Attendance';
+  const title=subjFilter?`${subjFilter} Sanctions`:'Overall Sanctions';
   const TN=['Code','On-Call','Detention'],TC=['#f97316','#ef4444','#7c3aed'];
   const gm=d=>{const dt=new Date(d);dt.setHours(12,0,0,0);dt.setDate(dt.getDate()-(dt.getDay()+6)%7);return dt};
 
@@ -2051,110 +2181,15 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   const monthSeen={};
   wks.forEach((w,i)=>{const d2=new Date(w+'T12:00:00');const mk=d2.getFullYear()+'-'+d2.getMonth();if(!monthSeen[mk]&&!wl[i]){wl[i]=d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'})}monthSeen[mk]=true});
 
-  // Attendance overlay — period-level counting (deduplicated)
-  const abw={};// periods absent per week
-  const uAbw={};// unauthorised periods absent per week
-  const pAbsSubjAll2=(DD.attAbsSubj||{})[String(x)]||[];
-  const _attSeen=new Set();
-  pAbsSubjAll2.forEach(r=>{
-    const key=r[0]+'|'+r[2];
-    if(_attSeen.has(key)) return;
-    _attSeen.add(key);
-    const m=localISO(gm(new Date(r[0]+'T12:00:00')));
-    abw[m]=(abw[m]||0)+1;
-    if(r[3]&&isUnauth(r[3])) uAbw[m]=(uAbw[m]||0)+1;
-  });
-
-  let attP,unauthP;
-  if(!subjFilter){
-    // Overall: weekly from absence counts vs total lessons
-    const attR=wks.map(w=>{const tl=WLK[w];if(!tl)return null;const abs=abw[w]||0;return Math.max(0,Math.min(100,parseFloat(((tl-abs)/tl*100).toFixed(1))))});
-    attP=attR;
-    // Unauthorised line: 100% minus unauth absence rate
-    const uR=wks.map(w=>{const tl=WLK[w];if(!tl)return null;const uabs=uAbw[w]||0;return Math.max(0,Math.min(100,parseFloat(((tl-uabs)/tl*100).toFixed(1))))});
-    unauthP=uR;
-  }else{
-    // Subject-specific: use pre-computed termly data mapped onto weeks
-    const pAS=(DD.attByPeriodSubj||{})[String(x)]||{};
-    attP=wks.map(w=>{
-      // Find which period this week falls in
-      for(let i=pp.length-1;i>=0;i--){
-        const p=pp[i];const pa=p.split(' ');const t=pa[0];const ay=parseInt(pa[1]);
-        let ps2,pe;
-        if(t==='T1'){ps2=`${ay}-09-01`;pe=`${ay}-12-31`}
-        else if(t==='T2'){ps2=`${ay+1}-01-01`;pe=`${ay+1}-03-31`}
-        else{ps2=`${ay+1}-04-01`;pe=`${ay+1}-07-31`}
-        if(w>=ps2&&w<=pe){
-          const sd=pAS[p];
-          if(sd&&sd[subjFilter]!=null) return sd[subjFilter];
-          return null;
-        }
-      }
-      return null;
-    });
-    // No carry-forward — let spanGaps handle holidays
-
-    // Subject-specific unauthorised: count unauth absences for this subject per week
-    const pAbsSubjAll=(DD.attAbsSubj||{})[String(x)]||[];
-    const uSubjAbw={};
-    pAbsSubjAll.forEach(r=>{
-      if(r[1]===subjFilter&&r[3]&&isUnauth(r[3])){
-        const m=localISO(gm(new Date(r[0]+'T12:00:00')));
-        uSubjAbw[m]=(uSubjAbw[m]||0)+1;
-      }
-    });
-    // LPW for this subject
-    const grid3=TT_DATA[String(x)];
-    let sLPW2=0;
-    if(grid3){for(let dd=0;dd<5;dd++)for(let pp3=0;pp3<5;pp3++){const gc=grid3[dd]?.[pp3];if(gc&&(gc[0]===subjFilter||(gc.length===4&&gc[2]===subjFilter)))sLPW2++}}
-    const uSubjR=wks.map(w=>{if(!WLK[w]||!sLPW2)return null;const uabs=uSubjAbw[w]||0;return Math.max(0,Math.min(100,parseFloat(((sLPW2-uabs)/sLPW2*100).toFixed(1))))});
-    unauthP=uSubjR;
-  }
-
   const tc=ps.filter(r=>r[1]===0).length,to=ps.filter(r=>r[1]===1).length,td=ps.filter(r=>r[1]===2).length;
   const tchrWId=flgWId+'t',cTchrId=cFlgId+'t',tchrKey=flgKey+'t';
   dc(tchrKey);
 
-  // Compute group average attendance per week
-  let grpAttP=null;
-  if(groupPupils&&groupPupils.length){
-    const WLK2=DD.weekLessons||{};
-    const grpAbsAll={};
-    groupPupils.forEach(px2=>{
-      const aas2=(DD.attAbsSubj||{})[String(px2)]||[];
-      const _gs=new Set();
-      aas2.forEach(r=>{
-        const key=r[0]+'|'+r[2];
-        if(_gs.has(key)) return;
-        _gs.add(key);
-        const wk2=localISO(gm(new Date(r[0]+'T12:00:00')));
-        grpAbsAll[wk2]=(grpAbsAll[wk2]||0)+1;
-      });
-    });
-    const n=groupPupils.length;
-    grpAttP=wks.map(w=>{
-      const tl=WLK2[w];if(!tl||!n)return null;
-      const totalAbs=grpAbsAll[w]||0;
-      const totalLessons=tl*n;
-      return Math.max(0,Math.min(100,parseFloat(((totalLessons-totalAbs)/totalLessons*100).toFixed(1))));
-    });
-    // No carry-forward — spanGaps:false handles holidays
-  }
-
   const grpLabel=groupLabel||'Group Avg Att';
-  wrap.innerHTML=`<div class="dw"><div class="dwt">${title}<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:#f97316">●</span>${tc} <span style="color:#ef4444;margin-left:.3rem">●</span>${to} <span style="color:#7c3aed;margin-left:.3rem">●</span>${td} <span style="color:#34d399;margin-left:.3rem">━</span>Att% <span style="color:#ef4444;margin-left:.3rem">┈</span>Excl.Auth ${grpAttP?`<span style="color:#38bdf8;margin-left:.3rem">┈</span>${grpLabel}`:''}</span></div><div style="position:relative;height:clamp(170px,14vw,260px)"><canvas id="${cSancId}"></canvas></div><div id="${flgWId}" style="position:relative;margin-top:2px"><canvas id="${cFlgId}"></canvas></div><div id="${tchrWId}" style="position:relative;margin-top:2px"><canvas id="${cTchrId}"></canvas></div></div>`;
+  wrap.innerHTML=`<div class="dw"><div class="dwt">${title}<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:#f97316">●</span>${tc} <span style="color:#ef4444;margin-left:.3rem">●</span>${to} <span style="color:#7c3aed;margin-left:.3rem">●</span>${td}</span></div><div style="position:relative;height:clamp(170px,14vw,260px)"><canvas id="${cSancId}"></canvas></div><div id="${flgWId}" style="position:relative;margin-top:2px"><canvas id="${cFlgId}"></canvas></div><div id="${tchrWId}" style="position:relative;margin-top:2px"><canvas id="${cTchrId}"></canvas></div></div>`;
 
   const ds=TN.map((n,i)=>({label:n,data:wks.map(w=>wm[w][i]),backgroundColor:TC[i],borderRadius:i===2?2:0,borderSkipped:false,barPercentage:0.9,categoryPercentage:0.9,yAxisID:'y',order:2}));
-  ds.push({label:'Attendance',data:attP,type:'line',borderColor:'#34d399',borderWidth:1.5,pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:false});
-  if(unauthP){
-    ds.push({label:'Excl. Authorised',data:unauthP,type:'line',borderColor:'#ef4444',borderWidth:1.2,borderDash:[4,3],pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:false});
-  }
-  if(grpAttP){
-    ds.push({label:grpLabel,data:grpAttP,type:'line',borderColor:'#38bdf8',borderWidth:1.5,borderDash:[4,3],pointRadius:0,pointHoverRadius:3,tension:.3,fill:false,yAxisID:'y1',order:1,spanGaps:false});
-  }
-  const allAttVals=[...(attP||[]).filter(v=>v!=null),...(grpAttP||[]).filter(v=>v!=null),...(unauthP||[]).filter(v=>v!=null)];
-  const y1Min=allAttVals.length?Math.max(0,Math.min(80,Math.min(...allAttVals)-5)):80;
-  sc2(sancKey,new Chart(document.getElementById(cSancId),{type:'bar',data:{labels:wl,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:7,padding:6}},tooltip:{mode:'index',intersect:false,callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',label:c=>{if(c.dataset.yAxisID==='y1')return` ${c.dataset.label}: ${c.parsed.y}%`;return` ${c.dataset.label}: ${c.parsed.y}`},afterBody:c=>{if(!c?.length)return'';const wi=c[0].dataIndex;const wk=wks[wi];const cat=wmCat[wk];if(!cat)return'';const total=cat.b+cat.u+cat.e+cat.a;if(!total&&!cat.d)return'';const lines=['───────'];if(cat.b)lines.push(`  Behaviour: ${cat.b}`);if(cat.u)lines.push(`  Uniform: ${cat.u}`);if(cat.e)lines.push(`  Equipment: ${cat.e}`);if(cat.a)lines.push(`  Attendance: ${cat.a}`);if(cat.d)lines.push(`  Detentions: ${cat.d}`);return lines}}}},scales:{x:{stacked:true,offset:true,ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},y:{stacked:true,position:'left',beginAtZero:true,ticks:{color:'#666666',stepSize:1,font:{size:7}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}},y1:{position:'right',min:y1Min,max:100,ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'},afterFit:a=>{a.width=35}}}}}));
+  sc2(sancKey,new Chart(document.getElementById(cSancId),{type:'bar',data:{labels:wl,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:8},boxWidth:7,padding:6}},tooltip:{mode:'index',intersect:false,callbacks:{title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',label:c=>` ${c.dataset.label}: ${c.parsed.y}`,afterBody:c=>{if(!c?.length)return'';const wi=c[0].dataIndex;const wk=wks[wi];const cat=wmCat[wk];if(!cat)return'';const total=cat.b+cat.u+cat.e+cat.a;if(!total&&!cat.d)return'';const lines=['───────'];if(cat.b)lines.push(`  Behaviour: ${cat.b}`);if(cat.u)lines.push(`  Uniform: ${cat.u}`);if(cat.e)lines.push(`  Equipment: ${cat.e}`);if(cat.a)lines.push(`  Attendance: ${cat.a}`);if(cat.d)lines.push(`  Detentions: ${cat.d}`);return lines}}}},scales:{x:{stacked:true,offset:true,ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},y:{stacked:true,position:'left',beginAtZero:true,ticks:{color:'#666666',stepSize:1,font:{size:7}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}}}}}));
 
   // Flag bars (only on overall chart)
   if(!subjFilter){
