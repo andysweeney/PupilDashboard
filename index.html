@@ -619,6 +619,32 @@ function goP(idx){
 // Render a clickable pupil name
 function pLink(idx,name){const clean=name.replace(/\s*\(P\d+\)\s*$/,'');return`<a href="#" onclick="event.stopPropagation();goP(${idx});return false" style="color:var(--tx);text-decoration:none;border-bottom:1px dotted var(--bd);cursor:pointer" onmouseover="this.style.color='var(--ac)'" onmouseout="this.style.color='var(--tx)'">${clean}</a>`}
 
+// Extract just the first name from a pupil's stored identifier.
+// Format assumption (configurable below): "Surname FirstName [MiddleNames…]" — UK secondary MIS default.
+// Also handles "Surname, FirstName" (comma-separated). Falls back to the full id if no name is detected
+// (e.g. while we're still on the demo dataset where id is a 6-digit number).
+// To change the assumption to "FirstName Surname" instead, set NAME_ORDER='first-last'.
+const NAME_ORDER='last-first'; // 'last-first' | 'first-last'
+function firstName(px){
+  const r=REG[String(px)];
+  const raw=r?String(r.id||'').replace(/\s*\(P\d+\)\s*$/,'').trim():'';
+  if(!raw) return `#${px}`;
+  // If id is purely digits, return as-is (demo data)
+  if(/^\d+$/.test(raw)) return raw;
+  // "Surname, FirstName [Middle]" → take the part after the comma, then first word
+  if(raw.includes(',')){
+    const after=raw.split(',')[1]||'';
+    const f=after.trim().split(/\s+/)[0];
+    return f||raw;
+  }
+  // No comma: split on whitespace
+  const parts=raw.split(/\s+/);
+  if(parts.length===1) return parts[0];
+  if(NAME_ORDER==='first-last') return parts[0];
+  // last-first: first name is the second token; if 3+ tokens treat the rest as middle names and still take token[1]
+  return parts[1];
+}
+
 // Concern thresholds (global)
 let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
 let AP_MULT=2.0, AP_HIGH_ABS=40;
@@ -6608,40 +6634,42 @@ function rPeer(){
   function pupilOtherConcernsAlert(px){
     const yg=curYG(REG[String(px)]?.intake);
     if(!yg) return'';
+    const fn=firstName(px);
     const items=[];
     
     // 1. Attendance Declining
     const a20=attRAMod(px,20),a60=attRAMod(px,60);
     if(a20.rate>a60.rate*CT_AT && a60.rate>0 && a20.absent>=CT_AM){
       const sev=a20.rate>a60.rate*2?'red':'amber';
-      items.push({label:'Attendance Declining',severity:sev,detail:`20sd ${a20.rate.toFixed(1)}% absent vs 60sd ${a60.rate.toFixed(1)}% (${a20.absent} absent periods, ${(a20.rate/a60.rate).toFixed(1)}× older window)`});
+      items.push({label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} Periods in the last 20 school days (${a20.rate.toFixed(1)}% of Periods) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average).`});
     }
     // 2. Persistent Absence
     const aPA=attRAMod(px,CT_PA_WIN);
     if(aPA.rate>=CT_PA_PCT){
-      items.push({label:'Persistent Absence',severity:'red',detail:`${CT_PA_WIN}sd absence ${aPA.rate.toFixed(1)}% (${aPA.absent} absent periods)`});
+      items.push({label:'Persistent Absence',severity:'red',detail:`${fn} has been absent for ${aPA.absent} Periods in the last ${CT_PA_WIN} school days (${aPA.rate.toFixed(1)}% absence rate).`});
     }
     // 3. Sanctions Accelerating
     const s20=sanRAMod(px,yg,20),s60=sanRAMod(px,yg,60);
     const sCount20=sanCountInMod(px,yg,20);
     if(s20>s60*CT_SC && s60>0 && sCount20>=CT_MN){
       const sev=s20>s60*2?'red':'amber';
-      items.push({label:'Sanctions Accelerating',severity:sev,detail:`20sd weighted ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)} (${sCount20} sanctions in last 20sd, ${(s20/s60).toFixed(1)}× older)`});
+      items.push({label:'Sanctions Accelerating',severity:sev,detail:`${fn} has had ${sCount20} sanctions in the last 20 school days (a weighted score of ${s20.toFixed(1)} compared with their weighted 60 school day average of ${s60.toFixed(1)}). This is ${(s20/s60).toFixed(1)}× the rolling weighted average.`});
     }
     // 4. Absence Pattern (slot-level)
     const absAnalysis=analyseAbsencePattern(px);
     if(absAnalysis&&absAnalysis.slotFlags&&absAnalysis.slotFlags.length){
       const sortedFlags=absAnalysis.slotFlags.slice().sort((a,b)=>b.rate-a.rate);
       const worst=sortedFlags[0];
-      const overallTxt=worst.pupilOverallRate!=null?` vs ${worst.pupilOverallRate.toFixed(0)}% overall`:'';
-      const more=sortedFlags.length>1?` + ${sortedFlags.length-1} more`:'';
-      items.push({label:'Absence Pattern',severity:worst.rate>=60?'red':'amber',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate${overallTxt})${more}`});
+      const overallTxt=worst.pupilOverallRate!=null?`${worst.pupilOverallRate.toFixed(0)}% overall`:'their overall rate';
+      const more=sortedFlags.length>1?` + ${sortedFlags.length-1} more Periods`:'';
+      items.push({label:'Absence Pattern',severity:worst.rate>=60?'red':'amber',detail:`${fn} seems to regularly miss ${worst.day} P${worst.per}. There have been ${worst.count} absences (a ${worst.rate.toFixed(0)}% rate vs ${overallTxt})${more}.`});
     }
     // 5. Subject Avoidance
     const avoidFlags=getSubjectAvoidance(px);
     avoidFlags.forEach(a=>{
       const sev=parseFloat(a.ratio)>=4?'red':'amber';
-      items.push({label:'Subject Avoidance',severity:sev,detail:`Avoiding ${a.subj} — ${a.absences} qualifying absences (${a.partial} partial-day${a.p1Whole?', '+a.p1Whole+' P1 whole-day':''}), ${a.actualPct}% of qualifying absences vs expected ${a.expectedPct}%, ratio ${a.ratio}×`});
+      const breakdown=a.p1Whole?`${a.partial} partial-day and ${a.p1Whole} whole-day where ${a.subj} was P1`:`${a.partial} partial-day`;
+      items.push({label:'Possible Subject Avoidance',severity:sev,detail:`${fn} may be avoiding ${a.subj}. They have ${a.absences} subject absences (${breakdown}). This represents a ${a.actualPct}% absence rate vs an expected rate of ${a.expectedPct}%. ${a.ratio}× expectations.`});
     });
     // 6. Sanctions Concentration (per-teacher)
     const scFlags=getSanctionsConcentration(px);
@@ -6649,12 +6677,13 @@ function rPeer(){
     const allCodes=(DD.sanctions||[]).filter(s=>s[0]===px&&s[1]===0).length;
     scFlags.forEach(f=>{
       const sev=parseFloat(f.ratio)>=4?'red':'amber';
-      const allNote=allCodes!==f.totalCodes?` (${f.codes}/${allCodes} all codes)`:'';
-      let detail=`${f.teacher} (${f.subjects.join(', ')}): ${f.codes}/${f.totalCodes} lesson codes — ${f.actualPct}% vs expected ${f.expectedPct}%, ratio ${f.ratio}×${allNote}`;
-      // Append Subject Engagement sub-detail if it correlates
+      const subjLabel=f.subjects.length>1?`${f.subjects.slice(0,-1).join(', ')} & ${f.subjects.slice(-1)}`:f.subjects[0];
+      let detail=`${fn} is receiving more sanctions from ${f.teacher} (${f.subjects.join(', ')}) than expected, given sanctions in other lessons. ${f.codes}/${f.totalCodes} subject codes are in ${subjLabel} (${f.actualPct}% vs expected ${f.expectedPct}%). This is ${f.ratio}×`;
+      if(allCodes!==f.totalCodes) detail+=` (${f.codes}/${allCodes} all codes)`;
+      detail+='.';
       const eng=engFlags.find(e=>e.subj===f.subjects[0]);
       if(eng){
-        detail+=` · Engagement: ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''})`;
+        detail+=` There may also be an Engagement issue because there are ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''}).`;
       }
       items.push({label:'Sanctions Concentration',severity:sev,detail});
     });
@@ -6672,7 +6701,7 @@ function rPeer(){
         <span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${col};padding:.05rem .35rem;border:1px solid ${col}55;border-radius:3px">${it.severity}</span>
       </div>`;
     }).join('');
-    return`<div class="dw" style="border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${items.length} active</span></div>${rows}</div>`;
+    return`<div class="dw" style="border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">There are ${items.length} active Concerns for ${fn}</span></div>${rows}</div>`;
   }
 
   // Pupil-level sanctions concentration alert (for use in rP)
