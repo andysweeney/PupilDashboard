@@ -6518,7 +6518,8 @@ function rPeer(){
 
   // Module-scope school-day list and per-day period count, computed once and cached.
   // Used by attendance/sanction rolling-window calculations outside the Concerns tab scope.
-  let _cnSDMod=null,_avgPerDayMod=null,_cnYgLatestMod=null,_cnYgSDMod=null;
+  // Using `var` so these are hoisted and accessible from any earlier-defined function in the IIFE.
+  var _cnSDMod=null,_avgPerDayMod=null,_cnYgLatestMod=null,_cnYgSDMod=null;
   function _ensureCnContext(){
     if(_cnSDMod) return;
     const todayD=new Date();
