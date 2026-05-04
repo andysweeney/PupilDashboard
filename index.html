@@ -2199,12 +2199,13 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
   dc(tchrKey);
 
   const grpLabel=groupLabel||'Group Avg Att';
-  wrap.innerHTML=`<div class="dw"><div class="dwt">${title}<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:#f97316">●</span>${tc} <span style="color:#ef4444;margin-left:.3rem">●</span>${to} <span style="color:#7c3aed;margin-left:.3rem">●</span>${td}</span></div><div style="position:relative;height:clamp(170px,14vw,260px)"><canvas id="${cSancId}"></canvas></div><div id="${flgWId}" style="position:relative;margin-top:2px"><canvas id="${cFlgId}"></canvas></div><div id="${tchrWId}" style="position:relative;margin-top:2px"><canvas id="${cTchrId}"></canvas></div></div>`;
+  wrap.innerHTML=`<div class="dw"><div class="dwt">${title}<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:#f97316">●</span>${tc} <span style="color:#ef4444;margin-left:.3rem">●</span>${to} <span style="color:#7c3aed;margin-left:.3rem">●</span>${td}</span></div><div style="position:relative;height:90px"><canvas id="${cSancId}"></canvas></div><div id="${flgWId}" style="position:relative;margin-top:2px"><canvas id="${cFlgId}"></canvas></div><div id="${tchrWId}" style="position:relative;margin-top:2px"><canvas id="${cTchrId}"></canvas></div></div>`;
 
-  // Sanctions chart — single combined-total filled line, structurally identical to the
-  // Attendance sparkline. Total = codes + on-calls + detentions per week. Breakdown
-  // by type appears in the tooltip and in the title row summary.
-  const totalPerWk=wks.map(w=>wm[w][0]+wm[w][1]+wm[w][2]);
+  // Sanctions chart — DUPLICATE of attendance sparkline. Only differences:
+  //   - data input is weekly sanction score (codes+oncalls+dets), not attendance %
+  //   - y-axis range is 0..max instead of yMin..100
+  //   - no reference-band plugin
+  const sancPerWk=wks.map(w=>wm[w][0]+wm[w][1]+wm[w][2]);
   sc2(sancKey,new Chart(document.getElementById(cSancId),{
     type:'bar',
     data:{labels:wl,datasets:[
@@ -2220,9 +2221,9 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
       {
         type:'line',
         label:'Sanctions',
-        data:totalPerWk,
-        borderColor:'#f97316',
-        backgroundColor:'rgba(249,115,22,0.18)',
+        data:sancPerWk,
+        borderColor:'#34d399',
+        backgroundColor:'rgba(52,211,153,0.18)',
         borderWidth:1.5,
         pointRadius:0,
         pointHoverRadius:4,
@@ -2241,7 +2242,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
           callbacks:{
             title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',
             label:c=>{
-              const wi=c.dataIndex;const wk=wks[wi];
+              const wk=wks[c.dataIndex];
               const codes=wm[wk][0],oncalls=wm[wk][1],dets=wm[wk][2];
               const total=codes+oncalls+dets;
               const lines=[` Total: ${total}`];
@@ -2256,7 +2257,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
       },
       scales:{
         x:{offset:true,ticks:{color:'#666666',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#d4d4d4'}},
-        y:{position:'left',beginAtZero:true,ticks:{color:'#666666',stepSize:1,font:{size:7}},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}}
+        y:{min:0,position:'left',beginAtZero:true,ticks:{color:'#666666',stepSize:1,font:{size:7}},grid:{color:'#d4d4d422'},border:{color:'#d4d4d4'},afterFit:a=>{a.width=35}}
       }
     }
   }));
