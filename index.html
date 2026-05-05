@@ -214,8 +214,8 @@ table.d tr:hover td{background:var(--sf2)}
 <div id="tg-network" style="margin-bottom:1.25rem"></div>
 <div style="page-break-before:always"></div>
 <div id="tg-perf-title" style="margin-bottom:.5rem"></div>
-<div class="crd-g" id="tg-cards"></div>
-<div class="ch-g" id="tg-charts"></div>
+<div class="crd-g tt-hide" id="tg-cards"></div>
+<div class="ch-g tt-hide" id="tg-charts"></div>
 </div>
 
 <div id="vw-classcomp" class="vw">
@@ -1226,8 +1226,8 @@ function renderTGAbsencePattern(tgPupilPxSet,containerId){
     return tip;
   }
 
-  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${tgSize} pupils · ${weekCount} weeks</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
-  html+=`<div style="padding:.5rem 1rem .75rem">`;
+  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${tgSize} pupils · ${weekCount} weeks</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
+  html+=`<div class="tt-hide" style="padding:.5rem 1rem .75rem">`;
 
   // Heatmap grid
   html+=`<div class="tt-grid">`;
@@ -1377,15 +1377,15 @@ function makeSummaryCards(pupils, opts){
   const attPct = expectedTotal > 0 ? ((expectedTotal - totalAbs) / expectedTotal * 100).toFixed(1) : '—';
   const attCol = attPct === '—' ? 'var(--mu)' : parseFloat(attPct) >= 95 ? '#34d399' : parseFloat(attPct) >= 90 ? 'var(--tx)' : '#ef4444';
   
-  // Sanctions YTD
-  const sanc = (typeof SAN !== 'undefined' ? SAN : []).filter(s => pupilPx.has(s[0]) && s[2] >= ayStart && s[2] <= endDate);
+  // Sanctions YTD — read from DD.sanctions (the global SAN const isn't in module scope)
+  const sanc = (DD.sanctions||[]).filter(s => pupilPx.has(s[0]) && s[2] >= ayStart && s[2] <= endDate);
   const codesN = sanc.filter(s => s[1] === 0).length;
   const detsN = sanc.filter(s => s[1] === 2).length;
   
   return `<div class="crd-g">
     <div class="crd"><div class="ct2">${titleLabel}</div>
       <div style="font-size:1.5rem;font-weight:700;color:var(--ac)">${pupils.length}</div>
-      <div style="font-size:.72rem;color:var(--mu)">pupils</div>
+      <div style="font-size:.72rem;color:var(--mu)">pupils · ${genderStr(pupils)}</div>
       <div style="margin-top:.4rem">${flagsStr(sendN,ehcpN,fsmN,pupils)}</div>
     </div>
     <div class="crd"><div class="ct2">YTD Attendance</div>
@@ -1396,6 +1396,21 @@ function makeSummaryCards(pupils, opts){
 }
 
 // Standard flags string with breakdown
+// Gender split string: "M:N · F:N" with optional "U:N" if any unknowns.
+// Accepts an array of pupil rows (uses [0] as pupil index) OR an array of pupil indices.
+function genderStr(items){
+  if(!items||!items.length)return'';
+  let m=0,f=0,u=0;
+  items.forEach(it=>{
+    const px=typeof it==='object'?it[0]:it;
+    const g=REG[String(px)]?.gender;
+    if(g==='M')m++;else if(g==='F')f++;else u++;
+  });
+  let s=`<span style="color:#6488ff;font-weight:600">${m}</span> M · <span style="color:#f472b6;font-weight:600">${f}</span> F`;
+  if(u)s+=` · <span style="color:var(--mu);font-weight:600">${u}</span> U`;
+  return s;
+}
+
 function flagsStr(sendN,ehcpN,fsmN,rows){
   if(!rows||!rows.length) return`<span style="color:#f97316;font-weight:600">${sendN}</span> SEND · <span style="color:#a78bfa;font-weight:600">${ehcpN}</span> EHCP · <span style="color:#6488ff;font-weight:600">${fsmN}</span> FSM`;
   const senCounts={};
@@ -1691,8 +1706,29 @@ function rP(){
     }
   }
   function getRankStr(ranks,pupilIdx){
-    const ri=ranks.findIndex(r=>r.x===pupilIdx)+1;
-    return ri?`${ord(ri)}/${ranks.length}`:'—';
+    if(!ranks.length)return'—';
+    // Standard competition ranking: tied scores share the earlier rank,
+    // and subsequent ranks skip accordingly. So [1,2,2,2,3] -> ranks [1,2,2,2,5].
+    let myRank=null,nTied=0;
+    for(let i=0;i<ranks.length;i++){
+      // First entry, or value differs from previous → start new rank at position+1
+      const isNewRank=(i===0)||ranks[i].v!==ranks[i-1].v;
+      const positionalRank=isNewRank?i+1:null;
+      if(ranks[i].x===pupilIdx){
+        // Walk back to find the start of this run of equal values
+        let start=i;
+        while(start>0&&ranks[start-1].v===ranks[i].v)start--;
+        myRank=start+1;
+        // Count how many pupils share this rank
+        let end=i;
+        while(end<ranks.length-1&&ranks[end+1].v===ranks[i].v)end++;
+        nTied=end-start+1;
+        break;
+      }
+    }
+    if(myRank==null)return'—';
+    const prefix=nTied>1?'Joint ':'';
+    return`${prefix}${ord(myRank)}/${ranks.length}`;
   }
 
   const prevP=pp.slice(Math.max(0,nP-3),nP-1).reverse();
@@ -2059,11 +2095,16 @@ function rP(){
   const efHdr=rl.map(l=>`<th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ef</span></th>`).join('');
   const pairHdr=rl.map(l=>`<th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ab</span></th><th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ef</span></th>`).join('');
   document.getElementById('p-tbl').innerHTML=(()=>{
-    // Build the body rows. For each subject in SUBS, render one main row.
+    // Build the body rows. For each subject in SUBS that the pupil has at least
+    // one non-empty grade for in any visible period, render one main row.
     // For Triple Science (where Science.sc has a 4th element with sub-grades),
     // also render Bio/Chem/Physics indented rows directly below.
+    const subjsWithData=SUBS.filter(s=>rpp.some(p=>{const r=data[p];return r&&r.sc&&r.sc[s]&&(r.sc[s][0]||r.sc[s][1])}));
     const rows=[];
-    SUBS.forEach(s=>{
+    if(!subjsWithData.length){
+      rows.push(`<tr><td colspan="${1+rpp.length*2}" style="color:var(--mu);text-align:center;padding:1rem;font-size:.7rem">No subject grades on record for this pupil yet.</td></tr>`);
+    }
+    subjsWithData.forEach(s=>{
       const dr=sDrop(en,s);
       const st=dr?'text-decoration:line-through;color:var(--mu)':'font-weight:500';
       const cells=rpp.map(p=>{
@@ -2815,7 +2856,12 @@ function rCmp(){
         const candRows=periods[ayPeriods[i]]||[];
         if(candRows.some(r=>r[3]&&Object.keys(r[3]).length>0)){lastP=ayPeriods[i];break}
       }
-      const rows=periods[lastP];
+      const allRows=periods[lastP];
+      // When a specific subject is selected, restrict the cohort to pupils with a grade
+      // in that subject for this period (a reasonable proxy for 'takes that subject').
+      // SEND/EHCP/FSM/gender counts then reflect the subject's cohort, not the whole year.
+      const rows=isAll?allRows:allRows.filter(r=>r[3]&&r[3][sub]);
+      if(!rows.length){continue}
       let avg,avgE,gb;
       if(isAll){
         const pA=rows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);
@@ -2877,7 +2923,10 @@ function rCmp(){
         const expectedTotal=totalLessons*rows.length;
         if(expectedTotal>0)ytdAtt=parseFloat(((expectedTotal-totalAbs)/expectedTotal*100).toFixed(1));
       }
-      cohorts.push({ink,ay,label:`${ay}-${ay+1}`,pupils:rows.length,avg,avgE,send,ehcp,fsm,senCats2,gb,_codeTip:sancTipAttrs(gb[0],gb[2],sancCatsFor(new Set(rows.map(r=>r[0])),DD.sanctions||[],SANC_DET),'Codes'),
+      // Gender split
+      let mN=0,fN_=0;
+      rows.forEach(r=>{const g=REG[String(r[0])]?.gender;if(g==='M')mN++;else if(g==='F')fN_++});
+      cohorts.push({ink,ay,label:`${ay}-${ay+1}`,pupils:rows.length,male:mN,female:fN_,avg,avgE,send,ehcp,fsm,senCats2,gb,_codeTip:sancTipAttrs(gb[0],gb[2],sancCatsFor(new Set(rows.map(r=>r[0])),DD.sanctions||[],SANC_DET),'Codes'),
         sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
         nCodes,nOnCalls,nDetentions,ytdAtt,
         status:ay+1<=CAY?'complete':(ay===CAY?'current':'future'),
@@ -2896,7 +2945,7 @@ function rCmp(){
     return`<tr>
       <td style="font-weight:500">${c.label}${c.left?' <span class="left-tag">LEFT</span>':c.status==='current'?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
       <td>Intake ${c.ink}</td>
-      <td>${c.pupils}</td>
+      <td>${c.pupils}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${c.male}M · ${c.female}F</div></td>
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:#34d399;font-weight:600':c.ytdAtt>=90?'':'color:#ef4444;font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
       <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${fV(c.avg,2)}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${fV(c.avgE,2)}</td>
@@ -3020,8 +3069,13 @@ function rPrg(){
       const candRows=periods[ayPeriods[i]]||[];
       if(candRows.some(r=>r[3]&&Object.keys(r[3]).length>0)){lastP=ayPeriods[i];break}
     }
-    const rows=periods[lastP];
-    if(!rows||!rows.length) continue;
+    const allRows=periods[lastP];
+    if(!allRows||!allRows.length) continue;
+    // When a specific subject is selected, restrict the cohort to pupils with a grade
+    // in that subject for this period (proxy for 'takes that subject'). SEND/EHCP/FSM
+    // and gender counts then reflect the subject's cohort, not the whole year.
+    const rows=isAll?allRows:allRows.filter(r=>r[3]&&r[3][sub]);
+    if(!rows.length) continue;
 
     let avg,avgE,gb;
     if(isAll){
@@ -3088,7 +3142,10 @@ function rPrg(){
 
     const isCurrent=ay===CAY;
     const isFuture=ay>CAY;
-    years.push({yg,ay,ayLabel,pupils:rows.length,avg,avgE,gb,
+    // Gender split for this YG/AY
+    let mN=0,fN_=0;
+    rows.forEach(r=>{const g=REG[String(r[0])]?.gender;if(g==='M')mN++;else if(g==='F')fN_++});
+    years.push({yg,ay,ayLabel,pupils:rows.length,male:mN,female:fN_,avg,avgE,gb,
       send,ehcp,fsm,senCats2,_codeTip:sancTipAttrs(gb[0],gb[2],sancCatsFor(new Set(rows.map(r=>r[0])),DD.sanctions||[],SANC_DET),'Codes'),sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
       nCodes,nOnCalls,nDetentions,ytdAtt,isCurrent,isFuture});
   }
@@ -3101,7 +3158,7 @@ function rPrg(){
     const efTip=`All: ${fV(c.avgE,2)}${c.send?`&#10;SEND (${c.send}): ${fV(c.sendEf,2)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${fV(c.ehcpEf,2)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${fV(c.fsmEf,2)}`:''}`;
     return`<tr>
       <td style="font-weight:500">Y${c.yg} — ${c.ayLabel}${c.isCurrent?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
-      <td>${c.pupils}</td>
+      <td>${c.pupils}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${c.male}M · ${c.female}F</div></td>
       <td style="text-align:center;font-family:'JetBrains Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:#34d399;font-weight:600':c.ytdAtt>=90?'':'color:#ef4444;font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
       <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${fV(c.avg,2)}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${fV(c.avgE,2)}</td>
@@ -5108,7 +5165,7 @@ function rSV(){
   const efRows=efLabels.map((label,i)=>{const c=efCounts[i];const p=efTotal?(c/efTotal*100).toFixed(0):0;const barW=Math.round(c/maxEfCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${efColors[i]}"></span><span style="color:var(--mu);min-width:3.5rem">${label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${efColors[i]}44;border-left:2px solid ${efColors[i]}"></div></div><span style="font-family:'JetBrains Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
 
   // Set flags in header bar
-  document.getElementById('sv-flags').innerHTML=`${flagsStr(sendN,ehcpN,fsmN,lrSubj)} · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils`;
+  document.getElementById('sv-flags').innerHTML=`${flagsStr(sendN,ehcpN,fsmN,lrSubj)} · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils · ${genderStr(lrSubj)}`;
 
   // Section title
   document.getElementById('sv-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} ${sub} Report Breakdown</div>`;
@@ -5345,7 +5402,11 @@ function rCL(){
   const dhAllSanc=(DD.sanctions||[]).filter(s=>lrIdxSet.has(s[0])&&s[2]>=dhAyStart&&s[2]<=dhTodayISO);
 
   // Per-pupil: codes/oncalls/detentions (all subjects + in this subject)
+  // Seed with every class pupil at zero so pupils with no sanctions still appear in the table.
   const dhPupil={};
+  lr.forEach(r=>{
+    dhPupil[r[0]]={codes:0,oncalls:0,dets:0,sCodes:0,sOncalls:0,sDets:0,cats:{b:0,u:0,e:0,a:0},sCats:{b:0,u:0,e:0,a:0}};
+  });
   const SAN_ALL2=DD.sanctions||[];
   dhAllSanc.forEach(s=>{
     if(!dhPupil[s[0]])dhPupil[s[0]]={codes:0,oncalls:0,dets:0,sCodes:0,sOncalls:0,sDets:0,cats:{b:0,u:0,e:0,a:0},sCats:{b:0,u:0,e:0,a:0}};
@@ -5669,7 +5730,7 @@ function rCC(){
     const dotD=clsDetentions>eDets?'#ef4444':clsDetentions<eDets?'#34d399':'var(--mu)';
     const dot=(col)=>`<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${col};vertical-align:middle;margin-left:.3rem"></span>`;
 
-    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}</td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${ytdAttCol}">${ytdAttCC!=null?ytdAttCC+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${fV(avg,2)}</td><td style="font-weight:600;color:${eC(avgE)}">${fV(avgE,2)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:#f97316;font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:#f97316;font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
+    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${(()=>{let m=0,f=0;info.pups.forEach(px=>{const g=REG[String(px)]?.gender;if(g==='M')m++;else if(g==='F')f++});return`${m}M · ${f}F`})()}</div></td><td style="text-align:center;font-family:'JetBrains Mono',monospace;${ytdAttCol}">${ytdAttCC!=null?ytdAttCC+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${fV(avg,2)}</td><td style="font-weight:600;color:${eC(avgE)}">${fV(avgE,2)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:#f97316;font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:#6488ff;font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:#f97316;font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:#ef4444;font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:#7c3aed;font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
 
   document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:#f97316">SEND</th><th style="color:#f97316;font-size:.55rem">K</th><th style="color:#a78bfa;font-size:.55rem">E</th><th style="color:#38bdf8;font-size:.55rem">Add</th><th style="color:#34d399;font-size:.55rem">Strat</th><th style="color:#94a3b8;font-size:.55rem">N</th><th style="color:#6488ff">FSM</th><th style="color:#f97316">Codes</th><th style="color:#f97316">Exp.</th><th style="color:#ef4444">On-Calls</th><th style="color:#ef4444">Exp.</th><th style="color:#7c3aed">Det.</th><th style="color:#7c3aed">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -5989,10 +6050,12 @@ function rPeer(){
   const enrols=ygEnrol(yearGroup);
   const tgs=new Set();
   enrols.filter(r=>r.t==='tg'&&r.u===null).forEach(r=>tgs.add(r.v));
+  // Add an 'All' option at the top so the whole year can be viewed in one go
+  const allOpt=document.createElement('option');allOpt.value='__all';allOpt.textContent='All Tutor Groups';sel.appendChild(allOpt);
   [...tgs].sort().forEach(tg=>{
     const o=document.createElement('option');o.value=tg;o.textContent=tg;sel.appendChild(o);
   });
-  if([...tgs].includes(prev))sel.value=prev;
+  if(prev==='__all'||[...tgs].includes(prev))sel.value=prev;
   rTG();
 }
 
@@ -6006,7 +6069,7 @@ function rPeer(){
   const ik=`I${ink}`;
   const pp=ygPeriods(yearGroup);
   if(!pp.length) return;
-  const lp=pp[pp.length-1];
+  const lp=ygCurrentGradePeriod(yearGroup)||pp[pp.length-1];
   const lr=ygRows(yearGroup,lp);
   const enrols=ENR[ik]||[];
 
@@ -6025,12 +6088,16 @@ function rPeer(){
   function aC(v){if(v==null)return'var(--mu)';if(v>=6)return'var(--exc)';if(v>=5)return'var(--skl)';if(v>=4)return'var(--con)';if(v>=3)return'var(--met)';if(v>=2)return'var(--wrk)';return'var(--bel)'}
   function eC(v){if(v==null)return'var(--mu)';if(v<=1.5)return'var(--exc)';if(v<=2)return'var(--con)';if(v<=3)return'var(--wrk)';return'var(--bel)'}
 
-  // Get pupils in this TG
-  const tgPupilPx=new Set(enrols.filter(r=>r.t==='tg'&&r.v===tgName&&r.u===null).map(r=>r.x));
+  // Get pupils in this TG (or all TGs in the year group if '__all' selected)
+  const isAllTG=tgName==='__all';
+  const tgPupilPx=isAllTG
+    ?new Set(enrols.filter(r=>r.t==='tg'&&r.u===null).map(r=>r.x))
+    :new Set(enrols.filter(r=>r.t==='tg'&&r.v===tgName&&r.u===null).map(r=>r.x));
   const tgRows=lr.filter(r=>tgPupilPx.has(r[0]));
+  const tgDisplayName=isAllTG?'All Tutor Groups':tgName;
 
   if(!tgRows.length){
-    document.getElementById('tg-title').innerHTML=`<div style="color:var(--mu)">No pupils in ${tgName}</div>`;
+    document.getElementById('tg-title').innerHTML=`<div style="color:var(--mu)">No pupils in ${tgDisplayName}</div>`;
     ['tg-summary','tg-alerts','tg-pupils','tg-abs-pattern','tg-network','tg-perf-title','tg-cards','tg-charts'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
     return;
   }
@@ -6042,13 +6109,13 @@ function rPeer(){
   const WLK=DD.weekLessons||{};
 
   // ── TITLE ──
-  document.getElementById('tg-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} Tutor Group ${tgName} Overview</div>`;
+  document.getElementById('tg-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Y${yearGroup} Tutor Group ${tgDisplayName} Overview</div>`;
 
   // ── SUMMARY CARDS ──
   const sendN=tgRows.filter(r=>r[4]).length;
   const ehcpN=tgRows.filter(r=>r[5]).length;
   const fsmN=tgRows.filter(r=>r[6]).length;
-  document.getElementById('tg-flags').innerHTML=`${flagsStr(sendN,ehcpN,fsmN,tgRows)} · <span style="color:var(--tx);font-weight:500">${tgRows.length}</span> pupils`;
+  document.getElementById('tg-flags').innerHTML=`${flagsStr(sendN,ehcpN,fsmN,tgRows)} · <span style="color:var(--tx);font-weight:500">${tgRows.length}</span> pupils · ${genderStr(tgRows)}`;
 
   // Attendance
   let tgYtdAtt='—',tgTtdAtt='—';
@@ -6071,7 +6138,7 @@ function rPeer(){
   const hasGradesTG=avg!=null||avgE!=null;
 
   document.getElementById('tg-summary').innerHTML=`<div class="crd-g">
-    <div class="crd"><div class="ct2">Tutor Group ${tgName}</div>
+    <div class="crd"><div class="ct2">Tutor Group ${tgDisplayName}</div>
       <div style="font-size:1.5rem;font-weight:700;color:var(--ac)">${tgRows.length}</div>
       <div style="font-size:.72rem;color:var(--mu)">pupils</div>
       <div style="margin-top:.4rem">${flagsStr(sendN,ehcpN,fsmN,tgRows)}</div>
@@ -6116,12 +6183,12 @@ function rPeer(){
     </tr>`;
   }).join('');
 
-  document.getElementById('tg-pupils').innerHTML=`<div class="dw"><div class="dwt">Pupil Overview</div>
+  document.getElementById('tg-pupils').innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Pupil Overview</span><span style="font-size:.62rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0">${tgRows.length} pupils</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 .5rem .75rem">
     <div style="overflow-x:auto"><table class="d"><thead><tr>
       <th>Name</th><th style="text-align:center">Gender</th><th style="text-align:center">YTD Att.</th>
       <th style="text-align:center;color:#f97316">Codes</th><th style="text-align:center;color:#7c3aed">Det.</th>
       ${hasGradesTG?'<th style="text-align:center">Ability</th><th style="text-align:center">Effort</th>':''}
-    </tr></thead><tbody>${pupilRows}</tbody></table></div></div>`;
+    </tr></thead><tbody>${pupilRows}</tbody></table></div></div></div>`;
 
   // ── DISCIPLINE ISSUES ──
   const tgSancAY=SAN.filter(s=>tgPupilPx.has(s[0])&&s[2]>=ayStart&&s[2]<=_tgTodayISO);
@@ -6188,7 +6255,7 @@ function rPeer(){
     if(pairs.length){
       const nodes=new Set();
       pairs.forEach(([k])=>{k.split('-').forEach(px=>nodes.add(parseInt(px)))});
-      const nodeData=[...nodes].map(px=>({px,name:(REG[String(px)]?.id||String(px)).replace(/\s*\(P?\d+\)\s*$/,'').replace(/\s*\(\d+ \w+\)\s*$/,''),tg:tgName}));
+      const nodeData=[...nodes].map(px=>({px,name:(REG[String(px)]?.id||String(px)).replace(/\s*\(P?\d+\)\s*$/,'').replace(/\s*\(\d+ \w+\)\s*$/,''),tg:tgDisplayName}));
       const links=pairs.map(([k,v])=>{const[a,b]=k.split('-').map(Number);return{source:a,target:b,weight:v}});
 
       // Render SVG network
@@ -6219,9 +6286,9 @@ function rPeer(){
         svg+=`<text x="${n.x}" y="${n.y+n.r+14}" fill="var(--mu)" font-size="7" font-family="Outfit" text-anchor="middle">${n.name.split(' ').slice(1).join(' ')}</text>`;
       });
       svg+=`</svg>`;
-      tgNetDiv.innerHTML=`<div class="dw"><div class="dwt">Sanction Pair Network — ${tgName}</div><div style="font-size:.6rem;color:var(--mu);margin-bottom:.5rem">Showing pupils sanctioned together in the same lesson ≥2 times this academic year</div>${svg}</div>`;
+      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="font-size:.6rem;color:var(--mu);margin-bottom:.5rem">Showing pupils sanctioned together in the same lesson ≥2 times this academic year</div>${svg}</div></div>`;
     }else{
-      tgNetDiv.innerHTML=`<div class="dw"><div class="dwt">Sanction Pair Network — ${tgName}</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No significant sanction pairs found</div></div>`;
+      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No significant sanction pairs found</div></div></div>`;
     }
   }
 
@@ -6234,11 +6301,16 @@ function rPeer(){
     const aY=avg!=null&&avg3!=null?avg-avg3:null;
     const eY=avgE!=null&&avgE3!=null?avgE-avgE3:null;
 
-    document.getElementById('tg-perf-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Effort and Ability Summary</div>`;
+    // Make 'Effort and Ability Summary' a clickable collapse header that hides
+    // the Cards (tg-cards) and Charts (tg-charts) below it. Default collapsed
+    // (re-collapse on each render so arrow state and content visibility stay in sync).
+    document.getElementById('tg-cards').classList.add('tt-hide');
+    document.getElementById('tg-charts').classList.add('tt-hide');
+    document.getElementById('tg-perf-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd);cursor:pointer;display:flex;align-items:center;gap:.6rem" onclick="['tg-cards','tg-charts'].forEach(id=>{const e=document.getElementById(id);if(e)e.classList.toggle('tt-hide')});this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Effort and Ability Summary</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
 
     const labs=pp.map(p=>PL[PER.indexOf(p)]);
-    const abDatasets=[{label:`${tgName} Avg Ability`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgAb(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
-    const efDatasets=[{label:`${tgName} Avg Effort`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgEf(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
+    const abDatasets=[{label:`${tgDisplayName} Avg Ability`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgAb(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
+    const efDatasets=[{label:`${tgDisplayName} Avg Effort`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgEf(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
 
     const allAbVals=abDatasets.flatMap(d=>d.data.filter(v=>v!=null));
     const allEfVals=efDatasets.flatMap(d=>d.data.filter(v=>v!=null));
