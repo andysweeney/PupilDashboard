@@ -784,6 +784,16 @@ function loadThresholds(){
   } catch(e){
     console.warn('Could not load thresholds from localStorage:', e);
   }
+  // Also load saved GCSE → letter mapping
+  try {
+    const gmRaw = localStorage.getItem('pupilDashboard.gcseMap.v1');
+    if(gmRaw){
+      const gm = JSON.parse(gmRaw);
+      if(gm && typeof gm==='object') GCSE_TO_LETTER = gm;
+    }
+  } catch(e){
+    console.warn('Could not load GCSE mapping from localStorage:', e);
+  }
 }
 
 // Reset all thresholds to hardcoded defaults, clear localStorage, refresh Admin
@@ -840,6 +850,11 @@ function hideCTModal(){}
 
 // Sanction weightings (global)
 let SW_CODE=1, SW_ONCALL=3, SW_DET=5;
+// GCSE 1-9 → ability letter mapping (used to render OTA grades in dashboard).
+// Loaded from config.gcse_to_letter; falls back to the default below.
+let GCSE_TO_LETTER = (DD.config && DD.config.gcse_to_letter) ? DD.config.gcse_to_letter : {
+  '1':'B','2':'B','3':'D','4':'W','5':'M','6':'C','7':'C','8':'S','9':'E','U':'B'
+};
 function sancWeight(type){return type===2?SW_DET:type===1?SW_ONCALL:SW_CODE}
 function applySW(){
   SW_CODE=parseInt(document.getElementById('sw-code').value)||1;
@@ -847,6 +862,20 @@ function applySW(){
   SW_DET=parseInt(document.getElementById('sw-det').value)||5;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   saveThresholds();
+}
+// Apply changes from the Grade Mapping panel — re-reads the per-grade dropdown
+// values and refreshes any currently-displayed pupil view.
+function applyGM(){
+  const newMap={};
+  ['1','2','3','4','5','6','7','8','9','U'].forEach(g=>{
+    const el=document.getElementById('gm-'+g);
+    if(el&&el.value) newMap[g]=el.value;
+  });
+  GCSE_TO_LETTER=newMap;
+  // Persist alongside thresholds (separate key so we don't conflate concerns)
+  try{localStorage.setItem('pupilDashboard.gcseMap.v1',JSON.stringify(newMap))}catch(e){}
+  // Re-render Pupil tab if active so changes show immediately
+  try{rP()}catch(e){}
 }
 function showSWModal(){}
 function hideSWModal(){}
@@ -7001,6 +7030,25 @@ function rPeer(){
     const threshHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Concern Thresholds &amp; Weightings</div>
       <div style="font-size:.72rem;color:var(--mu);margin-bottom:.85rem;line-height:1.5">These settings control how the dashboard decides when a pupil, class or tutor group is flagged as a concern. Each section below describes a single type of concern, lists the settings that affect it, and notes which tabs you'll see the change reflected in. Hover any value box for additional detail. After making changes, click <b style="color:var(--tx)">Apply Changes</b> at the foot of this panel.</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem">
+        ${(()=>{
+          // Build the Grade Mapping panel inline
+          const letterOptions=['B','D','W','M','C','S','E'];
+          const letterNames={B:'Below',D:'Developing',W:'Working',M:'Meeting',C:'Confident',S:'Skilful',E:'Excellent'};
+          const gradeRow=(g)=>{
+            const cur=GCSE_TO_LETTER[g]||'B';
+            const opts=letterOptions.map(l=>`<option value="${l}"${l===cur?' selected':''}>${l} (${letterNames[l]})</option>`).join('');
+            const label=g==='U'?'Ungraded (U)':`Grade ${g}`;
+            return `<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem"><label style="font-size:.74rem;color:var(--tx);min-width:9rem;margin:0">${label}</label><select id="gm-${g}" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'Outfit',sans-serif;font-size:.78rem;padding:.35rem .5rem;border-radius:6px;flex:1;max-width:14rem">${opts}</select></div>`;
+          };
+          const rows=['1','2','3','4','5','6','7','8','9','U'].map(gradeRow).join('');
+          return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.85rem 1rem;background:var(--sf)">
+            <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">GCSE Grade Mapping</div>
+            <div style="font-size:.7rem;color:var(--mu);margin-bottom:.3rem;line-height:1.4">From Y10 onwards, ability is reported as an <em>On Track to Achieve</em> GCSE grade (1-9). The dashboard also stores a B-E ability code for consistency with KS3 reporting. This panel sets how each GCSE grade maps to that internal code.</div>
+            <div style="font-size:.65rem;color:var(--ac);margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.05em">Affects: Pupil tab, Subject tab, all grade displays</div>
+            ${rows}
+            <button onclick="applyGM()" style="margin-top:.6rem;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;cursor:pointer">Apply Mapping</button>
+          </div>`;
+        })()}
         ${groupPanel(
           'Sanction Weightings',
           'These weights are used to convert behaviour incidents into a single weighted score. Used by every sanction-based concern (Sanctions Acceleration, Sanctions Concentration, Subject Engagement) plus pupil and class summary cards.',
@@ -7818,6 +7866,7 @@ function rPeer(){
   window.showCTModal=showCTModal;
   window.hideCTModal=hideCTModal;
   window.applySW=applySW;
+  window.applyGM=applyGM;
   window.showSWModal=showSWModal;
   window.hideSWModal=hideSWModal;
   window.toggleAll=toggleAll;
