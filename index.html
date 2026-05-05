@@ -1619,8 +1619,9 @@ function rP(){
   const x=parseInt(document.getElementById('p-sel').value);if(!x)return;
   const pu=REG[x],ink=pu.intake,en=getEn(ink,x),data=getProg(ink,x),ctg=curTG(en);
   const pp=PER.filter(p=>data[p]),nP=pp.length;
-  // If no progress periods, create a minimal structure so attendance/sanctions still work
-  const hasGrades=nP>0&&Object.keys(data[pp[nP-1]]?.sc||{}).length>0;
+  // hasGrades: true if ANY period has subject grades (not just the latest — Spring grades
+  // arrive before Summer, KS3 sometimes only reports terminally, etc.).
+  const hasGrades=nP>0&&pp.some(p=>Object.keys(data[p]?.sc||{}).length>0);
   if(!nP){
     // No progress data at all — still render what we can
     // Create empty data structures
@@ -1639,7 +1640,18 @@ function rP(){
     renderAbsencePattern(x,'p-abs-pattern');
     return;
   }
-  const lp=pp[nP-1],p3=nP>=3?pp[nP-3]:null,p5=nP>=2?pp[nP-2]:null;
+  // lp = "current" period for grade display. Default to last period; but if the last
+  // period has no grades AND an earlier period does, use the most recent period that
+  // actually has grade data (so Spring data shows when Summer hasn't been reported yet).
+  let lp=pp[nP-1];
+  if(hasGrades && Object.keys(data[lp]?.sc||{}).length===0){
+    for(let i=nP-2;i>=0;i--){
+      if(Object.keys(data[pp[i]]?.sc||{}).length>0){ lp=pp[i]; break; }
+    }
+  }
+  // Pick comparison periods (3 and 5 back from current) — relative to lp, not pp[nP-1]
+  const lpIdx=pp.indexOf(lp);
+  const p3=lpIdx>=2?pp[lpIdx-2]:null,p5=lpIdx>=1?pp[lpIdx-1]:null;
   const lt=data[lp],r3=p3?data[p3]:null,r5=p5?data[p5]:null;
   // Get active subjects from timetable if no grades
   const ttGrid=TT_DATA[String(x)]||[];
