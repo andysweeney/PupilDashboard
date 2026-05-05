@@ -117,6 +117,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
 <button class="tb" onclick="sw('sanctions',this)">⚖ Sanctions Analysis</button>
 <button class="tb" onclick="sw('concerns',this)">🚨 Concerns</button>
+<button class="tb" onclick="sw('slotavoid',this)">🎯 Slot Avoidance</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
@@ -272,6 +273,17 @@ table.d tr:hover td{background:var(--sf2)}
 <div class="cg"><label>Year Group</label><select id="sa-yg" onchange="rSA()"></select></div>
 </div>
 <div id="sa-out"></div>
+</div>
+
+<div id="vw-slotavoid" class="vw">
+<div class="ctl">
+<div class="cg"><label>Year Group</label><select id="sav-yg" onchange="rSlot()"></select></div>
+<div class="cg"><label>Mode</label><select id="sav-mode" onchange="rSlot()">
+  <option value="absolute" selected>Absolute (raw absence rate)</option>
+  <option value="relative">Relative (vs subject's own average)</option>
+</select></div>
+</div>
+<div id="sav-out"></div>
 </div>
 
 <div id="vw-admin" class="vw">
@@ -4944,7 +4956,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='admin')rAdmin();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='admin')rAdmin();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -5767,7 +5779,8 @@ function rCC(){
     'pp-yg':{hasAll:true,onChange:'rPP()'},
     'send-yg':{hasAll:true,onChange:'rSEND()'},
     'an-yg':{hasAll:false,onChange:'rAnalytics()'},
-    'sa-yg':{hasAll:true,onChange:'rSA()'}
+    'sa-yg':{hasAll:true,onChange:'rSA()'},
+    'sav-yg':{hasAll:true,onChange:'rSlot()'}
   };
   for(const[id,cfg2]of Object.entries(ygDropdowns)){
     const sel=document.getElementById(id);
@@ -7038,6 +7051,232 @@ function rPeer(){
     return`<div class="dw" style="border-left:3px solid #f97316"><div class="dwt" style="color:#f97316">Sanctions Concentration</div>${rows}</div>`;
   }
 
+  // ── SLOT AVOIDANCE TAB ──
+  // Year-group view: subject × slot heatmap revealing which subject-slot
+  // combinations have anomalous absence rates. The trick: each subject only
+  // occupies ~3-6 of the 25 weekly slots, so the grid is sparse. Same column =
+  // same physical timetable slot, so columns let you compare subjects directly
+  // ('Tue P1 — French is fine, Spanish is dark' = Spanish-Tue-P1 is being avoided).
+  function rSlot(){
+    const ygVal=document.getElementById('sav-yg').value;
+    const mode=document.getElementById('sav-mode').value;
+    const out=document.getElementById('sav-out');
+    if(!ygVal){out.innerHTML='';return}
+    
+    const yearGroups=ygVal==='all'?Object.keys(PRG).map(ik=>curYG(parseInt(ik.slice(1)))).filter(yg=>yg<=11):[parseInt(ygVal)];
+    
+    // Pupils in those year groups
+    const pupilPxs=[];
+    for(const[ik,_]of Object.entries(PRG)){
+      const ink=parseInt(ik.slice(1));
+      if(!atSchool(ink))continue;
+      if(!yearGroups.includes(curYG(ink)))continue;
+      const enrols=ENR[ik]||[];
+      enrols.filter(r=>r.t==='tg'&&r.u===null).forEach(r=>{if(!pupilPxs.includes(r.x))pupilPxs.push(r.x)});
+    }
+    if(!pupilPxs.length){out.innerHTML='<div style="color:var(--mu);padding:1rem">No pupils found</div>';return}
+    
+    // Determine date range — current AY only (consistent with weekLessons coverage)
+    const ayStart=`${CAY}-09-01`;
+    const _today=new Date();
+    const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
+    const ayEnd=`${CAY+1}-07-31`;
+    const endISO=_todayISO<ayEnd?_todayISO:ayEnd;
+    
+    // Count school weeks elapsed in current AY (one set of 5 slots per week)
+    const WLK=DD.weekLessons||{};
+    const weeksInRange=Object.keys(WLK).filter(w=>w>=ayStart&&w<=endISO).length;
+    
+    // For each pupil, walk their timetable. For each filled (day, period) cell,
+    // increment scheduled[subject][day][period] by weeksInRange (one lesson per week).
+    // Split cells (where subject changes mid-year) need pro-rating, but for a first
+    // pass we'll use the CURRENT subject (the second of the two) for the whole AY.
+    // This will slightly overcount lessons for pupils who switched, but the
+    // distortion is small — most pupils don't switch.
+    const scheduled={}; // scheduled[subj][d][p] = lesson count
+    const subjects=new Set();
+    const TT_DATA=DD.timetables||{};
+    pupilPxs.forEach(px=>{
+      const grid=TT_DATA[String(px)];
+      if(!grid)return;
+      for(let d=0;d<5;d++){
+        const day=grid[d];if(!day)continue;
+        for(let p=0;p<5;p++){
+          const cell=day[p];if(!cell)continue;
+          // Cell formats: [subjKey, period] or [subjKey1, p+1, subjKey2, fromDate]
+          let subjKey;
+          if(cell.length===4){subjKey=cell[2]}else{subjKey=cell[0]}
+          if(!subjKey)continue;
+          // Decompress key to full subject name
+          const SKR=Object.fromEntries(Object.entries(DD.subjectKeys||{}).map(([k,v])=>[v,k]));
+          const subj=SKR[subjKey]||subjKey;
+          subjects.add(subj);
+          if(!scheduled[subj])scheduled[subj]=[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]];
+          scheduled[subj][d][p]+=weeksInRange;
+        }
+      }
+    });
+    
+    // Now count absences per (subject, day, period), pulling from attAbsSubj.
+    // Records are [dateStr, subject, period, mark]. We need day-of-week from dateStr.
+    const absent={}; // absent[subj][d][p] = count
+    pupilPxs.forEach(px=>{
+      const aas=(DD.attAbsSubj||{})[String(px)]||[];
+      const seen=new Set();
+      aas.forEach(r=>{
+        const date=r[0],subj=r[1],period=r[2];
+        if(date<ayStart||date>endISO)return;
+        const key=date+'|'+period;
+        if(seen.has(key))return; // dedupe — same period, multiple subject records for split cells
+        seen.add(key);
+        if(!subj)return;
+        const dt=new Date(date+'T12:00:00');
+        const dow=(dt.getDay()+6)%7; // Mon=0
+        if(dow<0||dow>4)return;
+        const periodIdx=period-1;
+        if(periodIdx<0||periodIdx>4)return;
+        if(!absent[subj])absent[subj]=[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]];
+        absent[subj][dow][periodIdx]++;
+      });
+    });
+    
+    // Compute per-cell absence rate AND per-subject overall rate
+    const subjOverall={}; // subj -> {abs, sched, rate}
+    subjects.forEach(subj=>{
+      let totAbs=0,totSched=0;
+      for(let d=0;d<5;d++)for(let p=0;p<5;p++){
+        totSched+=scheduled[subj][d][p];
+        totAbs+=(absent[subj]?.[d]?.[p])||0;
+      }
+      subjOverall[subj]={abs:totAbs,sched:totSched,rate:totSched?(totAbs/totSched*100):0};
+    });
+    
+    // Sort subjects by overall absence rate desc
+    const subjList=[...subjects].filter(s=>subjOverall[s].sched>0).sort((a,b)=>subjOverall[b].rate-subjOverall[a].rate);
+    
+    if(!subjList.length){
+      out.innerHTML='<div style="color:var(--mu);padding:1rem">No timetable or absence data for this year group</div>';
+      return;
+    }
+    
+    // ── Render heatmap ──
+    const days=['Mon','Tue','Wed','Thu','Fri'];
+    const periods=[1,2,3,4,5];
+    
+    // Cell colour: in absolute mode, traffic-light by raw rate;
+    // in relative mode, by deviation from subject's own rate (positive = worse).
+    function cellColour(rate,subjRate){
+      if(rate==null)return'transparent';
+      if(mode==='absolute'){
+        // Match the rest of the dashboard: green<=5, amber 5-15, red>15
+        if(rate<=2)return'#e8f5e8';
+        if(rate<=5)return'#bde5be';
+        if(rate<=10)return'#fde4a8';
+        if(rate<=15)return'#fbb874';
+        if(rate<=25)return'#f97316';
+        return'#dc2626';
+      }else{
+        // Relative: deviation from subject's overall rate (in percentage points)
+        const delta=rate-subjRate;
+        if(delta<=-5)return'#34d399';
+        if(delta<=-2)return'#bde5be';
+        if(delta<=2)return'#f5f5f5';
+        if(delta<=5)return'#fbb874';
+        if(delta<=10)return'#f97316';
+        return'#dc2626';
+      }
+    }
+    function cellTextColour(rate,subjRate){
+      const bg=cellColour(rate,subjRate);
+      // Dark backgrounds get white text
+      if(bg==='#dc2626'||bg==='#f97316'||bg==='#34d399')return'#fff';
+      return'#1a1a1a';
+    }
+    
+    // Build the table
+    let header=`<tr><th style="text-align:left;font-size:.65rem;background:var(--sf2);padding:.4rem .5rem;position:sticky;left:0;z-index:2">Subject</th>`;
+    days.forEach((d,di)=>{
+      periods.forEach(p=>{
+        header+=`<th style="text-align:center;font-size:.55rem;color:var(--mu);background:var(--sf2);padding:.3rem .2rem;${p===5&&di<4?'border-right:2px solid var(--bd)':''}">${d.slice(0,3)}<br>P${p}</th>`;
+      });
+    });
+    header+=`<th style="text-align:center;font-size:.6rem;background:var(--sf2);padding:.3rem .4rem;border-left:2px solid var(--bd)">Subject<br>Avg</th></tr>`;
+    
+    const bodyRows=subjList.map(subj=>{
+      const overall=subjOverall[subj];
+      let row=`<tr><td style="text-align:left;font-size:.7rem;font-weight:500;padding:.25rem .5rem;background:var(--sf);position:sticky;left:0;z-index:1;border-right:1px solid var(--bd);white-space:nowrap">${subj}</td>`;
+      for(let d=0;d<5;d++){
+        for(let p=0;p<5;p++){
+          const sched=scheduled[subj][d][p]||0;
+          const abs=absent[subj]?.[d]?.[p]||0;
+          const rate=sched>0?(abs/sched*100):null;
+          const bg=cellColour(rate,overall.rate);
+          const fg=cellTextColour(rate,overall.rate);
+          const borderR=p===4&&d<4?'border-right:2px solid var(--bd)':'';
+          if(rate==null){
+            row+=`<td style="background:var(--sf);text-align:center;font-size:.55rem;color:var(--mu);padding:.25rem .15rem;${borderR}">·</td>`;
+          }else{
+            const tip=`${subj} · ${days[d]} P${p+1}\n${abs} absent / ${sched} scheduled = ${rate.toFixed(1)}%${mode==='relative'?`\nSubject avg: ${overall.rate.toFixed(1)}% · Δ ${(rate-overall.rate>=0?'+':'')}${(rate-overall.rate).toFixed(1)}pp`:''}`;
+            row+=`<td title="${tip}" style="background:${bg};color:${fg};text-align:center;font-size:.65rem;font-weight:500;font-family:'JetBrains Mono',monospace;padding:.25rem .15rem;${borderR}">${rate.toFixed(0)}</td>`;
+          }
+        }
+      }
+      const overallBg=cellColour(overall.rate,overall.rate);
+      row+=`<td style="background:${overallBg};color:${cellTextColour(overall.rate,overall.rate)};text-align:center;font-size:.7rem;font-weight:600;font-family:'JetBrains Mono',monospace;padding:.25rem .4rem;border-left:2px solid var(--bd)">${overall.rate.toFixed(1)}%</td></tr>`;
+      return row;
+    }).join('');
+    
+    // Anomaly table — top 15 (subject, slot) cells where absolute rate exceeds
+    // the subject's overall rate by the most (in percentage points).
+    const anomalies=[];
+    subjList.forEach(subj=>{
+      const overall=subjOverall[subj];
+      for(let d=0;d<5;d++)for(let p=0;p<5;p++){
+        const sched=scheduled[subj][d][p]||0;
+        if(sched<5)continue; // require minimum sample size
+        const abs=absent[subj]?.[d]?.[p]||0;
+        const rate=abs/sched*100;
+        const delta=rate-overall.rate;
+        anomalies.push({subj,day:days[d],period:p+1,sched,abs,rate,subjRate:overall.rate,delta});
+      }
+    });
+    anomalies.sort((a,b)=>b.delta-a.delta);
+    const top=anomalies.slice(0,15).filter(a=>a.delta>0);
+    const anomalyRows=top.map(a=>`<tr>
+      <td style="font-weight:500">${a.subj}</td>
+      <td style="text-align:center">${a.day} P${a.period}</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:var(--mu)">${a.subjRate.toFixed(1)}%</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:#ef4444;font-weight:600">${a.rate.toFixed(1)}%</td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;color:#ef4444;font-weight:600">+${a.delta.toFixed(1)}pp</td>
+      <td style="text-align:center;color:var(--mu);font-size:.65rem">${a.abs} / ${a.sched}</td>
+    </tr>`).join('');
+    
+    out.innerHTML=`
+      <div class="dw">
+        <div class="dwt">Subject × Slot Absence Rates</div>
+        <div style="font-size:.62rem;color:var(--mu);margin-bottom:.6rem;line-height:1.4">
+          Each row is a subject; each column is a timetable slot (Mon-Fri × P1-P5). Cells filled only where this year group has that subject scheduled.
+          Cell value = % of scheduled lessons missed at that slot. ${mode==='absolute'?'Coloured by absolute absence rate.':'Coloured by deviation from the subject\u2019s own average — green = better than average, red = worse.'}
+          <br>Same column = same physical slot, so you can compare subjects directly: a slot with one bright cell and several pale cells is showing a single subject being avoided at that time.
+        </div>
+        <div style="overflow-x:auto"><table class="d" style="font-size:.65rem;border-collapse:separate;border-spacing:0">
+          <thead>${header}</thead>
+          <tbody>${bodyRows}</tbody>
+        </table></div>
+        <div style="font-size:.6rem;color:var(--mu);margin-top:.5rem">${pupilPxs.length} pupils · ${weeksInRange} school weeks · ${subjList.length} subjects</div>
+      </div>
+      ${top.length?`<div class="dw" style="margin-top:1rem">
+        <div class="dwt">Top Anomalies — Subject Slots Worse Than Average</div>
+        <div style="font-size:.62rem;color:var(--mu);margin-bottom:.6rem">Slots where absence rate exceeds the subject\u2019s own average by the largest margin (minimum 5 scheduled lessons). Top 15 shown.</div>
+        <table class="d"><thead><tr>
+          <th>Subject</th><th style="text-align:center">Slot</th>
+          <th style="text-align:center">Subject avg</th><th style="text-align:center">This slot</th>
+          <th style="text-align:center">Δ</th><th style="text-align:center">Sample</th>
+        </tr></thead><tbody>${anomalyRows}</tbody></table>
+      </div>`:''}
+    `;
+  }
+  
   // ── ADMIN TAB ──
   function rAdmin(){
     const out=document.getElementById('admin-out');
@@ -7317,6 +7556,7 @@ function rPeer(){
   window.rAnalytics=rAnalytics;
   window.rAdmin=rAdmin;
   window.rSA=rSA;
+  window.rSlot=rSlot;
 
   // ── CONCERNS DASHBOARD ──
   function popCNFilters(){
