@@ -2800,7 +2800,13 @@ function rCmp(){
     const ay=ink+(targetYG-7);
     const ayPeriods=['T1','T2','T3'].map(t=>`${t} ${ay}`).filter(p=>periods[p]);
     if(ayPeriods.length){
-      const lastP=ayPeriods[ayPeriods.length-1];
+      // Pick the most recent period in this AY that actually has grade data;
+      // fall back to the last period if all are stubs.
+      let lastP=ayPeriods[ayPeriods.length-1];
+      for(let i=ayPeriods.length-1;i>=0;i--){
+        const candRows=periods[ayPeriods[i]]||[];
+        if(candRows.some(r=>r[3]&&Object.keys(r[3]).length>0)){lastP=ayPeriods[i];break}
+      }
       const rows=periods[lastP];
       let avg,avgE,gb;
       if(isAll){
@@ -3000,7 +3006,12 @@ function rPrg(){
     const ayLabel=`${ay}-${ay+1}`;
     const ayPeriods=['T1','T2','T3'].map(t=>`${t} ${ay}`).filter(p=>periods[p]);
     if(!ayPeriods.length) continue;
-    const lastP=ayPeriods[ayPeriods.length-1];
+    // Pick the most recent period with actual grade data; fall back to last period
+    let lastP=ayPeriods[ayPeriods.length-1];
+    for(let i=ayPeriods.length-1;i>=0;i--){
+      const candRows=periods[ayPeriods[i]]||[];
+      if(candRows.some(r=>r[3]&&Object.keys(r[3]).length>0)){lastP=ayPeriods[i];break}
+    }
     const rows=periods[lastP];
     if(!rows||!rows.length) continue;
 
@@ -4885,6 +4896,19 @@ function ygPeriods(yearGroup){
   }
   return[];
 }
+// Returns the most recent period for which the year group has actual grade data
+// in any pupil. Falls back to the last period if every period is a stub.
+// Used by tabs that need to show "current grades" when reports might only have
+// arrived for an earlier term (e.g. Spring imported but Summer not yet reported).
+function ygCurrentGradePeriod(yearGroup){
+  const pp=ygPeriods(yearGroup);
+  if(!pp.length)return null;
+  for(let i=pp.length-1;i>=0;i--){
+    const rows=ygRows(yearGroup,pp[i]);
+    if(rows.some(r=>r[3]&&Object.keys(r[3]).length>0))return pp[i];
+  }
+  return pp[pp.length-1];
+}
 // Get enrolments for a year group
 function ygEnrol(yearGroup){
   for(const[ik,enrols]of Object.entries(ENR)){
@@ -4901,15 +4925,18 @@ function rSV(){
   if(!yearGroup||!sub)return;
   const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('sv-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('sv-charts-top').innerHTML='';document.getElementById('sv-charts-bottom').innerHTML='';document.getElementById('sv-alerts').innerHTML='';document.getElementById('sv-title').innerHTML='';document.getElementById('sv-dist-title').innerHTML='';const ss=document.getElementById('sv-summary');if(ss)ss.innerHTML='';return}
   const nP=pp.length;
-  const lp=pp[nP-1],labs=pp.map(p=>PL[PER.indexOf(p)]);
+  // Pick the most recent period that actually has grade data — falls back to last period
+  const lp=ygCurrentGradePeriod(yearGroup)||pp[nP-1];
+  const lpIdx=pp.indexOf(lp);
+  const labs=pp.map(p=>PL[PER.indexOf(p)]);
   const lr=ygRows(yearGroup,lp);
 
   // Helper: avg ability for a set of rows
   function avgAb(rs){const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
   function avgEf(rs){const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 
-  // Current, YoY (3 back), term-on-term (1 back)
-  const p3=nP>=3?pp[nP-3]:null,p5=nP>=2?pp[nP-2]:null;
+  // Comparison periods — 2 back from current display period (YoY) and 1 back (term-on-term)
+  const p3=lpIdx>=2?pp[lpIdx-2]:null,p5=lpIdx>=1?pp[lpIdx-1]:null;
   const lr3=p3?ygRows(yearGroup,p3):null,lr5=p5?ygRows(yearGroup,p5):null;
 
   const avg=avgAb(lr),avgE=avgEf(lr);
@@ -5082,7 +5109,7 @@ function rSV(){
   document.getElementById('sv-summary').innerHTML=makeSummaryCards(lrSubj, {titleLabel:`Y${yearGroup} ${sub}`, ay:CAY});
 
   if(!hasGradesSV){
-    document.getElementById('sv-cards').innerHTML='<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported.</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lrSubj)} · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils</div></div>';
+    document.getElementById('sv-cards').innerHTML=`<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported.</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lrSubj)} · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils</div></div>`;
     document.getElementById('sv-charts-top').innerHTML='';
     document.getElementById('sv-charts-bottom').innerHTML='';
     document.getElementById('sv-dist-title').innerHTML='';
@@ -5180,7 +5207,8 @@ function rCL(){
   if(!yearGroup||!sub||isNaN(cl))return;
   const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('cl-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('cl-charts').innerHTML='';document.getElementById('cl-alerts').innerHTML='';document.getElementById('cl-network').innerHTML='';document.getElementById('cl-title').innerHTML='';document.getElementById('cl-send-title').innerHTML='';document.getElementById('cl-send').innerHTML='';document.getElementById('cl-perf-title').innerHTML='';const cs=document.getElementById('cl-summary');if(cs)cs.innerHTML='';return}
   const nP=pp.length;
-  const lp=pp[nP-1],labs=pp.map(p=>PL[PER.indexOf(p)]);
+  const lp=ygCurrentGradePeriod(yearGroup)||pp[nP-1];
+  const labs=pp.map(p=>PL[PER.indexOf(p)]);
 
   // Pupils currently in this class
   const enrols=ygEnrol(yearGroup);
@@ -5558,7 +5586,9 @@ function rCC(){
   const enrols=ygEnrol(yearGroup);
   const cm={};enrols.filter(r=>r.t==='cls'&&r.s===sub&&r.u===null).forEach(r=>{if(!cm[r.c])cm[r.c]={pups:new Set(),tc:r.tc};cm[r.c].pups.add(r.x)});
   const pp=ygPeriods(yearGroup);if(!pp.length)return;
-  const lp=pp[pp.length-1],p3=pp.length>=3?pp[pp.length-3]:null;
+  const lp=ygCurrentGradePeriod(yearGroup)||pp[pp.length-1];
+  const lpIdx=pp.indexOf(lp);
+  const p3=lpIdx>=2?pp[lpIdx-2]:null;
 
   const rows=Object.entries(cm).sort(([a],[b])=>a-b).map(([c,info])=>{
     const lr=ygRows(yearGroup,lp).filter(r=>info.pups.has(r[0]));
