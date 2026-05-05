@@ -4791,6 +4791,8 @@ function renderNet(){
   const ctx=window._netCtx;
   if(!ctx) return;
   const selAY=parseInt(document.getElementById('net-ay').value);
+  const minWEl=document.getElementById('net-min-w');
+  const minW=minWEl?parseInt(minWEl.value)||1:1;
   const ayStart=`${selAY}-09-01`,ayEnd=`${selAY+1}-07-31`;
   const netToday=new Date();
   const netTodayISO=`${netToday.getFullYear()}-${String(netToday.getMonth()+1).padStart(2,'0')}-${String(netToday.getDate()).padStart(2,'0')}`;
@@ -4836,22 +4838,27 @@ function renderNet(){
   }
 
   const pupSancCount={};SAN2.forEach(s=>{pupSancCount[s[0]]=(pupSancCount[s[0]]||0)+1});
-  const edges=Object.entries(pairW).map(([pk,w])=>{const[a,b]=pk.split('|').map(Number);return{a,b,w}});
+  // Apply minimum co-occurrence threshold to edges
+  const edges=Object.entries(pairW).filter(([,w])=>w>=minW).map(([pk,w])=>{const[a,b]=pk.split('|').map(Number);return{a,b,w}});
+  // Only render pupils who appear in at least one (filtered) edge — drop nodes with no co-sanctions
+  const pupilsInEdges=new Set();edges.forEach(e=>{pupilsInEdges.add(e.a);pupilsInEdges.add(e.b)});
+  const visiblePupils=ctx.classPupilList.filter(px=>pupilsInEdges.has(px));
+  const droppedCount=ctx.classPupilList.length-visiblePupils.length;
   const container=document.getElementById('net-container');
 
   if(!edges.length){
-    container.innerHTML=`<div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No co-sanctions found in ${selAY}-${selAY+1}</div>`;
+    container.innerHTML=`<div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No co-sanctions${minW>1?` with ≥${minW} occurrences`:''} found in ${selAY}-${selAY+1}</div>`;
     return;
   }
 
   const maxEdgeW=Math.max(...edges.map(e=>e.w));
-  const maxSanc=Math.max(...ctx.classPupilList.map(px=>pupSancCount[px]||0),1);
+  const maxSanc=Math.max(...visiblePupils.map(px=>pupSancCount[px]||0),1);
   const W=1050,H=675;
-  const nodes=ctx.classPupilList.map((px,i)=>{
+  const nodes=visiblePupils.map((px,i)=>{
     const pu=REG[px];const name=pu?pu.id.replace(/\s*\(P\d+\)\s*$/,''):`#${px}`;
     const sc=pupSancCount[px]||0;const r=Math.max(8,Math.min(30,8+sc/maxSanc*22));
     const connected=edges.some(e=>e.a===px||e.b===px);
-    const angle=(i/ctx.classPupilList.length)*Math.PI*2;
+    const angle=(i/visiblePupils.length)*Math.PI*2;
     return{px,name,sc,r,x:W/2+Math.cos(angle)*(W/2-50),y:H/2+Math.sin(angle)*(H/2-50),connected};
   });
   const nodeMap={};nodes.forEach(n=>nodeMap[n.px]=n);
@@ -4905,16 +4912,14 @@ function renderNet(){
   }).join('');
 
   const legend=`<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.5rem;font-size:.65rem;color:var(--mu)">
-    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f9731622;border:1.5px solid #f97316;vertical-align:middle;margin-right:.25rem"></span>Co-sanctioned</span>
-    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6488ff22;border:1.5px solid #6488ff;vertical-align:middle;margin-right:.25rem"></span>Sanctioned (no pairs)</span>
-    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--sf2);border:1.5px solid var(--bd);vertical-align:middle;margin-right:.25rem"></span>No sanctions</span>
+    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f9731622;border:1.5px solid #f97316;vertical-align:middle;margin-right:.25rem"></span>Co-sanctioned pupil</span>
     <span>Node size = sanction count · Line thickness = co-sanction frequency</span>
   </div>`;
 
   container.innerHTML=`<div style="position:relative">
     <svg id="net-svg" viewBox="0 0 ${W} ${H}" style="width:100%;max-height:675px;display:block;background:var(--sf2);border-radius:8px">${edgeSvg}${nodeSvg}</svg>
     <div id="net-tip" style="display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:999"></div>
-  </div>${legend}<div style="font-size:.6rem;color:var(--mu);margin-top:.3rem">${edges.length} pair${edges.length!==1?'s':''} · ${SAN2.length} sanctions in ${selAY}-${selAY+1}</div>`;
+  </div>${legend}<div style="font-size:.6rem;color:var(--mu);margin-top:.3rem">${edges.length} pair${edges.length!==1?'s':''} · ${SAN2.length} sanctions in ${selAY}-${selAY+1}${droppedCount>0?` · ${droppedCount} pupil${droppedCount!==1?'s':''} hidden (no co-sanctions${minW>1?` ≥${minW}`:''})`:''}</div>`;
 
   const svgEl=document.getElementById('net-svg'),tipEl=document.getElementById('net-tip');
   if(svgEl&&tipEl){
@@ -5584,7 +5589,7 @@ function rCL(){
 
   // Render dropdown + graph container
   const netDiv=document.getElementById('cl-network');
-  netDiv.innerHTML=`<div class="dw"><div class="dwt" style="display:flex;align-items:center;gap:1rem">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><select id="net-ay" onchange="renderNet()" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div>`;
+  netDiv.innerHTML=`<div class="dw"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Min co-occurrences <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div>`;
 
   window._netCtx={classPupilList:[...classPups],sub,cl};
   renderNet();
