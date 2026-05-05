@@ -118,6 +118,7 @@ table.d tr:hover td{background:var(--sf2)}
 <button class="tb" onclick="sw('sanctions',this)">⚖ Sanctions Analysis</button>
 <button class="tb" onclick="sw('concerns',this)">🚨 Concerns</button>
 <button class="tb" onclick="sw('slotavoid',this)">🎯 Slot Avoidance</button>
+<button class="tb" onclick="sw('rebalance',this)">🎚 Rebalance</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
@@ -284,6 +285,19 @@ table.d tr:hover td{background:var(--sf2)}
 </select></div>
 </div>
 <div id="sav-out"></div>
+</div>
+
+<div id="vw-rebalance" class="vw">
+<div class="ctl">
+<div class="cg"><label>Year Group</label><select id="rb-yg" onchange="rRebal()"></select></div>
+<div class="cg"><label>Min imbalance</label><select id="rb-min" onchange="rRebal()">
+  <option value="0.5" selected>0.5 codes/pupil</option>
+  <option value="0.3">0.3 codes/pupil</option>
+  <option value="1">1.0 codes/pupil</option>
+  <option value="0">Any imbalance</option>
+</select></div>
+</div>
+<div id="rb-out"></div>
 </div>
 
 <div id="vw-admin" class="vw">
@@ -4956,7 +4970,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='admin')rAdmin();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else rP();
 }
 
 // Helper: get all progress rows for a year group in the current academic year
@@ -5780,7 +5794,8 @@ function rCC(){
     'send-yg':{hasAll:true,onChange:'rSEND()'},
     'an-yg':{hasAll:false,onChange:'rAnalytics()'},
     'sa-yg':{hasAll:true,onChange:'rSA()'},
-    'sav-yg':{hasAll:true,onChange:'rSlot()'}
+    'sav-yg':{hasAll:true,onChange:'rSlot()'},
+    'rb-yg':{hasAll:false,onChange:'rRebal()'}
   };
   for(const[id,cfg2]of Object.entries(ygDropdowns)){
     const sel=document.getElementById(id);
@@ -7405,6 +7420,254 @@ function rPeer(){
     `;
   }
   
+  // ── REBALANCE TAB ──
+  // For each (year, subject, slot) group with multiple classes, suggest pair-swaps
+  // between pupils that would equalise the total expected-codes load per class.
+  // Expected codes = pupil's YTD code count this AY (simplest model — ignores subject
+  // and time-of-day, and ignores prior-year history).
+  // Co-offender pairs (≥3 shared coding incidents in a class) are flagged for splitting.
+  //
+  // CAVEATS — communicated heavily in the UI:
+  //   • Ignores ability sets (top-set kids shouldn't be moved to bottom-set)
+  //   • Ignores SEND/EHCP allocations and TA support
+  //   • Ignores teacher-pupil dynamics
+  //   • Just because moving X reduces codes statistically doesn't mean it should happen
+  function rRebal(){
+    const yearGroup=parseInt(document.getElementById('rb-yg').value);
+    const minImbalance=parseFloat(document.getElementById('rb-min').value);
+    const out=document.getElementById('rb-out');
+    if(!yearGroup){out.innerHTML='';return}
+    
+    const ayStart=`${CAY}-09-01`;
+    const _today=new Date();
+    const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
+    
+    // YTD code count per pupil
+    const SAN_REB=DD.sanctions||[];
+    const codesByPx={};
+    SAN_REB.forEach(s=>{
+      if(s[1]!==0)return;
+      if(s[2]<ayStart||s[2]>_todayISO)return;
+      codesByPx[s[0]]=(codesByPx[s[0]]||0)+1;
+    });
+    
+    const enrols=ygEnrol(yearGroup);
+    const TT_DATA=DD.timetables||{};
+    const SKR=Object.fromEntries(Object.entries(DD.subjectKeys||{}).map(([k,v])=>[v,k]));
+    
+    // Build subject/class → pupils map, and figure out the class's "slot" (day,period)
+    // by looking at any one pupil's timetable cell for that subject.
+    const grouping={}; // (subj, slot) -> { classes: { clsNum: [px1, px2, ...] } }
+    // Use the first pupil in each class to determine the slot
+    const classToSlot={}; // (subj, cls) -> "Mon P1" (or null)
+    enrols.filter(r=>r.t==='cls'&&r.u===null).forEach(r=>{
+      const subj=r.s,cls=r.c,px=r.x;
+      const k=`${subj}|${cls}`;
+      if(!classToSlot[k]){
+        // Find this pupil's timetable slot for this subject
+        const grid=TT_DATA[String(px)];
+        if(grid){
+          let foundSlot=null;
+          outer:for(let d=0;d<5;d++){
+            const day=grid[d];if(!day)continue;
+            for(let p=0;p<5;p++){
+              const cell=day[p];if(!cell)continue;
+              const sk=cell.length===4?cell[2]:cell[0];
+              const cellSubj=SKR[sk]||sk;
+              if(cellSubj===subj){foundSlot=`${['Mon','Tue','Wed','Thu','Fri'][d]} P${p+1}`;break outer}
+            }
+          }
+          classToSlot[k]=foundSlot;
+        }
+      }
+    });
+    
+    enrols.filter(r=>r.t==='cls'&&r.u===null).forEach(r=>{
+      const subj=r.s,cls=r.c,px=r.x;
+      const slot=classToSlot[`${subj}|${cls}`]||'?';
+      const groupKey=`${subj}|${slot}`;
+      if(!grouping[groupKey])grouping[groupKey]={subj,slot,classes:{}};
+      if(!grouping[groupKey].classes[cls])grouping[groupKey].classes[cls]={pupils:[],teacher:r.tc};
+      grouping[groupKey].classes[cls].pupils.push(px);
+    });
+    
+    // For each grouping, compute current totals and find swaps
+    const groups=[];
+    for(const[gk,g]of Object.entries(grouping)){
+      const classNums=Object.keys(g.classes).map(Number).sort((a,b)=>a-b);
+      if(classNums.length<2)continue; // need at least 2 classes to rebalance
+      
+      // Initial state — compute total codes per class
+      const state={};
+      classNums.forEach(cn=>{
+        const pupils=g.classes[cn].pupils.slice();
+        state[cn]={
+          pupils,
+          total:pupils.reduce((s,px)=>s+(codesByPx[px]||0),0),
+          teacher:g.classes[cn].teacher
+        };
+      });
+      
+      // Imbalance metric: range (max - min) of class totals divided by avg class size
+      // (so it's "codes per pupil of imbalance")
+      const totals=classNums.map(cn=>state[cn].total);
+      const sizes=classNums.map(cn=>state[cn].pupils.length);
+      const meanSize=sizes.reduce((a,b)=>a+b,0)/sizes.length;
+      const initialRange=Math.max(...totals)-Math.min(...totals);
+      const imbalancePerPupil=initialRange/meanSize;
+      if(imbalancePerPupil<minImbalance)continue;
+      
+      // Find co-offender pairs WITHIN THIS GROUP that are in the SAME class.
+      // Splitting these is high-value: it reduces in-class co-coding.
+      // Only consider pairs with ≥3 shared coding incidents in this subject this AY.
+      const allPxsInGroup=new Set(classNums.flatMap(cn=>state[cn].pupils));
+      const subjSan=SAN_REB.filter(s=>s[1]===0&&s[3]===g.subj&&s[2]>=ayStart&&s[2]<=_todayISO&&allPxsInGroup.has(s[0]));
+      const lessonMap={};
+      subjSan.forEach(s=>{const key=`${s[2]}|${s[4]}`;if(!lessonMap[key])lessonMap[key]=[];lessonMap[key].push(s[0])});
+      const pairW={};
+      for(const pupils of Object.values(lessonMap)){
+        const unique=[...new Set(pupils)];
+        if(unique.length<2)continue;
+        for(let i=0;i<unique.length;i++)for(let j=i+1;j<unique.length;j++){
+          const a=Math.min(unique[i],unique[j]),b=Math.max(unique[i],unique[j]);
+          pairW[`${a}|${b}`]=(pairW[`${a}|${b}`]||0)+1;
+        }
+      }
+      // Find pairs that are in the same class AND appear together ≥3 times
+      const cooffenderPairs=[];
+      for(const[pk,w]of Object.entries(pairW)){
+        if(w<3)continue;
+        const[a,b]=pk.split('|').map(Number);
+        // Are they in the same class?
+        let sharedClass=null;
+        for(const cn of classNums){
+          if(state[cn].pupils.includes(a)&&state[cn].pupils.includes(b)){sharedClass=cn;break}
+        }
+        if(sharedClass!==null) cooffenderPairs.push({a,b,count:w,inClass:sharedClass});
+      }
+      cooffenderPairs.sort((x,y)=>y.count-x.count);
+      
+      // Greedy swap algorithm — up to 3 pair-swaps
+      const swaps=[];
+      const swappedPxs=new Set();
+      // Working state copy
+      const wState=JSON.parse(JSON.stringify(state));
+      for(let iter=0;iter<3;iter++){
+        const cnByLoad=classNums.slice().sort((a,b)=>wState[b].total-wState[a].total);
+        const high=cnByLoad[0],low=cnByLoad[cnByLoad.length-1];
+        const gap=wState[high].total-wState[low].total;
+        if(gap<=1)break;
+        // Find the pupil in `high` with the highest individual code count (not yet swapped)
+        const highCandidates=wState[high].pupils.filter(p=>!swappedPxs.has(p)).sort((a,b)=>(codesByPx[b]||0)-(codesByPx[a]||0));
+        const lowCandidates=wState[low].pupils.filter(p=>!swappedPxs.has(p)).sort((a,b)=>(codesByPx[a]||0)-(codesByPx[b]||0));
+        if(!highCandidates.length||!lowCandidates.length)break;
+        const fromHigh=highCandidates[0];
+        const fromLow=lowCandidates[0];
+        const codeDelta=(codesByPx[fromHigh]||0)-(codesByPx[fromLow]||0);
+        if(codeDelta<=0)break; // swap wouldn't help
+        // Don't over-correct: if swap would flip the imbalance to >gap/2 the other way, skip
+        const newHigh=wState[high].total-codeDelta;
+        const newLow=wState[low].total+codeDelta;
+        if(Math.abs(newHigh-newLow)>=gap)break; // no improvement
+        // Apply swap
+        wState[high].pupils=wState[high].pupils.filter(p=>p!==fromHigh).concat(fromLow);
+        wState[low].pupils=wState[low].pupils.filter(p=>p!==fromLow).concat(fromHigh);
+        wState[high].total=newHigh;
+        wState[low].total=newLow;
+        swappedPxs.add(fromHigh);swappedPxs.add(fromLow);
+        swaps.push({fromClass:high,toClass:low,pxFromHigh:fromHigh,pxFromLow:fromLow,codeDelta});
+      }
+      
+      const finalRange=Math.max(...classNums.map(cn=>wState[cn].total))-Math.min(...classNums.map(cn=>wState[cn].total));
+      const improvement=initialRange-finalRange;
+      
+      groups.push({...g,classNums,initial:state,final:wState,initialRange,finalRange,improvement,swaps,cooffenderPairs,imbalancePerPupil});
+    }
+    
+    groups.sort((a,b)=>b.imbalancePerPupil-a.imbalancePerPupil);
+    
+    if(!groups.length){
+      out.innerHTML=`<div class="dw"><div class="dwt">No imbalanced groups</div><div style="color:var(--mu);font-size:.75rem">No (subject, slot) groups in Y${yearGroup} have an imbalance above ${minImbalance} codes per pupil. Lower the threshold to see less severe cases.</div></div>`;
+      return;
+    }
+    
+    // Render
+    function pxLabel(px){const r=REG[String(px)];const n=r?r.id.replace(/\s*\(P?\d+\)\s*$/,'').replace(/\s*\(\d+ \w+\)\s*$/,''):`#${px}`;return pLink(px,n)}
+    
+    const groupHtml=groups.map((g,gi)=>{
+      const classRows=g.classNums.map(cn=>{
+        const init=g.initial[cn],fin=g.final[cn];
+        const initRate=init.pupils.length?(init.total/init.pupils.length).toFixed(2):'0';
+        const finRate=fin.pupils.length?(fin.total/fin.pupils.length).toFixed(2):'0';
+        const totalChanged=init.total!==fin.total;
+        return`<tr>
+          <td style="padding:.3rem .5rem;font-weight:500">Class ${cn}</td>
+          <td style="padding:.3rem .5rem;color:var(--mu);font-size:.7rem">${init.teacher}</td>
+          <td style="padding:.3rem .5rem;text-align:center">${init.pupils.length}</td>
+          <td style="padding:.3rem .5rem;text-align:center;font-family:'JetBrains Mono',monospace">${init.total} <span style="color:var(--mu);font-size:.65rem">(${initRate}/pupil)</span></td>
+          <td style="padding:.3rem .5rem;text-align:center;font-family:'JetBrains Mono',monospace;color:${totalChanged?(fin.total<init.total?'#34d399':'#f97316'):'var(--mu)'};font-weight:${totalChanged?600:400}">${fin.total} <span style="color:var(--mu);font-size:.65rem;font-weight:400">(${finRate}/pupil)</span></td>
+        </tr>`;
+      }).join('');
+      
+      const swapList=g.swaps.length?g.swaps.map((s,si)=>{
+        return`<div style="font-size:.72rem;padding:.35rem 0;border-bottom:1px solid rgba(38,45,68,.15);display:flex;align-items:flex-start;gap:.5rem">
+          <span style="color:var(--mu);font-family:'JetBrains Mono',monospace;min-width:1.4rem">${si+1}.</span>
+          <div style="flex:1">
+            <div>${pxLabel(s.pxFromHigh)} <span style="color:var(--mu)">(YTD ${codesByPx[s.pxFromHigh]||0} codes)</span> <span style="color:var(--ac);font-weight:600">Class ${s.fromClass} → Class ${s.toClass}</span></div>
+            <div>${pxLabel(s.pxFromLow)} <span style="color:var(--mu)">(YTD ${codesByPx[s.pxFromLow]||0} codes)</span> <span style="color:var(--ac);font-weight:600">Class ${s.toClass} → Class ${s.fromClass}</span></div>
+          </div>
+        </div>`;
+      }).join(''):'<div style="font-size:.72rem;color:var(--mu);padding:.35rem 0">No beneficial pair-swap found within the search depth.</div>';
+      
+      const coRows=g.cooffenderPairs.length?g.cooffenderPairs.slice(0,5).map(p=>{
+        return`<div style="font-size:.7rem;padding:.25rem 0;border-bottom:1px solid rgba(38,45,68,.15)">
+          ${pxLabel(p.a)} + ${pxLabel(p.b)} <span style="color:var(--mu)">in Class ${p.inClass}</span> <span style="font-family:'JetBrains Mono',monospace;color:#ef4444;font-weight:600">${p.count}× co-coded</span>
+        </div>`;
+      }).join(''):'';
+      
+      const id=`rb-row-${gi}`;
+      return`<div class="dw" style="margin-top:1rem;padding:0;overflow:hidden">
+        <div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0;flex-wrap:wrap" onclick="const bd=document.getElementById('${id}');bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')">
+          <span>${g.subj} <span style="font-weight:400;color:var(--mu);font-size:.7rem">at ${g.slot}</span></span>
+          <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${g.classNums.length} classes · range ${g.initialRange} → ${g.finalRange} codes${g.improvement>0?` (\u2212${g.improvement})`:''}</span>
+          ${g.cooffenderPairs.length?`<span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.6rem;color:#ef4444;font-weight:600">${g.cooffenderPairs.length} co-offender pair${g.cooffenderPairs.length!==1?'s':''}</span>`:''}
+          <span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span>
+        </div>
+        <div id="${id}" style="padding:.75rem 1rem">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start">
+            <div>
+              <div style="font-size:.7rem;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem">Current vs Projected Class Loads</div>
+              <table class="d" style="font-size:.7rem;width:100%"><thead><tr>
+                <th style="text-align:left">Class</th>
+                <th style="text-align:left">Teacher</th>
+                <th style="text-align:center">#</th>
+                <th style="text-align:center">Now</th>
+                <th style="text-align:center">After swaps</th>
+              </tr></thead><tbody>${classRows}</tbody></table>
+            </div>
+            <div>
+              <div style="font-size:.7rem;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem">Suggested Pair-Swaps</div>
+              ${swapList}
+              ${coRows?`<div style="font-size:.7rem;font-weight:600;color:#ef4444;text-transform:uppercase;letter-spacing:.04em;margin:.6rem 0 .3rem">Co-Offender Pairs to Consider Splitting</div>${coRows}`:''}
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    
+    const intro=`<div class="dw">
+      <div class="dwt">Class Rebalancing — Y${yearGroup}</div>
+      <div style="font-size:.65rem;color:var(--mu);line-height:1.5">
+        For each (subject, slot) group with multiple classes, suggested pair-swaps that would equalise total expected codes per class. Expected codes = pupil's YTD code count this academic year.
+        <div style="margin-top:.5rem;padding:.5rem .7rem;background:#fbb87422;border-left:3px solid #f97316;border-radius:0 4px 4px 0">
+          <strong style="color:#f97316">Treat as a starting point, not a directive.</strong> The algorithm doesn't know about ability sets, SEND/EHCP allocations, TA support, friendship dynamics, teacher-pupil relationships, or which swaps have been tried before. Use these suggestions to spark a conversation, not as a class-list change order.
+        </div>
+      </div>
+    </div>${groupHtml}`;
+    
+    out.innerHTML=intro;
+  }
+  
   // ── ADMIN TAB ──
   function rAdmin(){
     const out=document.getElementById('admin-out');
@@ -7685,6 +7948,7 @@ function rPeer(){
   window.rAdmin=rAdmin;
   window.rSA=rSA;
   window.rSlot=rSlot;
+  window.rRebal=rRebal;
 
   // ── CONCERNS DASHBOARD ──
   function popCNFilters(){
