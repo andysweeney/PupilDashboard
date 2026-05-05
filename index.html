@@ -2453,7 +2453,15 @@ function rHeatmaps(x,ink,subjFilter){
   const psWithCat=[];
   SAN.forEach((r,i)=>{if(r[0]===x&&r[2]<=_hmTodayISO)psWithCat.push({r,cat:SANC_DET[i]?SANC_DET[i][1]:'Other',incident:SANC_DET[i]?SANC_DET[i][0]:''})});
   const wrap=document.getElementById('p-heatmaps');
-  if(!ps.length){wrap.innerHTML='';return}
+  if(!ps.length){
+    wrap.innerHTML='';
+    // Also clear the distribution charts container and the global ctx so a
+    // previously-viewed pupil's charts don't linger when this pupil has none.
+    const distWrap=document.getElementById('p-dist');
+    if(distWrap)distWrap.innerHTML='';
+    window._distCtx=null;
+    return;
+  }
 
   const selSubj=subjFilter&&subjFilter!=='all'?subjFilter:null;
 
