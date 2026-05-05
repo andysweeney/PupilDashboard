@@ -7159,6 +7159,59 @@ function rPeer(){
       return;
     }
     
+    // ── Per-pupil Subject Avoidance rollup ──
+    // For each pupil, run getSubjectAvoidance and aggregate flags by subject.
+    // Severity: ratio>=4 → red (weight 1.0), else amber (weight 0.5).
+    // For each (subject, slot), count the ABSENCE share contributed by flagged
+    // pupils — so we can answer 'where are these avoiders skipping' as well as
+    // 'who is avoiding what'.
+    const avoidBySubject={}; // subj -> {pupils:[{px,name,severity,ratio,absences,partial,p1Whole,actualPct,expectedPct}], slotAbs:[d][p]=count}
+    pupilPxs.forEach(px=>{
+      const flags=getSubjectAvoidance(px);
+      if(!flags||!flags.length)return;
+      flags.forEach(f=>{
+        const subj=f.subj;
+        if(!avoidBySubject[subj])avoidBySubject[subj]={pupils:[],slotAbs:[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]};
+        const sev=parseFloat(f.ratio)>=4?'red':'amber';
+        const fname=firstName(px);
+        const pid=REG[String(px)]?.id||`#${px}`;
+        avoidBySubject[subj].pupils.push({px,name:fname,pid,severity:sev,ratio:f.ratio,absences:f.absences,partial:f.partial,p1Whole:f.p1Whole,actualPct:f.actualPct,expectedPct:f.expectedPct});
+        // Tally where this pupil's absences from this subject fall (slot-wise)
+        const aas=(DD.attAbsSubj||{})[String(px)]||[];
+        const seen=new Set();
+        aas.forEach(r=>{
+          const date=r[0],rsubj=r[1],period=r[2];
+          if(date<ayStart||date>endISO)return;
+          if(rsubj!==subj)return;
+          const key=date+'|'+period;
+          if(seen.has(key))return;
+          seen.add(key);
+          const dt=new Date(date+'T12:00:00');
+          const dow=(dt.getDay()+6)%7;
+          if(dow<0||dow>4)return;
+          const periodIdx=period-1;
+          if(periodIdx<0||periodIdx>4)return;
+          avoidBySubject[subj].slotAbs[dow][periodIdx]++;
+        });
+      });
+    });
+    
+    // Build ranked list — severity-weighted (red=1, amber=0.5)
+    const avoidRanking=Object.entries(avoidBySubject).map(([subj,info])=>{
+      const reds=info.pupils.filter(p=>p.severity==='red').length;
+      const ambers=info.pupils.filter(p=>p.severity==='amber').length;
+      const score=reds*1.0+ambers*0.5;
+      // Find dominant slot for this subject's avoiders
+      let dominantSlot=null,dominantCount=0,totalSlotAbs=0;
+      for(let d=0;d<5;d++)for(let p=0;p<5;p++){
+        const c=info.slotAbs[d][p];
+        totalSlotAbs+=c;
+        if(c>dominantCount){dominantCount=c;dominantSlot={d,p,count:c}}
+      }
+      const dominantPct=totalSlotAbs>0?(dominantCount/totalSlotAbs*100):0;
+      return{subj,reds,ambers,total:info.pupils.length,score,pupils:info.pupils.sort((a,b)=>parseFloat(b.ratio)-parseFloat(a.ratio)),slotAbs:info.slotAbs,totalSlotAbs,dominantSlot,dominantPct};
+    }).sort((a,b)=>b.score-a.score);
+    
     // ── Render heatmap ──
     const days=['Mon','Tue','Wed','Thu','Fri'];
     const periods=[1,2,3,4,5];
@@ -7251,8 +7304,83 @@ function rPeer(){
       <td style="text-align:center;color:var(--mu);font-size:.65rem">${a.abs} / ${a.sched}</td>
     </tr>`).join('');
     
-    out.innerHTML=`
+    // Build Subject Avoidance panel (primary view)
+    const avoidPanelRows=avoidRanking.map((r,i)=>{
+      const slotLabel=r.dominantSlot?`${days[r.dominantSlot.d]} P${r.dominantSlot.p+1}`:'—';
+      const slotPctStr=r.dominantSlot?`${r.dominantPct.toFixed(0)}% of avoidance absences`:'';
+      // Mini slot grid for this subject's avoidance absences (5x5)
+      const maxSlotC=Math.max(...[].concat(...r.slotAbs),1);
+      let miniGrid='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;width:9rem">';
+      for(let d=0;d<5;d++){
+        for(let p=0;p<5;p++){
+          const c=r.slotAbs[d][p];
+          const intensity=c/maxSlotC;
+          const bg=c===0?'var(--sf2)':`rgba(220,38,38,${0.15+intensity*0.7})`;
+          const fg=intensity>0.5?'#fff':'var(--mu)';
+          miniGrid+=`<div title="${days[d]} P${p+1}: ${c} absence${c!==1?'s':''}" style="background:${bg};color:${fg};font-size:.55rem;font-family:'JetBrains Mono',monospace;text-align:center;padding:.1rem;border-radius:2px;${c===r.dominantSlot?.count&&c>0?'outline:1.5px solid #dc2626;outline-offset:-1px':''}">${c||''}</div>`;
+        }
+      }
+      miniGrid+='</div>';
+      // Pupils detail (initially hidden)
+      const pupilRows=r.pupils.map(p=>{
+        const sevCol=p.severity==='red'?'#ef4444':'#f97316';
+        return`<tr>
+          <td style="padding:.2rem .5rem;font-family:'JetBrains Mono',monospace;font-size:.7rem">${pLink(p.px,p.pid)}</td>
+          <td style="padding:.2rem .5rem;text-align:center"><span style="font-size:.55rem;font-weight:700;text-transform:uppercase;color:${sevCol};padding:.05rem .35rem;border:1px solid ${sevCol}55;border-radius:3px">${p.severity}</span></td>
+          <td style="padding:.2rem .5rem;text-align:center;font-family:'JetBrains Mono',monospace;font-size:.7rem">${p.ratio}×</td>
+          <td style="padding:.2rem .5rem;text-align:center;font-size:.65rem;color:var(--mu)">${p.absences} qual. (${p.partial} partial${p.p1Whole?` + ${p.p1Whole} P1`:''})</td>
+          <td style="padding:.2rem .5rem;text-align:center;font-size:.65rem;color:var(--mu)">${p.actualPct}% vs ${p.expectedPct}% expected</td>
+        </tr>`;
+      }).join('');
+      const id=`av-row-${i}`;
+      return `<tr style="cursor:pointer" onclick="const bd=document.getElementById('${id}');bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')">
+        <td style="padding:.4rem .5rem;font-weight:500"><span class="tv-arrow" style="display:inline-block;width:10px;font-size:.55rem;color:var(--mu);transition:transform .2s">▶</span> ${r.subj}</td>
+        <td style="padding:.4rem .5rem;text-align:center;font-family:'JetBrains Mono',monospace;font-weight:600">${r.score.toFixed(1)}</td>
+        <td style="padding:.4rem .5rem;text-align:center"><span style="color:#ef4444;font-weight:600">${r.reds}</span></td>
+        <td style="padding:.4rem .5rem;text-align:center"><span style="color:#f97316;font-weight:600">${r.ambers}</span></td>
+        <td style="padding:.4rem .5rem;text-align:center;font-weight:500">${slotLabel} <span style="color:var(--mu);font-size:.6rem;font-weight:400">${slotPctStr}</span></td>
+        <td style="padding:.4rem .5rem">${miniGrid}</td>
+      </tr>
+      <tr id="${id}" class="tt-hide"><td colspan="6" style="padding:0 .5rem .5rem;background:var(--sf2)">
+        <div style="font-size:.65rem;color:var(--mu);margin:.4rem 0 .3rem">${r.total} pupil${r.total!==1?'s':''} flagged for ${r.subj}</div>
+        <table class="d" style="font-size:.7rem;background:var(--sf)"><thead><tr>
+          <th style="text-align:left">Pupil</th><th style="text-align:center">Severity</th>
+          <th style="text-align:center">Ratio</th><th style="text-align:center">Absences</th>
+          <th style="text-align:center">Share</th>
+        </tr></thead><tbody>${pupilRows}</tbody></table>
+      </td></tr>`;
+    }).join('');
+    
+    const totalFlagged=new Set();
+    avoidRanking.forEach(r=>r.pupils.forEach(p=>totalFlagged.add(p.px)));
+    const totalReds=avoidRanking.reduce((s,r)=>s+r.reds,0);
+    const totalAmbers=avoidRanking.reduce((s,r)=>s+r.ambers,0);
+    
+    const avoidPanel=avoidRanking.length?`
       <div class="dw">
+        <div class="dwt">Possible Subject Avoidance — Y${yearGroups.join(', Y')} <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.65rem;margin-left:.5rem">${totalFlagged.size} pupils · <span style="color:#ef4444;font-weight:600">${totalReds}</span> red flag${totalReds!==1?'s':''} · <span style="color:#f97316;font-weight:600">${totalAmbers}</span> amber</span></div>
+        <div style="font-size:.62rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">
+          Pupils flagged by the per-pupil Subject Avoidance check (configurable in Admin). Score is severity-weighted (red = 1.0, amber = 0.5). The grid shows where each subject's avoiders are missing lessons — outlined cell is the dominant slot. Click any subject row to expand the list of flagged pupils.
+        </div>
+        <table class="d" style="font-size:.72rem"><thead><tr>
+          <th style="text-align:left">Subject</th>
+          <th style="text-align:center">Score</th>
+          <th style="text-align:center">Red</th>
+          <th style="text-align:center">Amber</th>
+          <th style="text-align:left">Dominant slot</th>
+          <th style="text-align:left">Avoidance absences by slot</th>
+        </tr></thead><tbody>${avoidPanelRows}</tbody></table>
+      </div>
+    `:`
+      <div class="dw">
+        <div class="dwt">Possible Subject Avoidance — Y${yearGroups.join(', Y')}</div>
+        <div style="color:var(--mu);font-size:.75rem;padding:.5rem 0">No pupils currently flagged for subject avoidance. Adjust thresholds in Admin if you'd like a more sensitive view.</div>
+      </div>
+    `;
+    
+    out.innerHTML=`
+      ${avoidPanel}
+      <div class="dw" style="margin-top:1rem">
         <div class="dwt">Subject × Slot Absence Rates</div>
         <div style="font-size:.62rem;color:var(--mu);margin-bottom:.6rem;line-height:1.4">
           Each row is a subject; each column is a timetable slot (Mon-Fri × P1-P5). Cells filled only where this year group has that subject scheduled.
