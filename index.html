@@ -341,7 +341,17 @@ table.d tr:hover td{background:var(--sf2)}
         const fp=PKR[pk]||pk;
         prg2[ik][fp]=rows.map(r=>{
           const sc2={};
-          Object.entries(r[2]).forEach(([sk,v])=>{sc2[SKR[sk]||sk]=v});
+          Object.entries(r[2]).forEach(([sk,v])=>{
+            const fullName=SKR[sk]||sk;
+            // If this entry has a 4th element (Triple Science sub-grades), decompress its keys too
+            if(Array.isArray(v)&&v.length>=4&&v[3]&&typeof v[3]==='object'){
+              const subDecompressed={};
+              Object.entries(v[3]).forEach(([ssk,sv])=>{subDecompressed[SKR[ssk]||ssk]=sv});
+              sc2[fullName]=[v[0],v[1],v[2],subDecompressed];
+            }else{
+              sc2[fullName]=v;
+            }
+          });
           const px=r[0];
           const name=DD.registry[String(px)]?DD.registry[String(px)].id:`#${px}`;
           return[px,name,r[1],sc2,r[3],r[4],r[5]];
