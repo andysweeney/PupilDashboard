@@ -7078,6 +7078,10 @@ function rPeer(){
     const out=document.getElementById('sav-out');
     if(!ygVal){out.innerHTML='';return}
     
+    // Hoisted helpers used across all sections of this function
+    const SKR=Object.fromEntries(Object.entries(DD.subjectKeys||{}).map(([k,v])=>[v,k]));
+    const TT_DATA=DD.timetables||{};
+    
     const yearGroups=ygVal==='all'?Object.keys(PRG).map(ik=>curYG(parseInt(ik.slice(1)))).filter(yg=>yg<=11):[parseInt(ygVal)];
     
     // Pupils in those year groups
@@ -7110,7 +7114,6 @@ function rPeer(){
     // distortion is small — most pupils don't switch.
     const scheduled={}; // scheduled[subj][d][p] = lesson count
     const subjects=new Set();
-    const TT_DATA=DD.timetables||{};
     pupilPxs.forEach(px=>{
       const grid=TT_DATA[String(px)];
       if(!grid)return;
@@ -7122,8 +7125,6 @@ function rPeer(){
           let subjKey;
           if(cell.length===4){subjKey=cell[2]}else{subjKey=cell[0]}
           if(!subjKey)continue;
-          // Decompress key to full subject name
-          const SKR=Object.fromEntries(Object.entries(DD.subjectKeys||{}).map(([k,v])=>[v,k]));
           const subj=SKR[subjKey]||subjKey;
           subjects.add(subj);
           if(!scheduled[subj])scheduled[subj]=[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]];
