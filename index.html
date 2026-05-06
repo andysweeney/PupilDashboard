@@ -7417,6 +7417,115 @@ function rPeer(){
           <th style="text-align:center">Δ</th><th style="text-align:center">Sample</th>
         </tr></thead><tbody>${anomalyRows}</tbody></table>
       </div>`:''}
+      ${(()=>{
+        // ── Per-class absence breakdown table ──
+        // Rows: every class with ≥10 pupils. Columns: 25 slots (Mon P1 ... Fri P5).
+        // Cell value: absences at that specific (date matching slot) for that class's pupils.
+        // A class typically has 3-5 lessons per week and so 3-5 filled cells.
+        const ENRall=DD.enrolments||{};
+        const classRows=[];
+        for(const yg of yearGroups){
+          for(const[ik,enrols] of Object.entries(ENRall)){
+            const ink=parseInt(ik.slice(1));
+            if(curYG(ink)!==yg)continue;
+            // Group enrolments by (subject, class)
+            const classMap={};
+            enrols.filter(r=>r.t==='cls'&&r.u===null).forEach(r=>{
+              const k=`${r.s}|${r.c}`;
+              if(!classMap[k])classMap[k]={subj:r.s,cls:r.c,teacher:r.tc,pupils:new Set()};
+              classMap[k].pupils.add(r.x);
+            });
+            for(const info of Object.values(classMap)){
+              if(info.pupils.size<10)continue; // filter: ≥10 pupils only
+              // Determine which slots this class runs at by looking at any pupil's timetable
+              const slotsUsed=new Set(); // 'd|p' strings
+              const samplePx=[...info.pupils][0];
+              const grid=TT_DATA[String(samplePx)];
+              if(grid){
+                for(let d=0;d<5;d++){const day=grid[d];if(!day)continue;for(let p=0;p<5;p++){
+                  const cell=day[p];if(!cell)continue;
+                  const sk=cell.length===4?cell[2]:cell[0];
+                  const cellSubj=SKR[sk]||sk;
+                  if(cellSubj===info.subj)slotsUsed.add(`${d}|${p}`);
+                }}
+              }
+              if(!slotsUsed.size)continue;
+              // Count absences at each (d,p) where this class runs
+              const cellAbs={}; // 'd|p' -> count
+              info.pupils.forEach(px=>{
+                const aas=(DD.attAbsSubj||{})[String(px)]||[];
+                const seen=new Set();
+                aas.forEach(r=>{
+                  const date=r[0],rsubj=r[1],period=r[2];
+                  if(date<ayStart||date>endISO)return;
+                  if(rsubj!==info.subj)return;
+                  const dt=new Date(date+'T12:00:00');
+                  const dow=(dt.getDay()+6)%7;
+                  if(dow<0||dow>4)return;
+                  const periodIdx=period-1;
+                  if(periodIdx<0||periodIdx>4)return;
+                  const slotKey=`${dow}|${periodIdx}`;
+                  if(!slotsUsed.has(slotKey))return; // only count slots this class actually runs
+                  const dedupKey=date+'|'+period;
+                  if(seen.has(dedupKey))return;
+                  seen.add(dedupKey);
+                  cellAbs[slotKey]=(cellAbs[slotKey]||0)+1;
+                });
+              });
+              const totalAbs=Object.values(cellAbs).reduce((a,b)=>a+b,0);
+              classRows.push({yg,subj:info.subj,cls:info.cls,teacher:info.teacher,nPupils:info.pupils.size,slotsUsed:[...slotsUsed],cellAbs,totalAbs});
+            }
+          }
+        }
+        if(!classRows.length) return '';
+        classRows.sort((a,b)=>b.totalAbs-a.totalAbs);
+        
+        // Build the wide table
+        let hdr=`<tr><th style="text-align:left;font-size:.6rem;background:var(--sf2);padding:.3rem .4rem;position:sticky;left:0;z-index:2">Class</th><th style="text-align:center;font-size:.6rem;background:var(--sf2);padding:.3rem .3rem">Pup</th><th style="text-align:center;font-size:.6rem;background:var(--sf2);padding:.3rem .3rem;border-right:2px solid var(--bd)">Total</th>`;
+        for(let d=0;d<5;d++){for(let p=0;p<5;p++){
+          hdr+=`<th style="text-align:center;font-size:.55rem;color:var(--mu);background:var(--sf2);padding:.3rem .15rem;${p===4&&d<4?'border-right:2px solid var(--bd)':''}">${days[d].slice(0,3)}<br>P${p+1}</th>`;
+        }}
+        hdr+='</tr>';
+        
+        // Per-cell colour: by absolute absence count. >=20 dark red, >=10 red, >=5 amber, >=1 faint
+        function colourForCount(c){
+          if(c==null||c===0)return null;
+          if(c>=30)return['#dc2626','#fff'];
+          if(c>=20)return['#f97316','#fff'];
+          if(c>=10)return['#fbb874','#1a1a1a'];
+          if(c>=5)return['#fde4a8','#1a1a1a'];
+          return['#e8f5e8','#1a1a1a'];
+        }
+        const body=classRows.map(c=>{
+          let row=`<tr><td style="text-align:left;font-size:.65rem;font-weight:500;padding:.2rem .4rem;background:var(--sf);position:sticky;left:0;z-index:1;border-right:1px solid var(--bd);white-space:nowrap">Y${c.yg} ${c.subj} <span style="color:var(--mu);font-weight:400">Cl ${c.cls}</span></td><td style="text-align:center;font-size:.65rem;color:var(--mu);padding:.2rem .3rem">${c.nPupils}</td><td style="text-align:center;font-size:.7rem;font-weight:600;font-family:'JetBrains Mono',monospace;padding:.2rem .3rem;border-right:2px solid var(--bd)">${c.totalAbs}</td>`;
+          for(let d=0;d<5;d++){for(let p=0;p<5;p++){
+            const slotKey=`${d}|${p}`;
+            const isUsed=c.slotsUsed.includes(slotKey);
+            const cnt=c.cellAbs[slotKey];
+            const borderR=p===4&&d<4?'border-right:2px solid var(--bd)':'';
+            if(!isUsed){
+              row+=`<td style="background:var(--sf);text-align:center;color:var(--mu);font-size:.55rem;padding:.2rem .15rem;${borderR}">·</td>`;
+            }else{
+              const col=colourForCount(cnt);
+              const bg=col?col[0]:'var(--sf2)';
+              const fg=col?col[1]:'var(--mu)';
+              const tip=`Y${c.yg} ${c.subj} Class ${c.cls} · ${days[d]} P${p+1}\n${c.teacher} · ${c.nPupils} pupils\n${cnt||0} absent pupil-lessons`;
+              row+=`<td title="${tip}" style="background:${bg};color:${fg};text-align:center;font-size:.65rem;font-weight:500;font-family:'JetBrains Mono',monospace;padding:.2rem .15rem;${borderR}">${cnt||0}</td>`;
+            }
+          }}
+          row+='</tr>';
+          return row;
+        }).join('');
+        
+        return `<div class="dw" style="margin-top:1rem">
+          <div class="dwt">Per-Class Absences by Slot</div>
+          <div style="font-size:.62rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">
+            One row per class with ≥10 pupils. Cells show pupil-lesson absence counts at each timetable slot the class runs at; empty cells (·) = the class doesn't run at that slot. Sorted by total absences this academic year.
+          </div>
+          <div style="overflow-x:auto"><table class="d" style="font-size:.65rem;border-collapse:separate;border-spacing:0"><thead>${hdr}</thead><tbody>${body}</tbody></table></div>
+          <div style="font-size:.6rem;color:var(--mu);margin-top:.5rem">${classRows.length} classes shown · ${weeksInRange} school weeks YTD</div>
+        </div>`;
+      })()}
     `;
   }
   
