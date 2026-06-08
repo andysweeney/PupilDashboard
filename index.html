@@ -63,12 +63,10 @@ table.d tr:hover td{background:var(--sf2)}
 #ct-modal.ct-show{display:block!important}
 #ct-modal.ct-show~#ct-overlay{display:block!important}
 @media print {
-  @page { size: A4 portrait; margin: 14mm 11mm 15mm 11mm; }
-  @page landscape { size: A4 landscape; margin: 11mm 14mm 12mm 14mm; }
-  /* each .sheet is one page; .land sheets rotate to landscape */
+  @page { size: A4 landscape; margin: 11mm 14mm 12mm 14mm; }
+  /* one .sheet = one page */
   .sheet { break-before: page; }
   #vw-pupil .sheet:first-child { break-before: auto; }
-  .sheet.land { page: landscape; }
 
   /* force true-colour printing (browsers drop backgrounds by default) */
   *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
