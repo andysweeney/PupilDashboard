@@ -926,6 +926,19 @@ function applySW(){
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   saveThresholds();
 }
+// Apply House Point weights from the Admin panel (mutates the shared HP_WEIGHTS object,
+// links it into config for export, persists locally, and re-renders the open pupil).
+function applyHPW(){
+  const hp=parseFloat(document.getElementById('hp-w')?.value);
+  const poc=parseFloat(document.getElementById('hp-poc-w')?.value);
+  if(!isNaN(hp)) HP_WEIGHTS[HP_TYPE_LABELS[0]]=hp;
+  if(!isNaN(poc)) HP_WEIGHTS[HP_TYPE_LABELS[1]]=poc;
+  if(!DD.config) DD.config={};
+  DD.config.house_point_weights=HP_WEIGHTS;
+  try{localStorage.setItem('pupilDashboard.hpWeights.v1',JSON.stringify(HP_WEIGHTS))}catch(e){}
+  const sel=document.getElementById('p-sel');
+  if(sel&&sel.value){const x=parseInt(sel.value);try{renderHPTimetable(x);renderHPDistCharts()}catch(e){}}
+}
 // Apply changes from the Grade Mapping panel — re-reads the per-grade dropdown
 // values and refreshes any currently-displayed pupil view.
 function applyGM(){
@@ -969,6 +982,8 @@ const HP_TYPE_LABELS=(DD.config&&DD.config.house_point_types)||['House Point','P
 const HP_WEIGHTS=(DD.config&&DD.config.house_point_weights)||{'House Point':1,'Positive on call (SLT)':5};
 const HP_TYPE_COLORS=['#34d399','#0ea5e9'];// HP = green, Positive on-call = blue
 function hpWeight(typeIdx){return HP_WEIGHTS[HP_TYPE_LABELS[typeIdx]]||1}
+// Restore Admin-edited house-point weights (this browser only).
+try{const _hw=JSON.parse(localStorage.getItem('pupilDashboard.hpWeights.v1')||'null');if(_hw&&typeof _hw==='object')Object.assign(HP_WEIGHTS,_hw)}catch(e){}
 const SEN_STATUS=DD.senStatus||{};
 const SEN_LABELS={'K':'SEN Support','E':'EHCP','Add':'Additional Help','add':'Additional Help','Strat':'Strategies Applied','strat':'Strategies Applied','N':'SEN Monitoring'};
 const SEN_COLORS={'K':'#f97316','E':'#a78bfa','Add':'#38bdf8','add':'#38bdf8','Strat':'#34d399','strat':'#34d399','N':'#94a3b8'};
@@ -8215,6 +8230,33 @@ function rPeer(){
     });
     incHtml+=`</tbody></table></div></div>`;
 
+    // Build subject mapping table (mirror of the incident-codes loop). Detects spelling
+    // variants (case/whitespace collisions) and lets the user assign a canonical name.
+    const subjectMap=DD.config.subject_map||(DD.config.subject_map={});
+    const foundSubjFreq={};
+    Object.values(DD.timetables||{}).forEach(grid=>{if(Array.isArray(grid))grid.forEach(row=>row.forEach(cell=>{if(cell&&cell[0])foundSubjFreq[cell[0]]=(foundSubjFreq[cell[0]]||0)+1}))});
+    (DD.sanctions||[]).forEach(s=>{if(s[3])foundSubjFreq[s[3]]=(foundSubjFreq[s[3]]||0)+1});
+    (DD.housePoints||[]).forEach(h=>{if(h[3])foundSubjFreq[h[3]]=(foundSubjFreq[h[3]]||0)+1});
+    Object.keys(DD.subjectKeys||{}).forEach(s=>{if(!(s in foundSubjFreq))foundSubjFreq[s]=0});
+    const foundSubjects=Object.keys(foundSubjFreq).sort();
+    const lowerGroups={};
+    foundSubjects.forEach(s=>{const k=s.toLowerCase().trim();(lowerGroups[k]=lowerGroups[k]||[]).push(s)});
+    const variantForms=new Set();
+    Object.values(lowerGroups).forEach(forms=>{if(forms.length>1)forms.forEach(f=>variantForms.add(f))});
+    let subjHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Subject Mapping</div>`;
+    if(variantForms.size){
+      subjHtml+=`<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:#ef4444;font-weight:600">⚠ ${variantForms.size} possible spelling variant${variantForms.size!==1?'s':''}: </span>${[...variantForms].sort().map(c=>`<b>${c}</b>`).join(', ')}</div>`;
+    }
+    subjHtml+=`<div style="font-size:.7rem;color:var(--mu);margin-bottom:.6rem;line-height:1.4">Map inconsistent subject spellings to one canonical name (e.g. <b>Pe</b> → <b>PE</b>). Leave blank to keep as-is. Mappings save into the data key and are applied on the next data import.</div>`;
+    subjHtml+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject (as in data)</th><th>Maps To</th><th style="text-align:center">Slots / Records</th></tr></thead><tbody>`;
+    foundSubjects.forEach(s=>{
+      const isVar=variantForms.has(s);
+      const mapped=subjectMap[s]||'';
+      const esc=s.replace(/'/g,"\\'");
+      subjHtml+=`<tr${isVar?' style="background:rgba(239,68,68,.08)"':''}><td style="font-weight:600${isVar?';color:#ef4444':''}">${s}</td><td><input value="${mapped}" placeholder="${s}" onchange="window._adminSetSubj('${esc}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .4rem;border-radius:4px;width:140px"></td><td style="text-align:center">${foundSubjFreq[s]||'—'}</td></tr>`;
+    });
+    subjHtml+=`</tbody></table></div></div>`;
+
     // Summary
     const summaryHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Data Key Summary</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.8rem;padding:.5rem 0">
@@ -8274,6 +8316,13 @@ function rPeer(){
           inputRow('Code (lowest tier)','sw-code',SW_CODE,{min:0,max:20,step:1,hint:'Standard behaviour incident logged against a pupil. Default 1.'})+
           inputRow('On-Call (escalated)','sw-oncall',SW_ONCALL,{min:0,max:20,step:1,hint:'More serious behaviour incident requiring senior staff. Default 3.'})+
           inputRow('Detention (sanction)','sw-det',SW_DET,{min:0,max:20,step:1,hint:'Detention issued. Default 5.'})
+        )}
+        ${groupPanel(
+          'House Point Weightings',
+          'Weights that convert positive behaviour into a single weighted score, mirroring the sanction weights above. Used by the House Points heatmap and distribution on the Pupil tab (and any net-behaviour calculations).',
+          'Pupil tab → House Points timetable &amp; distribution',
+          inputRow('House Point','hp-w',hpWeight(0),{min:0,max:20,step:1,hint:'Standard house point awarded to a pupil. Default 1.'})+
+          inputRow('Positive on-call (SLT)','hp-poc-w',hpWeight(1),{min:0,max:20,step:1,hint:'Positive recognition escalated to senior staff. Default 5.'})
         )}
         ${groupPanel(
           'Attendance Decline',
@@ -8354,10 +8403,10 @@ function rPeer(){
           inputRow('Minimum persistently-absent pupils','tg-pa-min',TG_PA_MIN,{min:1,max:20,step:1,hint:'Minimum number of pupils meeting Persistent Absence threshold to fire PA cluster flag. Default 3.'})
         )}
       </div>
-      <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><button onclick="applyCT();applySW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.75rem;font-weight:600;padding:.5rem 1rem;border-radius:6px;cursor:pointer">Apply Changes</button><button onclick="resetThresholds()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.5rem .9rem;border-radius:6px;cursor:pointer" title="Restore all thresholds to factory defaults and clear saved values">Reset to Defaults</button><span style="font-size:.65rem;color:var(--mu);margin-left:.5rem">Saved values persist across hard refreshes (this browser only).</span></div>
+      <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><button onclick="applyCT();applySW();applyHPW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.75rem;font-weight:600;padding:.5rem 1rem;border-radius:6px;cursor:pointer">Apply Changes</button><button onclick="resetThresholds()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.5rem .9rem;border-radius:6px;cursor:pointer" title="Restore all thresholds to factory defaults and clear saved values">Reset to Defaults</button><span style="font-size:.65rem;color:var(--mu);margin-left:.5rem">Saved values persist across hard refreshes (this browser only).</span></div>
     </div>`;
 
-    out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml;
+    out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml+subjHtml;
   }
 
   // Admin change handlers
@@ -8391,12 +8440,21 @@ function rPeer(){
     });
     rAdmin();
   };
+  window._adminSetSubj=function(raw,canonical){
+    if(!DD.config.subject_map) DD.config.subject_map={};
+    canonical=(canonical||'').trim();
+    if(!canonical||canonical===raw) delete DD.config.subject_map[raw];
+    else DD.config.subject_map[raw]=canonical;
+    rAdmin();
+  };
 
   window._adminExport=function(){
     const cfg={
       att_codes:DD.config.att_codes,
       sen_codes:DD.config.sen_codes,
-      incident_codes:DD.config.incident_codes
+      incident_codes:DD.config.incident_codes,
+      house_point_weights:DD.config.house_point_weights||HP_WEIGHTS,
+      subject_map:DD.config.subject_map||{}
     };
     const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
     const a=document.createElement('a');
