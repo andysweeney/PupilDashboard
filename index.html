@@ -89,7 +89,14 @@ table.d tr:hover td{background:var(--sf2)}
 
   /* charts: fixed page-friendly heights, canvases rasterise as-is */
   canvas { max-height:165px !important; }
+  .chw { height:150px !important; }
+  .chw canvas { height:150px !important; max-height:150px !important; }
   .ch-g { gap:.5rem !important; }
+  /* expand any collapsed panels (e.g. Historic Grades) so they print in full */
+  .tt-hide { display:block !important; }
+  #p-tbl table.d { width:100% !important; font-size:7pt !important; }
+  /* trim timetable + absence pattern so both fit one sheet */
+  #p-tt .tt-grid, #p-abs-pattern { font-size:7.5pt !important; }
   #p-sanc [style*="height:clamp"], #p-sanc-subj [style*="height:clamp"] { height:150px !important; }
   #p-pupil-net svg, #cl-network svg { max-height:300px !important; }
 
@@ -152,28 +159,35 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 </div>
 <div id="print-masthead" class="print-only"><div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-family:var(--serif);font-size:14pt;font-weight:600">Pupil Progress — Individual Pack</span><span style="font-size:7.5pt;text-transform:uppercase;letter-spacing:.1em;color:var(--red);font-weight:600">Confidential · SLT use only</span></div><div style="font-size:7.5pt;color:var(--mu);margin-top:.15rem">Generated <span id="print-date"></span> · figures as shown on screen</div></div>
 <div id="p-hd"></div>
+<!-- PAGE 1: Summary -->
+<div id="p-att-section" style="margin-bottom:.5rem"></div>
 <div id="p-acad-title" style="margin-bottom:.5rem"></div>
 <div class="crd-g" id="p-crds"></div>
-<div class="ch-g" id="p-ch"></div>
+<div id="p-sanchp-section" style="margin-bottom:.5rem"></div>
 <div style="page-break-before:always"></div>
+<!-- PAGE 2: Academic Progress -->
+<div id="p-acadprog-title" style="margin-bottom:.5rem"></div>
+<div class="ch-g" id="p-ch"></div>
+<div id="p-hist-title" style="margin-bottom:.5rem"></div>
+<div id="p-tbl"></div>
+<div style="page-break-before:always"></div>
+<!-- PAGE 3: Timetable & attendance pattern -->
 <div id="p-behav-title" style="margin-bottom:.5rem"></div>
 <div id="p-tt" style="margin-bottom:1.25rem"></div>
-<div id="p-tt-hp" style="margin-bottom:1.25rem"></div>
 <div id="p-abs-pattern" style="margin-bottom:1.25rem"></div>
+<div id="p-tt-hp" style="margin-bottom:1.25rem"></div>
 <div id="p-att-spark" style="margin-bottom:1.25rem"></div>
 <div id="p-sanc"></div>
 <div id="p-sanc-subj"></div>
 <div id="p-heatmaps"></div>
 <div style="page-break-before:always"></div>
+<!-- PAGE 4: Distribution & relationships -->
 <div id="p-dist-title" style="margin-bottom:.5rem"></div>
 <div id="p-dist"></div>
 <div id="p-dist-hp-title" style="margin-bottom:.5rem"></div>
 <div id="p-dist-hp"></div>
 <div id="p-pupil-net" style="margin-bottom:1.25rem"></div>
 <div id="p-att-table" style="margin-bottom:1.25rem"></div>
-<div style="page-break-before:always"></div>
-<div id="p-hist-title" style="margin-bottom:.5rem"></div>
-<div id="p-tbl"></div>
 <div class="print-only print-footer">Pupil Progress · Confidential — SLT use only</div>
 </div>
 
@@ -346,6 +360,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   const PAL={red:gv('--red'),redDeep:gv('--red-deep'),redBand:gv('--red-band'),rose:gv('--rose'),orange:gv('--orange'),orangeMid:gv('--orange-mid'),orangePale:gv('--orange-pale'),amber:gv('--amber'),gold:gv('--gold'),amberBand:gv('--amber-band'),orangeBand:gv('--orange-band'),green:gv('--green'),greenMid:gv('--green-mid'),greenDeep:gv('--green-deep'),greenDark:gv('--green-dark'),lime:gv('--lime'),greenBand:gv('--green-band'),greenBg:gv('--green-bg'),greenBg2:gv('--green-bg2'),teal:gv('--teal'),tealBright:gv('--teal-bright'),blue:gv('--blue'),sky:gv('--sky'),cyan:gv('--cyan'),blueBand:gv('--blue-band'),navy:gv('--navy'),tealDark:gv('--teal-dark'),indigo:gv('--indigo'),violet:gv('--violet'),lilac:gv('--lilac'),purple:gv('--purple'),plum:gv('--plum'),magenta:gv('--magenta'),pink:gv('--pink'),pinkDeep:gv('--pink-deep'),slate:gv('--slate'),amberBg:gv('--amber-bg')};
   Object.entries(PAL).forEach(([k,v])=>{if(!v)console.warn('PAL token empty:',k)});
   try{const _pd=document.getElementById('print-date');if(_pd)_pd.textContent=new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});}catch(e){}
+  // Re-layout charts for print so axes/labels fit the print box instead of being bitmap-scaled
+  ['beforeprint','afterprint'].forEach(ev=>window.addEventListener(ev,()=>{try{document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}}));
   let DD;
   try{
     const resp=await fetch('./data.json');
@@ -2222,7 +2238,7 @@ function rP(){
   const bcLine=bcBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${bcBadges}</div>`:'';
   const otherConcernsAlert=pupilOtherConcernsAlert(x);
 
-  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${otherConcernsAlert}${summaryLine}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
+  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${otherConcernsAlert}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
   renderTimetable(x);
@@ -2235,6 +2251,18 @@ function rP(){
   document.getElementById('p-dist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Sanctions Distribution</div>`;
   document.getElementById('p-dist-hp-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">House Points Distribution</div>`;
   document.getElementById('p-hist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Historic Grades</div>`;
+  document.getElementById('p-acadprog-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Academic Progress</div>`;
+
+  // ── Attendance section (summary page) ──
+  document.getElementById('p-att-section').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd);margin-bottom:.5rem">Attendance</div><div class="crd-g"><div class="crd"><div class="ct2">Attendance ${ayLabel}${isA?'':' · '+sf}</div><div style="display:flex;align-items:baseline;gap:.9rem;flex-wrap:wrap"><span class="cv2" style="color:${ayAttCol};font-size:2.4rem">${ayAttPct}${ayAttPct==='—'?'':'%'}</span>${isA?'':`<span style="font-size:.8rem;color:var(--mu)">${sf}: <b style="color:${ayAttCol}">${ayAttPct}%</b></span>`}</div><div style="font-size:.7rem;color:var(--mu);margin-top:.3rem">Periods attended this academic year</div></div></div>`;
+
+  // ── Sanctions & House Points section (summary page) ──
+  const _hpRecs=(DD.housePoints||[]).filter(r=>r[0]===x&&r[2]>=ayStart&&r[2]<=ayEnd);
+  const _hpN=_hpRecs.filter(r=>r[1]===0).length,_pocN=_hpRecs.filter(r=>r[1]===1).length;
+  const _hpWt=_hpN*hpWeight(0)+_pocN*hpWeight(1);
+  const _sancCard=`<div class="crd"><div class="ct2">Sanctions ${ayLabel}</div><div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${PAL.orange}">${ayCodes}</span><span style="font-size:.72rem;color:var(--mu)">codes${_ayCatStr}</span></div><div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.45rem;font-size:.78rem"><span style="color:var(--mu)"><b style="color:${PAL.red}">${ayOnCalls}</b> On-calls</span><span style="color:var(--mu)"><b style="color:${PAL.violet}">${ayDetentions}</b> Detentions</span></div></div>`;
+  const _hpCard=`<div class="crd g"><div class="ct2">House Points ${ayLabel}</div><div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${PAL.green}">${_hpN}</span><span style="font-size:.72rem;color:var(--mu)">house points</span></div><div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.45rem;font-size:.78rem"><span style="color:var(--mu)"><b style="color:${PAL.blue}">${_pocN}</b> Positive on-calls</span><span style="color:var(--mu)">Weighted <b style="color:var(--tx)">${_hpWt}</b></span></div></div>`;
+  document.getElementById('p-sanchp-section').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd);margin-bottom:.5rem">Sanctions and House Points</div><div class="crd-g">${_sancCard}${_hpCard}</div>`;
 
   if(hasGrades&&isA){
     document.getElementById('p-crds').innerHTML=`
@@ -2303,7 +2331,7 @@ function rP(){
     const attLabel=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     abDS.push({label:attLabel,data:attData,borderColor:PAL.green,backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:PAL.green,tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   const efDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][1]||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay on effort chart
@@ -2318,7 +2346,7 @@ function rP(){
     const attLabelE=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     efDS.push({label:attLabelE,data:attDataE,borderColor:PAL.green,backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:PAL.green,tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pef',new Chart(document.getElementById('c-pef'),{type:'line',data:{labels:labs,datasets:efDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{reverse:true,min:1,max:4,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(efDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('pef',new Chart(document.getElementById('c-pef'),{type:'line',data:{labels:labs,datasets:efDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{reverse:true,min:1,max:4,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(efDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   }else{
     // No grades — clear chart area
     document.getElementById('p-ch').innerHTML='';
@@ -7409,13 +7437,14 @@ function rPeer(){
     const borderCol=maxSev==='red'?PAL.red:PAL.orange;
     const rows=items.map(it=>{
       const col=it.severity==='red'?PAL.red:PAL.orange;
-      return`<div style="padding:.25rem 0;border-bottom:1px solid rgba(40,34,20,.2);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-        <span style="font-size:.72rem;font-weight:600;color:${col};min-width:9rem">${it.label}</span>
-        <span style="font-size:.68rem;color:var(--mu);flex:1">${it.detail}</span>
-        <span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${col};padding:.05rem .35rem;border:1px solid ${col}55;border-radius:3px">${it.severity}</span>
+      const bg=it.severity==='red'?'rgba(181,72,59,.18)':'rgba(187,107,26,.18)';
+      return`<div style="background:${bg};border-radius:5px;padding:.35rem .5rem;margin-bottom:.3rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <span style="font-size:.72rem;font-weight:700;color:var(--tx);min-width:9rem">${it.label}</span>
+        <span style="font-size:.68rem;color:var(--tx);flex:1">${it.detail}</span>
+        <span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${col};padding:.05rem .35rem;border:1px solid ${col}99;border-radius:3px;background:var(--sf)">${it.severity}</span>
       </div>`;
     }).join('');
-    return`<div class="dw" style="border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">There are ${items.length} active Concerns for ${fn}</span></div>${rows}</div>`;
+    return`<div class="dw" style="margin-top:.7rem;border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">There are ${items.length} active Concerns for ${fn}</span></div>${rows}</div>`;
   }
 
   // Pupil-level sanctions concentration alert (for use in rP)
