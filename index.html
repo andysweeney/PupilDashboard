@@ -64,9 +64,9 @@ table.d tr:hover td{background:var(--sf2)}
 #ct-modal.ct-show~#ct-overlay{display:block!important}
 @media print {
   @page { size: A4 landscape; margin: 11mm 14mm 12mm 14mm; }
-  /* one .sheet = one page */
+  /* one .sheet = one page; first sheet must not force a leading blank page */
   .sheet { break-before: page; }
-  #vw-pupil .sheet:first-child { break-before: auto; }
+  .sheet-1 { break-before: auto !important; }
 
   /* force true-colour printing (browsers drop backgrounds by default) */
   *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -82,13 +82,12 @@ table.d tr:hover td{background:var(--sf2)}
   .vw.on { display:block !important; }
 
   /* cards become clean sheet blocks */
-  .dw, .crd, .chc { background:#fff !important; border:1px solid var(--bd) !important; box-shadow:none !important; break-inside:avoid; }
+  .dw, .crd, .chc { background:#fff !important; border:1px solid var(--bd) !important; box-shadow:none !important; overflow:visible !important; }
 
-  /* keep logical blocks whole; the 4 sheet dividers already use page-break-before:always */
-  .crd-g, .ch-g, .ch-g > *, #p-hd, #p-crds, #p-ch, #p-tt, #p-tt-hp, #p-abs-pattern,
-  #p-att-spark, #p-sanc, #p-sanc-subj, #p-heatmaps, #p-dist, #p-dist-hp,
-  #p-pupil-net, #p-att-table, #p-tbl { break-inside:avoid; }
-  #p-acad-title, #p-behav-title, #p-dist-title, #p-dist-hp-title, #p-hist-title { break-after:avoid; }
+  /* keep only individual cards/charts whole — avoiding whole grids/sections left blank pages */
+  .crd, .chc, .dw, .tt-grid { break-inside:avoid; }
+  #p-att-section, #p-sanchp-section { break-inside:avoid; }
+  #p-acad-title, #p-acadprog-title, #p-behav-title, #p-dist-title, #p-dist-hp-title, #p-hist-title { break-after:avoid; }
 
   /* charts re-layout for print via the beforeprint hook — no CSS bitmap-scaling (which distorted the axes) */
   .ch-g { gap:.6rem !important; }
@@ -160,7 +159,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div class="cg"><label>Subject</label><select id="p-sf"><option value="all">All Subjects</option></select></div>
 </div>
 <div id="print-masthead" class="print-only"><div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-family:var(--serif);font-size:14pt;font-weight:600">Pupil Progress — Individual Pack</span><span style="font-size:7.5pt;text-transform:uppercase;letter-spacing:.1em;color:var(--red);font-weight:600">Confidential · SLT use only</span></div><div style="font-size:7.5pt;color:var(--mu);margin-top:.15rem">Generated <span id="print-date"></span> · figures as shown on screen</div></div>
-<div class="sheet">
+<div class="sheet sheet-1">
 <div id="p-hd"></div>
 <div id="p-att-section" style="margin-bottom:.5rem"></div>
 <div id="p-acad-title" style="margin-bottom:.5rem"></div>
@@ -170,6 +169,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div class="sheet land">
 <div id="p-acadprog-title" style="margin-bottom:.5rem"></div>
 <div class="ch-g" id="p-ch"></div>
+</div>
+<div class="sheet land">
 <div id="p-hist-title" style="margin-bottom:.5rem"></div>
 <div id="p-tbl"></div>
 </div>
@@ -372,7 +373,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   Object.entries(PAL).forEach(([k,v])=>{if(!v)console.warn('PAL token empty:',k)});
   try{const _pd=document.getElementById('print-date');if(_pd)_pd.textContent=new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});}catch(e){}
   // Re-layout charts for print so axes/labels fit the print box instead of being bitmap-scaled
-  ['beforeprint','afterprint'].forEach(ev=>window.addEventListener(ev,()=>{try{document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}}));
+  window.addEventListener('beforeprint',()=>{try{document.querySelectorAll('#p-ch .chw').forEach(w=>{w.dataset.sh=w.style.height||'';w.style.height='210px'});document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}});
+  window.addEventListener('afterprint',()=>{try{document.querySelectorAll('#p-ch .chw').forEach(w=>{w.style.height=w.dataset.sh||''});document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}});
   let DD;
   try{
     const resp=await fetch('./data.json');
