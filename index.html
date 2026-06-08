@@ -143,6 +143,7 @@ table.d tr:hover td{background:var(--sf2)}
 <div style="page-break-before:always"></div>
 <div id="p-behav-title" style="margin-bottom:.5rem"></div>
 <div id="p-tt" style="margin-bottom:1.25rem"></div>
+<div id="p-tt-hp" style="margin-bottom:1.25rem"></div>
 <div id="p-abs-pattern" style="margin-bottom:1.25rem"></div>
 <div id="p-att-spark" style="margin-bottom:1.25rem"></div>
 <div id="p-sanc"></div>
@@ -151,6 +152,8 @@ table.d tr:hover td{background:var(--sf2)}
 <div style="page-break-before:always"></div>
 <div id="p-dist-title" style="margin-bottom:.5rem"></div>
 <div id="p-dist"></div>
+<div id="p-dist-hp-title" style="margin-bottom:.5rem"></div>
+<div id="p-dist-hp"></div>
 <div id="p-pupil-net" style="margin-bottom:1.25rem"></div>
 <div id="p-att-table" style="margin-bottom:1.25rem"></div>
 <div style="page-break-before:always"></div>
@@ -341,12 +344,12 @@ table.d tr:hover td{background:var(--sf2)}
     if(missing.length){
       console.error('[data.json] Missing required enrichment fields:',missing);
     }
-    // Shape check: slotDenominators must be 5×5
+    // Shape check: slotDenominators is 5×5 per academic year (legacy: a single 5×5 array).
     if(DD.slotDenominators){
+      const is5x5=sd=>Array.isArray(sd)&&sd.length===5&&sd.every(row=>Array.isArray(row)&&row.length===5);
       const sd=DD.slotDenominators;
-      if(!Array.isArray(sd)||sd.length!==5||!sd.every(row=>Array.isArray(row)&&row.length===5)){
-        console.error('[data.json] slotDenominators has wrong shape — expected 5×5 array, got:',sd);
-      }
+      const ok = Array.isArray(sd) ? is5x5(sd) : Object.values(sd).every(is5x5);
+      if(!ok) console.error('[data.json] slotDenominators has wrong shape — expected 5×5 per AY, got:',sd);
     }
   })();
 
@@ -466,18 +469,52 @@ table.d tr:hover td{background:var(--sf2)}
       DD.sanctions=DD.sanctions.map(r=>[r[0],r[1],DI[r[2]]||String(r[2]),r[3]!=null?(SKR[r[3]]||r[3]):null,r[4]||null]);
     }
 
-    // Timetables: decompress subject keys (handle split cells)
-    if(DD.timetables){
-      const tt2={};
-      for(const[px,grid] of Object.entries(DD.timetables)){
-        tt2[px]=grid.map(day=>day.map(c=>{
-          if(!c) return null;
-          if(c.length===4) return[SKR[c[0]]||c[0],c[1],SKR[c[2]]||c[2],c[3]];// split
-          return[SKR[c[0]]||c[0],c[1]];// normal
-        }));
-      }
-      DD.timetables=tt2;
+    // House points: same shape as sanctions [px, type, dateISO, subject, period]
+    if(DD.housePoints){
+      DD.housePoints=DD.housePoints.map(r=>[r[0],r[1],DI[r[2]]||String(r[2]),r[3]!=null?(SKR[r[3]]||r[3]):null,r[4]||null]);
     }
+
+    // Per-year snapshot structures are nested by academic year {ay:{px:...}}.
+    // Decompress timetable subject keys, expose the full per-year data on *ByAY,
+    // and alias the flat DD.* names to the latest AY so every existing read keeps working.
+    (function setupPerYear(){
+      const curAY = String((DD.config && DD.config.current_acad_year) || '');
+      const latest = keys => !keys.length ? null
+        : (keys.includes(curAY) ? curAY : keys.slice().sort((a,b)=>(+a)-(+b)).pop());
+      const decompGrid = grid => grid.map(day=>day.map(c=>{
+        if(!c) return null;
+        if(c.length===4) return[SKR[c[0]]||c[0],c[1],SKR[c[2]]||c[2],c[3]];// split cell
+        return[SKR[c[0]]||c[0],c[1]];// normal
+      }));
+      if(DD.timetables){
+        // legacy flat ({px:grid}) -> wrap under current AY
+        if(Array.isArray(Object.values(DD.timetables)[0])) DD.timetables={[curAY||'0']:DD.timetables};
+        const byAY={};
+        for(const[ay,pupils] of Object.entries(DD.timetables)){
+          byAY[ay]={};
+          for(const[px,grid] of Object.entries(pupils)) byAY[ay][px]=decompGrid(grid);
+        }
+        DD.timetablesByAY=byAY;
+        DD.timetables=byAY[latest(Object.keys(byAY))]||{};
+      }
+      if(DD.slotTeachers){
+        if(Array.isArray(Object.values(DD.slotTeachers)[0])) DD.slotTeachers={[curAY||'0']:DD.slotTeachers};
+        DD.slotTeachersByAY=DD.slotTeachers;
+        DD.slotTeachers=DD.slotTeachersByAY[latest(Object.keys(DD.slotTeachersByAY))]||{};
+      }
+      if(DD.slotDenominators){
+        if(Array.isArray(DD.slotDenominators)) DD.slotDenominators={[curAY||'0']:DD.slotDenominators};
+        DD.slotDenominatorsByAY=DD.slotDenominators;
+        DD.slotDenominators=DD.slotDenominatorsByAY[latest(Object.keys(DD.slotDenominatorsByAY))]
+          ||[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]];
+      }
+      if(DD.schoolDayCounts){
+        const k0=Object.keys(DD.schoolDayCounts)[0];
+        if(k0 && typeof DD.schoolDayCounts[k0]!=='object') DD.schoolDayCounts={[curAY||'0']:DD.schoolDayCounts};
+        DD.schoolDayCountsByAY=DD.schoolDayCounts;
+        DD.schoolDayCounts=DD.schoolDayCountsByAY[latest(Object.keys(DD.schoolDayCountsByAY))]||{};
+      }
+    })();
   })();
 
   // ── Boot the app ──
@@ -881,17 +918,6 @@ let SW_CODE=1, SW_ONCALL=3, SW_DET=5;
 let GCSE_TO_LETTER = (DD.config && DD.config.gcse_to_letter) ? DD.config.gcse_to_letter : {
   '1':'B','2':'B','3':'D','4':'W','5':'M','6':'C','7':'C','8':'S','9':'E','U':'B'
 };
-// Inverse: given a B-E letter, return [min, max] GCSE-1-9 range it spans.
-// Derived from GCSE_TO_LETTER at call time so it reflects any Admin changes.
-function letterToGcseRange(letter){
-  if(!letter)return null;
-  const matches=[];
-  for(const[g,l]of Object.entries(GCSE_TO_LETTER)){
-    if(l===letter){const n=parseInt(g);if(!isNaN(n))matches.push(n)}
-  }
-  if(!matches.length)return null;
-  return[Math.min(...matches),Math.max(...matches)];
-}
 function sancWeight(type){return type===2?SW_DET:type===1?SW_ONCALL:SW_CODE}
 function applySW(){
   SW_CODE=parseInt(document.getElementById('sw-code').value)||1;
@@ -937,6 +963,12 @@ const TT_DATA=DD.timetables||{};
 const _SKR2={};
 if(DD.subjectKeys) Object.entries(DD.subjectKeys).forEach(([name,key])=>{_SKR2[key]=name});
 const SANC_DET=DD.sanctionDetails||[];
+// House points (positive behaviour) — labels + Admin-editable weights.
+const HP_DET=DD.housePointDetails||[];
+const HP_TYPE_LABELS=(DD.config&&DD.config.house_point_types)||['House Point','Positive on call (SLT)'];
+const HP_WEIGHTS=(DD.config&&DD.config.house_point_weights)||{'House Point':1,'Positive on call (SLT)':5};
+const HP_TYPE_COLORS=['#34d399','#0ea5e9'];// HP = green, Positive on-call = blue
+function hpWeight(typeIdx){return HP_WEIGHTS[HP_TYPE_LABELS[typeIdx]]||1}
 const SEN_STATUS=DD.senStatus||{};
 const SEN_LABELS={'K':'SEN Support','E':'EHCP','Add':'Additional Help','add':'Additional Help','Strat':'Strategies Applied','strat':'Strategies Applied','N':'SEN Monitoring'};
 const SEN_COLORS={'K':'#f97316','E':'#a78bfa','Add':'#38bdf8','add':'#38bdf8','Strat':'#34d399','strat':'#34d399','N':'#94a3b8'};
@@ -1036,10 +1068,13 @@ function sortableTable(tableId,data,renderRow,defaultSortFn){
 
 // ── ABSENCE PATTERN ANALYSIS ──
 // Analyse a single pupil's absence patterns by day+period
-function analyseAbsencePattern(px){
-  const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
+function analyseAbsencePattern(px, ay){
+  // ay: a specific academic-year string (e.g. '2025') or 'all' (aggregate every year).
+  let pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
   const pMarks=(DD.attendanceMarks||{})[String(px)]||{};
   const DAYS=['Mon','Tue','Wed','Thu','Fri'];
+  const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
+  if(ay && ay!=='all') pAbsSubj=pAbsSubj.filter(r=>_ayOf(r[0])===String(ay));
 
   // Count absences per slot (day x period) — deduplicate by date+slot for split cells
   const slotAbs=Array.from({length:5},()=>Array(5).fill(0));
@@ -1073,7 +1108,15 @@ function analyseAbsencePattern(px){
 
   // Compute pupil's overall absence rate against the same denominator base used per slot.
   // Total scheduled slots = sum of slotDenominators[d][p] across all 5×5 cells.
-  const _slotDenomFull=DD.slotDenominators;
+  // Denominator: that AY's 5×5 grid, or the element-wise sum across all years for 'all'.
+  const _denomByAY=DD.slotDenominatorsByAY||{};
+  let _slotDenomFull;
+  if(ay==='all'){
+    _slotDenomFull=Array.from({length:5},()=>Array(5).fill(0));
+    for(const g of Object.values(_denomByAY)){ if(Array.isArray(g)&&g.length===5) for(let d=0;d<5;d++)for(let p=0;p<5;p++) _slotDenomFull[d][p]+=(g[d]&&g[d][p]||0); }
+  } else {
+    _slotDenomFull=_denomByAY[String(ay)]||DD.slotDenominators;
+  }
   let pupilOverallRate=null;
   if(_slotDenomFull && Array.isArray(_slotDenomFull) && _slotDenomFull.length===5){
     let totalScheduled=0;
@@ -1117,18 +1160,44 @@ function analyseAbsencePattern(px){
   return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags,pupilOverallRate};
 }
 
-// Render pupil absence pattern heatmap
-function renderAbsencePattern(px,containerId){
+// Render pupil absence pattern heatmap (year-aware; ay may be a year string or 'all')
+function renderAbsencePattern(px,containerId,ay){
   const el=document.getElementById(containerId);
   if(!el) return;
-  const analysis=analyseAbsencePattern(px);
+  // Academic years this pupil has data for (oldest -> newest), default to latest.
+  const _ttByAY=DD.timetablesByAY||{};
+  const pAYS=Object.keys(_ttByAY).filter(a=>_ttByAY[a]&&_ttByAY[a][String(px)]).sort((a,b)=>(+a)-(+b));
+  if(!ay) ay = pAYS.includes(String(CAY)) ? String(CAY) : (pAYS[pAYS.length-1]||String(CAY));
+  ay=String(ay);
+  const showSelector = pAYS.length>1;   // only offer the dropdown when there's a real choice
+  const _ink=REG[String(px)]?.intake;
+  const ayLab=a=>{const yg=_ink?((+a)-_ink+7):null; return (yg&&yg>=7&&yg<=13)?`Y${yg} (${a}-${(+a)+1})`:`${a}-${(+a)+1}`;};
+  const yearSel = showSelector
+    ? `<select onchange="renderAbsencePattern(${px},'${containerId}',this.value)" onclick="event.stopPropagation()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.62rem;padding:.1rem .25rem;border-radius:4px;margin-left:.4rem">${pAYS.map(a=>`<option value="${a}"${a===ay?' selected':''}>${ayLab(a)}</option>`).join('')}<option value="all"${ay==='all'?' selected':''}>All years</option></select>`
+    : '';
+
+  const analysis=analyseAbsencePattern(px, ay);
   const{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags}=analysis;
 
-  if(totalAbs<AP_MIN){el.innerHTML='';return}
+  // School days denominator for the header (per-AY, or summed for 'all')
+  const _sdcByAY=DD.schoolDayCountsByAY||{};
+  const _schoolDays = ay==='all'
+    ? Object.values(_sdcByAY).reduce((t,d)=>t+Object.values(d||{}).reduce((a,b)=>a+b,0),0)
+    : Object.values(_sdcByAY[ay]||DD.schoolDayCounts||{}).reduce((a,b)=>a+b,0);
+
+  if(totalAbs<AP_MIN){
+    // Nothing notable. In single-year mode keep the section hidden (as before);
+    // in multi-year mode keep header+selector so the user can switch years.
+    if(!showSelector){el.innerHTML='';return}
+    el.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;display:flex;align-items:center;gap:.4rem;margin-bottom:0"><span>Absence Patterns</span>${yearSel}<span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu);margin-left:auto">no notable absences in ${ay==='all'?'any year':ayLab(ay)}</span></div></div>`;
+    return;
+  }
 
   const DAYS=['Mon','Tue','Wed','Thu','Fri'];
   const maxSlot=Math.max(...slotAbs.flat(),1);
-  const grid=(DD.timetables||{})[String(px)]||[];
+  // Subject labels come from a real timetable grid (latest year for the 'all' view).
+  const _gridAY = ay==='all' ? (pAYS[pAYS.length-1]||'') : ay;
+  const grid=(_ttByAY[_gridAY]||{})[String(px)]||[];
 
   function absHeat(count){
     if(!count)return'';
@@ -1141,7 +1210,7 @@ function renderAbsencePattern(px,containerId){
     return'background:rgba(147,51,234,0.4)';
   }
 
-  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${Object.values(DD.schoolDayCounts||{}).reduce((a,b)=>a+b,0)} school days${dayFlags.length||slotFlags.length?' · <span style=color:#ef4444>'+( dayFlags.length+slotFlags.length)+' pattern'+(dayFlags.length+slotFlags.length!==1?'s':'')+' detected</span>':''}</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
+  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.4rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span>${yearSel}<span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${_schoolDays} school days${dayFlags.length||slotFlags.length?' · <span style=color:#ef4444>'+( dayFlags.length+slotFlags.length)+' pattern'+(dayFlags.length+slotFlags.length!==1?'s':'')+' detected</span>':''}</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
   html+=`<div style="padding:.5rem 1rem .75rem">`;
 
   // Heatmap grid
@@ -1149,7 +1218,15 @@ function renderAbsencePattern(px,containerId){
   html+=`<div class="tt-per"></div>`;DAYS.forEach(d=>{html+=`<div class="tt-day">${d}</div>`});
 
   // Per-slot denominators (day × period) for accurate percentages
-  const _slotDenom=DD.slotDenominators||[[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29]];
+  // Per-slot denominators for accurate percentages — same year scope as the analysis above.
+  const _denomByAY2=DD.slotDenominatorsByAY||{};
+  let _slotDenom;
+  if(ay==='all'){
+    _slotDenom=Array.from({length:5},()=>Array(5).fill(0));
+    for(const g of Object.values(_denomByAY2)){ if(Array.isArray(g)&&g.length===5) for(let d=0;d<5;d++)for(let p=0;p<5;p++) _slotDenom[d][p]+=(g[d]&&g[d][p]||0); }
+  } else {
+    _slotDenom=_denomByAY2[String(ay)]||DD.slotDenominators||[[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29]];
+  }
 
   for(let p=0;p<5;p++){
     html+=`<div class="tt-per">P${p+1}</div>`;
@@ -1478,17 +1555,23 @@ function senPillShort(px){
   return`<span style="display:inline-block;padding:.05rem .25rem;border-radius:3px;font-size:.55rem;background:${col}18;border:1px solid ${col}44;color:${col};margin-left:.2rem">${short}</span>`;
 }
 
-// Render timetable for a pupil
-function renderTimetable(x){
-  const grid=TT_DATA[String(x)];
+// Render timetable for a pupil (year-aware). `ay` defaults to the pupil's latest year.
+function renderTimetable(x, ay){
   const wrap=document.getElementById('p-tt');
+  // Academic years this pupil has a timetable for (data-driven), oldest -> newest.
+  const ttByAY=DD.timetablesByAY||{};
+  const pAYS=Object.keys(ttByAY).filter(a=>ttByAY[a] && ttByAY[a][String(x)]).sort((a,b)=>(+a)-(+b));
+  if(!ay) ay = pAYS.includes(String(CAY)) ? String(CAY) : (pAYS[pAYS.length-1]||String(CAY));
+  ay=String(ay);
+  const grid=(ttByAY[ay]||{})[String(x)];
   if(!grid){wrap.innerHTML='';return}
 
-  // Sanctions per timetable slot (day-of-week + period) for this academic year
+  // Sanctions per timetable slot (day-of-week + period) for the SELECTED academic year
   const SAN=DD.sanctions||[];
   const _today=new Date();
   const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
-  const ayStart=`${CAY}-09-01`,ayEnd=_todayISO;
+  const ayStart=`${ay}-09-01`;
+  const ayEnd=(ay===String(CAY))?_todayISO:`${(+ay)+1}-08-31`;
 
   // Pre-build sanction index for this pupil with categories
   const pSancIdx=[];
@@ -1527,7 +1610,14 @@ function renderTimetable(x){
     return`<span style="display:inline-flex;align-items:center;gap:.2rem;padding:.1rem .4rem;border-radius:4px;background:${col}12;border:1px solid ${col}30;font-size:.65rem;color:${col};white-space:nowrap"><span style="font-weight:600">${s}</span>×${n}</span>`;
   }).join(' ');
 
-  let html=`<div class="dw"><div class="dwt" style="display:flex;align-items:center;gap:.6rem;cursor:pointer" onclick="this.parentElement.querySelector('.tt-body').classList.toggle('tt-hide');this.querySelector('.tt-arrow').classList.toggle('tt-open')">Weekly Timetable <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${totalLessons} lessons/wk</span><span class="tt-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
+  // Academic-year selector (years only — no "All"). Dropdown when >1 year, else a label.
+  const _ttInk=REG[String(x)]?.intake;
+  const ayLabel=a=>{const yg=_ttInk?((+a)-_ttInk+7):null; return (yg&&yg>=7&&yg<=13)?`Y${yg} (${a}-${(+a)+1})`:`${a}-${(+a)+1}`;};
+  const ttYearSel = pAYS.length>1
+    ? `<select onchange="renderTimetable(${x},this.value)" onclick="event.stopPropagation()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.62rem;padding:.1rem .25rem;border-radius:4px">${pAYS.map(a=>`<option value="${a}"${a===ay?' selected':''}>${ayLabel(a)}</option>`).join('')}</select>`
+    : `<span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.62rem;color:var(--mu)">${ayLabel(ay)}</span>`;
+
+  let html=`<div class="dw"><div class="dwt" style="display:flex;align-items:center;gap:.6rem;cursor:pointer" onclick="this.parentElement.querySelector('.tt-body').classList.toggle('tt-hide');this.querySelector('.tt-arrow').classList.toggle('tt-open')">Weekly Timetable <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${totalLessons} lessons/wk</span>${ttYearSel}<span class="tt-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
   html+=`<div class="tt-body">`;
   html+=`<div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.6rem">${subjSummary}</div>`;
   html+='<div class="tt-grid">';
@@ -1589,8 +1679,8 @@ function renderTimetable(x){
         }
         const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#1a1a1a;text-shadow:0 0 2px rgba(255,255,255,.6)">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#1a1a1a;text-shadow:0 0 2px rgba(255,255,255,.6)">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.65rem;font-weight:500;font-family:JetBrains Mono,monospace">'+parts.join(" · ")+"</span>"})();
 
-        // Teacher session info from slotTeachers
-        const _st=(DD.slotTeachers||{})[String(x)];
+        // Teacher session info from slotTeachers (selected academic year)
+        const _st=((DD.slotTeachersByAY||{})[ay]||{})[String(x)];
         const _slotT=_st?_st[d]?.[p]:null;
         const teacherHtml=_slotT&&_slotT.length?`<div style="font-size:.42rem;color:var(--mu);margin-top:.15rem;line-height:1.2">${_slotT.map(t=>`T${t[0]} (${t[1]})`).join(' · ')}</div>`:'';
 
@@ -1666,6 +1756,136 @@ function renderTimetable(x){
   wrap.innerHTML=html;
 }
 
+// House-point version of the weekly timetable: same grid, but each slot shows House
+// Points (HP) and Positive on-calls (POC) with a positive (green) heatmap.
+function renderHPTimetable(x, ay){
+  const wrap=document.getElementById('p-tt-hp');
+  if(!wrap) return;
+  const ttByAY=DD.timetablesByAY||{};
+  const pAYS=Object.keys(ttByAY).filter(a=>ttByAY[a] && ttByAY[a][String(x)]).sort((a,b)=>(+a)-(+b));
+  if(!ay) ay = pAYS.includes(String(CAY)) ? String(CAY) : (pAYS[pAYS.length-1]||String(CAY));
+  ay=String(ay);
+  const grid=(ttByAY[ay]||{})[String(x)];
+  if(!grid){wrap.innerHTML='';return}
+
+  const HP=DD.housePoints||[];
+  const _today=new Date();
+  const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
+  const ayStart=`${ay}-09-01`;
+  const ayEnd=(ay===String(CAY))?_todayISO:`${(+ay)+1}-08-31`;
+
+  // House points for this pupil within the selected AY
+  const pHP=HP.filter(r=>r[0]===x&&r[2]>=ayStart&&r[2]<=ayEnd);
+  const pHPLesson=pHP.filter(r=>r[3]!=null&&r[4]!=null);
+
+  // slot "dow|period" -> {hp, poc} (+ per-subject variant)
+  const slotHP={}, slotSubjHP={};
+  pHPLesson.forEach(r=>{
+    const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;const per=(r[4]||1)-1;
+    if(dow>=0&&dow<5){
+      const key=dow+'|'+per;
+      if(!slotHP[key])slotHP[key]={hp:0,poc:0};
+      const sk3=key+'|'+r[3];
+      if(!slotSubjHP[sk3])slotSubjHP[sk3]={hp:0,poc:0};
+      const t=r[1]===1?'poc':'hp';
+      slotHP[key][t]++;slotSubjHP[sk3][t]++;
+    }
+  });
+
+  // Subject summary (lessons/week) — same as the sanctions timetable
+  const subjCount={};
+  for(let d=0;d<5;d++)for(let p=0;p<5;p++){const c=grid[d][p];if(c)subjCount[c[0]]=(subjCount[c[0]]||0)+1}
+  const totalLessons=Object.values(subjCount).reduce((a,b)=>a+b,0);
+  const subjSummary=Object.entries(subjCount).sort((a,b)=>b[1]-a[1]).map(([s,n])=>{
+    const col=TT_COLORS[s]||'var(--ac)';
+    return`<span style="display:inline-flex;align-items:center;gap:.2rem;padding:.1rem .4rem;border-radius:4px;background:${col}12;border:1px solid ${col}30;font-size:.65rem;color:${col};white-space:nowrap"><span style="font-weight:600">${s}</span>×${n}</span>`;
+  }).join(' ');
+
+  // Year selector (calls renderHPTimetable)
+  const _ttInk=REG[String(x)]?.intake;
+  const ayLabel=a=>{const yg=_ttInk?((+a)-_ttInk+7):null; return (yg&&yg>=7&&yg<=13)?`Y${yg} (${a}-${(+a)+1})`:`${a}-${(+a)+1}`;};
+  const ttYearSel = pAYS.length>1
+    ? `<select onchange="renderHPTimetable(${x},this.value)" onclick="event.stopPropagation()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.62rem;padding:.1rem .25rem;border-radius:4px">${pAYS.map(a=>`<option value="${a}"${a===ay?' selected':''}>${ayLabel(a)}</option>`).join('')}</select>`
+    : `<span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.62rem;color:var(--mu)">${ayLabel(ay)}</span>`;
+
+  // Weighted score per slot for the heatmap (HP weight + POC weight)
+  const wHP=hpWeight(0), wPOC=hpWeight(1);
+  const slotScores={};let maxScore=0;
+  for(const[sk,sc] of Object.entries(slotHP)){const score=(sc.hp||0)*wHP+(sc.poc||0)*wPOC;slotScores[sk]=score;if(score>maxScore)maxScore=score}
+  function heatBg(score){
+    if(!score||!maxScore)return'';
+    const i=Math.min(score/maxScore,1);
+    if(i<0.15)return'background:rgba(52,211,153,0.07)';
+    if(i<0.3)return'background:rgba(52,211,153,0.14)';
+    if(i<0.5)return'background:rgba(52,211,153,0.22)';
+    if(i<0.7)return'background:rgba(16,185,129,0.30)';
+    if(i<0.85)return'background:rgba(16,185,129,0.40)';
+    return'background:rgba(5,150,105,0.50)';
+  }
+  const totalHP=pHP.filter(r=>r[1]===0).length, totalPOC=pHP.filter(r=>r[1]===1).length;
+
+  let html=`<div class="dw"><div class="dwt" style="display:flex;align-items:center;gap:.6rem;cursor:pointer" onclick="this.parentElement.querySelector('.tt-body').classList.toggle('tt-hide');this.querySelector('.tt-arrow').classList.toggle('tt-open')">Weekly Timetable — House Points <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${totalHP} HP · ${totalPOC} POC</span>${ttYearSel}<span class="tt-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
+  html+=`<div class="tt-body">`;
+  html+=`<div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.6rem">${subjSummary}</div>`;
+  html+='<div class="tt-grid">';
+  html+='<div class="tt-hd"></div>';
+  TT_DAYS.forEach(d=>{html+=`<div class="tt-hd">${d}</div>`});
+
+  function hpForSubj(slotKey,subjName){
+    const ss=slotSubjHP[slotKey+'|'+subjName];if(!ss)return'';
+    const parts=[];
+    if(ss.hp)parts.push(`<span style="color:#065f46;text-shadow:0 0 2px rgba(255,255,255,.6)">${ss.hp} HP</span>`);
+    if(ss.poc)parts.push(`<span style="color:#075985;text-shadow:0 0 2px rgba(255,255,255,.6)">${ss.poc} POC</span>`);
+    return parts.length?`<span style="font-size:.6rem;font-weight:500;font-family:'JetBrains Mono',monospace">${parts.join(' ')}</span>`:'';
+  }
+
+  for(let p=0;p<TT_PERIODS;p++){
+    html+=`<div class="tt-per">P${p+1}</div>`;
+    for(let d=0;d<5;d++){
+      const cell=grid[d][p];
+      if(cell){
+        const isSplit=cell.length===4;
+        const subj=cell[0];const subj2=isSplit?cell[2]:null;
+        const col=TT_COLORS[subj]||'var(--ac)';const col2=subj2?(TT_COLORS[subj2]||'var(--ac)'):'';
+        const sk2=d+'|'+p;const sc=slotHP[sk2];const heat=heatBg(slotScores[sk2]||0);
+        const hpHtml=(()=>{if(!sc)return'';const parts=[];if(sc.hp)parts.push(`<span style="color:#065f46;text-shadow:0 0 2px rgba(255,255,255,.6)">${sc.hp} HP</span>`);if(sc.poc)parts.push(`<span style="color:#075985;text-shadow:0 0 2px rgba(255,255,255,.6)">${sc.poc} POC</span>`);return parts.length?`<span style="font-size:.65rem;font-weight:500;font-family:'JetBrains Mono',monospace">${parts.join(' · ')}</span>`:''})();
+        if(isSplit){
+          html+=`<div class="tt-cell" style="padding:0;${heat}"><div style="border-left:2px solid ${col};padding:.2rem .3rem;border-bottom:1px dashed var(--bd)"><span class="tt-subj" style="font-size:.55rem">${subj}</span>${hpForSubj(sk2,subj)?`<div>${hpForSubj(sk2,subj)}</div>`:''}</div><div style="border-left:2px solid ${col2};padding:.2rem .3rem"><span class="tt-subj" style="font-size:.55rem">${subj2}</span>${hpForSubj(sk2,subj2)?`<div>${hpForSubj(sk2,subj2)}</div>`:''}</div></div>`;
+        }else{
+          html+=`<div class="tt-cell" style="border-left:2px solid ${col};${heat}"><span class="tt-subj">${subj}</span>${hpHtml}</div>`;
+        }
+      }else{
+        html+=`<div class="tt-cell"><span style="color:var(--mu)">—</span></div>`;
+      }
+    }
+  }
+
+  // Non-lesson HP row
+  const nlHP=pHP.filter(r=>r[3]===null||r[4]===null);
+  if(nlHP.length){
+    const nlByDay={0:{hp:0,poc:0},1:{hp:0,poc:0},2:{hp:0,poc:0},3:{hp:0,poc:0},4:{hp:0,poc:0}};
+    nlHP.forEach(r=>{const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;if(dow>=0&&dow<5){if(r[1]===1)nlByDay[dow].poc++;else nlByDay[dow].hp++}});
+    let nlMax=0;const nlScores={};
+    for(let d=0;d<5;d++){const sc2=nlByDay[d];const score=(sc2.hp||0)*wHP+(sc2.poc||0)*wPOC;nlScores[d]=score;if(score>nlMax)nlMax=score}
+    const combinedMax=Math.max(maxScore,nlMax);
+    function heatBgNL(score){if(!score||!combinedMax)return'';const i=Math.min(score/combinedMax,1);if(i<0.15)return'background:rgba(52,211,153,0.07)';if(i<0.3)return'background:rgba(52,211,153,0.14)';if(i<0.5)return'background:rgba(52,211,153,0.22)';if(i<0.7)return'background:rgba(16,185,129,0.30)';if(i<0.85)return'background:rgba(16,185,129,0.40)';return'background:rgba(5,150,105,0.50)'}
+    html+=`<div class="tt-per" style="font-size:.55rem;white-space:nowrap">Non<br>Lesson</div>`;
+    for(let d=0;d<5;d++){
+      const sc2=nlByDay[d];const heat=heatBgNL(nlScores[d]||0);
+      if(sc2.hp||sc2.poc){
+        const parts=[];if(sc2.hp)parts.push(`<span style="color:#065f46">${sc2.hp} HP</span>`);if(sc2.poc)parts.push(`<span style="color:#075985">${sc2.poc} POC</span>`);
+        html+=`<div class="tt-cell" style="border-left:2px solid var(--mu);${heat}"><span style="font-size:.65rem;font-weight:500;font-family:'JetBrains Mono',monospace;text-shadow:0 0 2px rgba(255,255,255,.6)">${parts.join(', ')}</span></div>`;
+      }else{
+        html+=`<div class="tt-cell"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
+      }
+    }
+  }
+  html+='</div>';
+  if(!pHP.length) html+=`<div style="font-size:.7rem;color:var(--mu);padding:.4rem 0">No house points recorded for ${ayLabel(ay)}.</div>`;
+  html+='</div></div>';
+  wrap.innerHTML=html;
+}
+
 // ── PUPIL VIEW ──
 function rP(){
   const x=parseInt(document.getElementById('p-sel').value);if(!x)return;
@@ -1690,6 +1910,7 @@ function rP(){
     // Still render timetable, sanctions, network, attendance table
     renderTimetable(x);
     renderAbsencePattern(x,'p-abs-pattern');
+    renderHPTimetable(x);
     return;
   }
   // lp = "current" period for grade display. Default to last period; but if the last
@@ -1985,11 +2206,13 @@ function rP(){
   // Render timetable grid
   renderTimetable(x);
   renderAbsencePattern(x,'p-abs-pattern');
+  renderHPTimetable(x);
 
   // Section titles
   document.getElementById('p-acad-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Academic Performance</div>`;
   document.getElementById('p-behav-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Behaviour Performance</div>`;
   document.getElementById('p-dist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Sanctions Distribution</div>`;
+  document.getElementById('p-dist-hp-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">House Points Distribution</div>`;
   document.getElementById('p-hist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Historic Grades</div>`;
 
   if(hasGrades&&isA){
@@ -2044,66 +2267,9 @@ function rP(){
   dc('pab');dc('pef');
   if(hasGrades){
   const labs=pp.map(p=>PL[PER.indexOf(p)]);
-  // Determine the y-axis mode based on the pupil's current year group.
-  // Y10+ pupils: GCSE 1-9 axis (OTA-native). KS3 history (when present) renders as ribbons.
-  // Y9 and below: B-E letter axis (1-7), unchanged from before.
-  const pupilYG=curYG(ink);
-  const useGcseAxis=pupilYG>=10;
-  const axisHeaderLabel=useGcseAxis?'GCSE 1-9':'B-E (7=Excellent)';
-  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${axisHeaderLabel})</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
-  // Build datasets — for each visible subject, build the value series.
-  // GCSE-axis mode (Y10+): if entry has OTA (sc[s][2]), use it as the line point; if only letter, render as a band (upper/lower via inverted mapping).
-  // B-E-axis mode (KS3): legacy behaviour, single line per subject at AS[AM[letter]].
-  const abDS=[];
-  act.forEach((s,i)=>{
-    const colour=`hsl(${i*360/act.length},58%,56%)`;
-    const ptR=isA?2:4;
-    const bw=isA?1:2.5;
-    const subjLabel=isA?s:pu.id;
-    if(useGcseAxis){
-      // Build per-period: precise OTA point (Y10+ data) OR band (KS3 letter only)
-      const linePts=[],bandUp=[],bandLo=[];
-      pp.forEach(p=>{
-        const entry=data[p]?.sc[s];
-        if(!entry){linePts.push(null);bandUp.push(null);bandLo.push(null);return}
-        const ota=entry[2];
-        if(ota!=null&&ota!==''){
-          const otaN=typeof ota==='number'?ota:(ota==='U'?0:parseInt(ota));
-          linePts.push(isNaN(otaN)?null:otaN);
-          bandUp.push(null);bandLo.push(null);
-        }else if(entry[0]){
-          // KS3 letter — render as a band
-          const rng=letterToGcseRange(entry[0]);
-          if(rng){
-            linePts.push(null);
-            bandUp.push(rng[1]);
-            bandLo.push(rng[0]);
-          }else{linePts.push(null);bandUp.push(null);bandLo.push(null)}
-        }else{linePts.push(null);bandUp.push(null);bandLo.push(null)}
-      });
-      // Push upper bound (transparent), lower bound (transparent, fills upward into upper).
-      // Order matters in Chart.js: upper first then lower with fill:'-1' fills BETWEEN them.
-      const hasBand=bandUp.some(v=>v!=null);
-      if(hasBand){
-        abDS.push({label:`${subjLabel} (KS3 range)`,data:bandUp,borderColor:'transparent',backgroundColor:colour.replace(',58%,56%)',',58%,56%,.18)').replace('hsl(','hsla('),borderWidth:0,pointRadius:0,fill:false,yAxisID:'y',_isBand:true,_pair:`${i}`,spanGaps:false});
-        abDS.push({label:`${subjLabel} (KS3 range low)`,data:bandLo,borderColor:'transparent',backgroundColor:colour.replace(',58%,56%)',',58%,56%,.18)').replace('hsl(','hsla('),borderWidth:0,pointRadius:0,fill:'-1',yAxisID:'y',_isBand:true,_pair:`${i}`,spanGaps:false});
-      }
-      // Then the precise OTA line, on top — only includes Y10+ points, gaps for KS3 periods (handled by spanGaps:false)
-      abDS.push({label:subjLabel,data:linePts,borderColor:colour,tension:.4,pointRadius:ptR,borderWidth:bw,fill:false,yAxisID:'y',spanGaps:false});
-    }else{
-      // KS3 pupil — legacy B-E axis
-      abDS.push({label:subjLabel,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:colour,tension:.4,pointRadius:ptR,borderWidth:bw,fill:false,yAxisID:'y'});
-    }
-  });
-  // Cohort average (single-subject view only) — uses same axis logic as primary subjects
-  if(!isA){
-    if(useGcseAxis){
-      abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const otas=rs.map(r=>{const e=r[3][sf];if(!e)return null;const ota=e[2];if(ota!=null&&ota!==''){const n=typeof ota==='number'?ota:(ota==='U'?0:parseInt(ota));return isNaN(n)?null:n}// KS3 fallback — use range midpoint
-const rng=letterToGcseRange(e[0]);return rng?(rng[0]+rng[1])/2:null}).filter(v=>v!=null);return otas.length?parseFloat((otas.reduce((a,b)=>a+b,0)/otas.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'});
-    }else{
-      abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'});
-    }
-  }
+  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
+  const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:`hsl(${i*360/act.length},58%,56%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
+  if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay: subject-specific when single subject, overall when all
   const pAtt=ABP[String(x)];
   const pAttS=ABPS[String(x)];
@@ -2116,13 +2282,7 @@ const rng=letterToGcseRange(e[0]);return rng?(rng[0]+rng[1])/2:null}).filter(v=>
     const attLabel=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     abDS.push({label:attLabel,data:attData,borderColor:'#34d399',backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:'#34d399',tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  // Y-axis config switches based on mode
-  const yScale=useGcseAxis
-    ?{min:0,max:9,position:'left',ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>Number.isInteger(v)&&v>=1&&v<=9?'GCSE '+v:''},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
-    :{min:1,max:7,position:'left',ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}};
-  // Hide band datasets from the legend (they're paired with the visible line)
-  const legendFilter=(legendItem,chartData)=>{const ds=chartData.datasets[legendItem.datasetIndex];return !ds._isBand};
-  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:7,padding:6,filter:legendFilter}},tooltip:{filter:(item)=>{const ds=item.dataset;return !ds._isBand}}},scales:{y:yScale,y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#666666',font:{size:8}},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
+  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,position:'left',ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#666666',font:{size:8}},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
   const efDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][1]||null:null),borderColor:`hsl(${i*360/act.length},58%,56%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay on effort chart
@@ -2932,6 +3092,40 @@ function rHeatmaps(x,ink,subjFilter){
       distTip.style.left=left+'px';distTip.style.top=top+'px';
     });
     distWrap.addEventListener('mouseleave',()=>{distTip.style.display='none'});
+  },50);
+
+  // ── House Points distribution (mirror of the sanctions distribution) ──
+  const hpAySet=new Set();
+  function getHPAY(ds){const d2=new Date(ds+'T12:00:00');const m=d2.getMonth(),y=d2.getFullYear();const ayS=m>=8?y:y-1;const lbl=`${ayS}-${(ayS+1)%100}`;hpAySet.add(lbl);return lbl}
+  const _hpAll=DD.housePoints||[];
+  const hpParsed=_hpAll.filter(r=>r[0]===x).map(r=>({t:r[1],d:r[2],s:r[3]||'Non-Lesson',p:r[4],ay:getHPAY(r[2])}));
+  const hpAyLabels=[...hpAySet].sort();
+  window._hpDistCtx={hpParsed,hpAyLabels,ayColors,ink};
+  document.getElementById('p-dist-hp').innerHTML=`
+    <div style="margin-bottom:.6rem"><select id="hpdist-yg-filter" onchange="renderHPDistCharts()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${distYGOpts.join('')}</select></div>
+    <div class="ch-g" style="position:relative">
+      <div class="chc"><div class="cht">House Points by Subject</div><div id="hpdist-subj"></div></div>
+      <div class="chc"><div class="cht">House Points by Type</div><div id="hpdist-type"></div></div>
+      <div class="chc"><div class="cht">House Points by Day of Week</div><div id="hpdist-dow-legend"></div><div id="hpdist-dow"></div></div>
+      <div class="chc"><div class="cht">House Points by Period</div><div id="hpdist-les"></div></div>
+      <div id="hpdist-tip" style="display:none;position:fixed;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:400px;z-index:999"></div>
+    </div>`;
+  renderHPDistCharts();
+  setTimeout(()=>{
+    const w=document.getElementById('p-dist-hp');const tip=document.getElementById('hpdist-tip');
+    if(!w||!tip) return;
+    w.addEventListener('mousemove',ev=>{
+      const el=ev.target.closest('[data-hpdist-tip]');
+      if(!el){tip.style.display='none';return}
+      const html=window._hpDistTipData?.[el.getAttribute('data-hpdist-tip')];
+      if(!html){tip.style.display='none';return}
+      tip.innerHTML=html;tip.style.display='block';
+      let left=ev.clientX+15,top=ev.clientY+15;
+      if(left+400>window.innerWidth) left=ev.clientX-415;
+      if(top+tip.offsetHeight>window.innerHeight) top=Math.max(5,ev.clientY-tip.offsetHeight-10);
+      tip.style.left=left+'px';tip.style.top=top+'px';
+    });
+    w.addEventListener('mouseleave',()=>{tip.style.display='none'});
   },50);
 }
 
@@ -4525,6 +4719,89 @@ function renderDistCharts(){
   typeGrid+='</div>';
   document.getElementById('dist-type').innerHTML=typeGrid;
   window._distTipData=distTipData;
+}
+
+// House-point distribution charts — mirror of renderDistCharts. Two types only
+// (House Point / Positive on-call); no reason/category breakdown.
+function renderHPDistCharts(){
+  const ctx=window._hpDistCtx;
+  if(!ctx) return;
+  const {hpParsed:all,hpAyLabels:allAy,ayColors}=ctx;
+  const filterVal=document.getElementById('hpdist-yg-filter')?.value||'all';
+  let filtered=all, visAy=allAy;
+  if(filterVal!=='all'){const ay=parseInt(filterVal);const lbl=`${ay}-${(ay+1)%100}`;filtered=all.filter(r=>r.ay===lbl);visAy=[lbl]}
+
+  const tipData={};
+  const dowNames=['Mon','Tue','Wed','Thu','Fri'];
+  const TLAB=['House Points','Positive on-calls'];const TSHORT=['HP','POC'];const TCOL=['#34d399','#0ea5e9'];
+  const noun=n=>`${n} house point${n!==1?'s':''}`;
+  function typeBody(items){const c=[0,0];items.forEach(r=>c[r.t]++);return`<div>${TLAB.map((n,i)=>c[i]?`<span style="color:${TCOL[i]};font-weight:600">${c[i]} ${n}</span>`:null).filter(Boolean).join(' · ')}</div>`}
+
+  // DOW
+  const dowAyCounts={},dowItems={};
+  filtered.forEach(r=>{const d2=new Date(r.d+'T12:00:00');const dow=d2.getDay();if(dow>=1&&dow<=5){const k=dow-1;if(!dowAyCounts[k])dowAyCounts[k]={};dowAyCounts[k][r.ay]=(dowAyCounts[k][r.ay]||0)+1;if(!dowItems[k])dowItems[k]=[];dowItems[k].push(r)}});
+  const dowTotals=dowNames.map((_,i)=>visAy.reduce((s,ay)=>(s+(dowAyCounts[i]?.[ay]||0)),0));
+  const maxDowT=Math.max(...dowTotals,1);
+  dowNames.forEach((name,i)=>{tipData['dow-'+i]=`<div style="font-weight:600;font-size:.8rem;margin-bottom:.3rem;color:var(--tx)">${name}</div><div style="font-size:.72rem;color:var(--mu);margin-bottom:.3rem">${noun(dowTotals[i])}</div>${typeBody(dowItems[i]||[])}`});
+  const dowGrid=`<div style="display:flex;gap:.35rem;align-items:flex-end">${dowNames.map((name,i)=>{
+    const total=dowTotals[i];const h=Math.max(8,Math.round(total/maxDowT*80));
+    const segments=visAy.map((ay,ai)=>{const c=dowAyCounts[i]?.[ay]||0;if(!c)return'';const sh=Math.max(1,Math.round(c/total*h));return`<div style="width:100%;height:${sh}px;background:${ayColors[ai%ayColors.length]}"></div>`}).join('');
+    return`<div style="display:flex;flex-direction:column;align-items:center;gap:.2rem;cursor:pointer" data-hpdist-tip="dow-${i}"><div style="width:36px;height:${h}px;border-radius:3px;overflow:hidden;display:flex;flex-direction:column-reverse">${segments}</div><span style="font-size:.6rem;font-family:'JetBrains Mono',monospace;color:var(--tx)">${total||''}</span><span style="font-size:.65rem;color:var(--mu)">${name}</span></div>`;
+  }).join('')}</div>`;
+
+  // Period + N/L
+  const lesAyCounts={},lesItems={};const lesNames=['P1','P2','P3','P4','P5','N/L'];
+  filtered.forEach(r=>{const k=(r.p>=1&&r.p<=5)?r.p-1:5;if(!lesAyCounts[k])lesAyCounts[k]={};lesAyCounts[k][r.ay]=(lesAyCounts[k][r.ay]||0)+1;if(!lesItems[k])lesItems[k]=[];lesItems[k].push(r)});
+  const lesTotals=lesNames.map((_,i)=>visAy.reduce((s,ay)=>(s+(lesAyCounts[i]?.[ay]||0)),0));
+  const maxLesT=Math.max(...lesTotals,1);
+  lesNames.forEach((name,i)=>{tipData['les-'+i]=`<div style="font-weight:600;font-size:.8rem;margin-bottom:.3rem;color:var(--tx)">${name}</div><div style="font-size:.72rem;color:var(--mu);margin-bottom:.3rem">${noun(lesTotals[i])}</div>${typeBody(lesItems[i]||[])}`});
+  const lesGrid=`<div style="display:flex;gap:.35rem;align-items:flex-end">${lesNames.map((name,i)=>{
+    const total=lesTotals[i];const h=Math.max(8,Math.round(total/maxLesT*80));
+    const segments=visAy.map((ay,ai)=>{const c=lesAyCounts[i]?.[ay]||0;if(!c)return'';const sh=Math.max(1,Math.round(c/total*h));return`<div style="width:100%;height:${sh}px;background:${ayColors[ai%ayColors.length]}"></div>`}).join('');
+    return`<div style="display:flex;flex-direction:column;align-items:center;gap:.2rem;cursor:pointer" data-hpdist-tip="les-${i}"><div style="width:36px;height:${h}px;border-radius:3px;overflow:hidden;display:flex;flex-direction:column-reverse">${segments}</div><span style="font-size:.6rem;font-family:'JetBrains Mono',monospace;color:var(--tx)">${total||''}</span><span style="font-size:.65rem;color:var(--mu)">${name}</span></div>`;
+  }).join('')}</div>`;
+
+  // Subject
+  const subjAyCounts={},subjItems={};
+  filtered.forEach(r=>{if(!r.s)return;if(!subjAyCounts[r.s])subjAyCounts[r.s]={};subjAyCounts[r.s][r.ay]=(subjAyCounts[r.s][r.ay]||0)+1;if(!subjItems[r.s])subjItems[r.s]=[];subjItems[r.s].push(r)});
+  const subjTotals={};for(const[s,ays]of Object.entries(subjAyCounts))subjTotals[s]=Object.values(ays).reduce((a,b)=>a+b,0);
+  const subjsSorted=Object.keys(subjTotals).sort((a,b)=>subjTotals[b]-subjTotals[a]);
+  const maxSubj=Math.max(...Object.values(subjTotals),1);
+  subjsSorted.forEach(s=>{
+    const items=subjItems[s]||[];const total=subjTotals[s];
+    let h=`<div style="font-weight:600;font-size:.8rem;margin-bottom:.3rem;color:var(--tx)">${s}</div><div style="font-size:.72rem;color:var(--mu);margin-bottom:.3rem">${noun(total)}</div>${typeBody(items)}`;
+    const ayData=visAy.map(ay=>{const ai=items.filter(r=>r.ay===ay);const c=[0,0];ai.forEach(r=>c[r.t]++);return{ay,hp:c[0],poc:c[1],total:c[0]+c[1]}}).filter(d=>d.total>0);
+    if(ayData.length){
+      h+=`<table style="width:100%;border-collapse:collapse;font-size:.68rem;margin-top:.3rem"><thead><tr style="border-bottom:1px solid rgba(38,45,68,.3)"><th style="text-align:left;color:var(--mu);padding:.15rem .3rem">Year</th><th style="text-align:center;color:${TCOL[0]};padding:.15rem .3rem">HP</th><th style="text-align:center;color:${TCOL[1]};padding:.15rem .3rem">POC</th></tr></thead><tbody>`;
+      ayData.forEach(d=>{h+=`<tr style="border-bottom:1px solid rgba(38,45,68,.15)"><td style="padding:.15rem .3rem;color:var(--mu)">${d.ay}</td><td style="text-align:center;padding:.15rem .3rem;font-family:'JetBrains Mono',monospace">${d.hp||'—'}</td><td style="text-align:center;padding:.15rem .3rem;font-family:'JetBrains Mono',monospace">${d.poc||'—'}</td></tr>`});
+      h+=`</tbody></table>`;
+    }
+    tipData['subj-'+s]=h;
+  });
+  const subjGrid=`<div style="display:flex;flex-direction:column;gap:.3rem">
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.3rem">${visAy.map((ay,i)=>`<span style="font-size:.6rem;color:${ayColors[i%ayColors.length]}">● ${ay}</span>`).join('')}</div>
+    ${subjsSorted.map(s=>{
+      const total=subjTotals[s];const maxBarW=200;
+      return`<div style="display:flex;align-items:center;gap:.4rem;cursor:pointer" data-hpdist-tip="subj-${s}"><span style="font-size:.65rem;color:var(--mu);min-width:12rem;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s}</span><div style="display:flex;height:14px;border-radius:2px;overflow:hidden">${visAy.map((ay,ai)=>{const c2=subjAyCounts[s]?.[ay]||0;if(!c2)return'';const w=Math.max(2,Math.round(c2/maxSubj*maxBarW));return`<div style="width:${w}px;background:${ayColors[ai%ayColors.length]}"></div>`}).join('')}</div><span style="font-size:.62rem;font-family:'JetBrains Mono',monospace;color:var(--mu)">${total}</span></div>`;
+    }).join('')}</div>`;
+
+  // Type chart — House Points vs Positive on-calls
+  const typeVals=[filtered.filter(r=>r.t===0).length, filtered.filter(r=>r.t===1).length];
+  const maxType=Math.max(...typeVals,1);
+  let typeGrid='<div style="display:flex;flex-direction:column;gap:.35rem">';
+  TLAB.forEach((lbl,i)=>{
+    const pct=maxType>0?(typeVals[i]/maxType*100):0;
+    typeGrid+=`<div style="display:flex;align-items:center;gap:.5rem"><span style="min-width:6rem;font-size:.68rem;color:var(--tx);text-align:right">${lbl}</span><div style="flex:1;height:18px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${TCOL[i]};border-radius:3px;transition:width .3s"></div></div><span style="min-width:2rem;font-size:.68rem;font-family:'JetBrains Mono',monospace;color:var(--tx);font-weight:600">${typeVals[i]}</span></div>`;
+  });
+  typeGrid+=`<div style="font-size:.6rem;color:var(--mu);margin-top:.3rem">Weighted: 1 HP = ${hpWeight(0)} · 1 POC = ${hpWeight(1)} pts</div></div>`;
+
+  const empty=!filtered.length;
+  document.getElementById('hpdist-dow-legend').innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.4rem">${visAy.map((ay,i)=>`<span style="font-size:.6rem;color:${ayColors[i%ayColors.length]}">● ${ay}</span>`).join('')}</div>`;
+  document.getElementById('hpdist-dow').innerHTML=empty?'<div style="font-size:.7rem;color:var(--mu)">No house points</div>':dowGrid;
+  document.getElementById('hpdist-les').innerHTML=empty?'<div style="font-size:.7rem;color:var(--mu)">No house points</div>':lesGrid;
+  document.getElementById('hpdist-subj').innerHTML=empty?'<div style="font-size:.7rem;color:var(--mu)">No house points</div>':subjGrid;
+  document.getElementById('hpdist-type').innerHTML=typeGrid;
+  window._hpDistTipData=tipData;
 }
 
 function renderAttTable(){
@@ -8796,6 +9073,8 @@ function rPeer(){
   window.renderPupilNet=renderPupilNet;
   window.renderAttTable=renderAttTable;
   window.renderDistCharts=renderDistCharts;
+  window.renderHPDistCharts=renderHPDistCharts;
+  window.renderHPTimetable=renderHPTimetable;
   window.peerAddRow=peerAddRow;
   window.peerDelRow=peerDelRow;
   window.rPeer=rPeer;
