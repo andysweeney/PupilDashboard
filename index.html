@@ -63,41 +63,50 @@ table.d tr:hover td{background:var(--sf2)}
 #ct-modal.ct-show{display:block!important}
 #ct-modal.ct-show~#ct-overlay{display:block!important}
 @media print {
-  @page { size: A4 landscape; margin: 0.8cm; }
-  body { background: #fff !important; color: #1b2231 !important; font-size: 9pt; }
-  header, .ctl, #ct-modal, #sw-modal, #ct-overlay, .tb { display: none !important; }
-  .vw { display: block !important; }
-  .vw:not(.on) { display: none !important; }
-  .dw, .crd, .chc { background: #fff !important; border-color: #e6dfd0 !important; box-shadow: none !important; }
-  .crd-g, .ch-g { page-break-inside: avoid; }
-  #p-acad-title, #p-behav-title, #p-dist-title, #p-hist-title { page-break-before: avoid; }
-  #p-hd, #p-acad-title, #p-crds, #p-ch { page-break-inside: avoid; }
-  #p-tt, #p-sanc, #p-sanc-subj, #p-heatmaps { page-break-inside: avoid; }
-  #p-dist { page-break-inside: avoid; }
-  #p-pupil-net { page-break-inside: avoid; }
-  #p-tbl { page-break-inside: avoid; }
-  /* Hide tooltips and scrollbars */
-  #hm-tip, #dist-tip, #net-tip, #pnet-tip { display: none !important; }
-  /* Remove scrollable overflow for print */
-  [style*="overflow-x:auto"], [style*="overflow-x: auto"] { overflow-x: visible !important; }
-  div[style*="overflow:hidden"] { overflow: visible !important; }
-  /* Ensure SVGs and colours print */
-  svg, .bg, .ed, .e1, .e2, .e3, .e4 { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-  /* Charts fit on page */
-  canvas { max-height: 200px !important; }
-  .chw { height: 180px !important; max-height: 180px !important; }
-  /* Sanctions chart container */
-  #p-sanc .dw, #p-sanc-subj .dw { max-width: 100% !important; overflow: visible !important; }
-  #p-sanc [style*="height:clamp"], #p-sanc-subj [style*="height:clamp"] { height: 150px !important; }
-  /* Network graphs scale down */
-  #p-pupil-net svg, #cl-network svg { max-height: 350px !important; }
-  /* Compact cards */
-  .crd-g { gap: 0.5rem !important; }
-  .ch-g { gap: 0.5rem !important; }
-  /* Table font size */
-  .d { font-size: 7pt !important; }
-  .d th, .d td { padding: 2px 4px !important; }
+  @page { size: A4 portrait; margin: 14mm 11mm 15mm 11mm; }
+
+  /* force true-colour printing (browsers drop backgrounds by default) */
+  *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  body { background:#fff !important; background-image:none !important; color:var(--tx) !important; font-size:9pt; }
+
+  /* hide interactive chrome; print only the active Pupil view */
+  header, .ctl, .tb, button, select, input,
+  #ct-modal, #sw-modal, #ct-overlay,
+  #hm-tip, #dist-tip, #net-tip, #pnet-tip,
+  .print-hide { display:none !important; }
+  .vw { display:none !important; }
+  .vw.on { display:block !important; }
+
+  /* cards become clean sheet blocks */
+  .dw, .crd, .chc { background:#fff !important; border:1px solid var(--bd) !important; box-shadow:none !important; break-inside:avoid; }
+
+  /* keep logical blocks whole; the 4 sheet dividers already use page-break-before:always */
+  .crd-g, .ch-g, .ch-g > *, #p-hd, #p-crds, #p-ch, #p-tt, #p-tt-hp, #p-abs-pattern,
+  #p-att-spark, #p-sanc, #p-sanc-subj, #p-heatmaps, #p-dist, #p-dist-hp,
+  #p-pupil-net, #p-att-table, #p-tbl { break-inside:avoid; }
+  #p-acad-title, #p-behav-title, #p-dist-title, #p-dist-hp-title, #p-hist-title { break-after:avoid; }
+
+  /* charts: fixed page-friendly heights, canvases rasterise as-is */
+  canvas { max-height:165px !important; }
+  .ch-g { gap:.5rem !important; }
+  #p-sanc [style*="height:clamp"], #p-sanc-subj [style*="height:clamp"] { height:150px !important; }
+  #p-pupil-net svg, #cl-network svg { max-height:300px !important; }
+
+  /* fit wide content to portrait width */
+  #pupil [style*="overflow-x:auto"], #pupil [style*="overflow-x: auto"] { overflow-x:visible !important; }
+  #pupil .tt-grid { max-width:100% !important; }
+  .d { font-size:7pt !important; }
+  .d th, .d td { padding:2px 4px !important; }
+
+  /* print-only document furniture */
+  .print-only { display:block !important; }
+  #print-masthead { border-bottom:2px solid var(--tx); padding-bottom:.4rem; margin-bottom:.8rem; }
+  .print-footer { position:fixed; bottom:3mm; left:0; right:0; text-align:center;
+    font-size:7pt; letter-spacing:.1em; text-transform:uppercase; color:var(--mu); }
 }
+.print-only { display:none; }
+
 /* ── Paper re-skin foundation: type hierarchy + card polish ── */
 h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-height:1.06}
 .cv2{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-size:1.7rem}
@@ -141,6 +150,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div class="cg"><label>Pupil</label><select id="p-sel" onchange="rP()"></select></div>
 <div class="cg"><label>Subject</label><select id="p-sf"><option value="all">All Subjects</option></select></div>
 </div>
+<div id="print-masthead" class="print-only"><div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-family:var(--serif);font-size:14pt;font-weight:600">Pupil Progress — Individual Pack</span><span style="font-size:7.5pt;text-transform:uppercase;letter-spacing:.1em;color:var(--red);font-weight:600">Confidential · SLT use only</span></div><div style="font-size:7.5pt;color:var(--mu);margin-top:.15rem">Generated <span id="print-date"></span> · figures as shown on screen</div></div>
 <div id="p-hd"></div>
 <div id="p-acad-title" style="margin-bottom:.5rem"></div>
 <div class="crd-g" id="p-crds"></div>
@@ -164,6 +174,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div style="page-break-before:always"></div>
 <div id="p-hist-title" style="margin-bottom:.5rem"></div>
 <div id="p-tbl"></div>
+<div class="print-only print-footer">Pupil Progress · Confidential — SLT use only</div>
 </div>
 
 <div id="vw-compare" class="vw">
@@ -334,6 +345,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   const gv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const PAL={red:gv('--red'),redDeep:gv('--red-deep'),redBand:gv('--red-band'),rose:gv('--rose'),orange:gv('--orange'),orangeMid:gv('--orange-mid'),orangePale:gv('--orange-pale'),amber:gv('--amber'),gold:gv('--gold'),amberBand:gv('--amber-band'),orangeBand:gv('--orange-band'),green:gv('--green'),greenMid:gv('--green-mid'),greenDeep:gv('--green-deep'),greenDark:gv('--green-dark'),lime:gv('--lime'),greenBand:gv('--green-band'),greenBg:gv('--green-bg'),greenBg2:gv('--green-bg2'),teal:gv('--teal'),tealBright:gv('--teal-bright'),blue:gv('--blue'),sky:gv('--sky'),cyan:gv('--cyan'),blueBand:gv('--blue-band'),navy:gv('--navy'),tealDark:gv('--teal-dark'),indigo:gv('--indigo'),violet:gv('--violet'),lilac:gv('--lilac'),purple:gv('--purple'),plum:gv('--plum'),magenta:gv('--magenta'),pink:gv('--pink'),pinkDeep:gv('--pink-deep'),slate:gv('--slate'),amberBg:gv('--amber-bg')};
   Object.entries(PAL).forEach(([k,v])=>{if(!v)console.warn('PAL token empty:',k)});
+  try{const _pd=document.getElementById('print-date');if(_pd)_pd.textContent=new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});}catch(e){}
   let DD;
   try{
     const resp=await fetch('./data.json');
