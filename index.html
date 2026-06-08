@@ -881,6 +881,17 @@ let SW_CODE=1, SW_ONCALL=3, SW_DET=5;
 let GCSE_TO_LETTER = (DD.config && DD.config.gcse_to_letter) ? DD.config.gcse_to_letter : {
   '1':'B','2':'B','3':'D','4':'W','5':'M','6':'C','7':'C','8':'S','9':'E','U':'B'
 };
+// Inverse: given a B-E letter, return [min, max] GCSE-1-9 range it spans.
+// Derived from GCSE_TO_LETTER at call time so it reflects any Admin changes.
+function letterToGcseRange(letter){
+  if(!letter)return null;
+  const matches=[];
+  for(const[g,l]of Object.entries(GCSE_TO_LETTER)){
+    if(l===letter){const n=parseInt(g);if(!isNaN(n))matches.push(n)}
+  }
+  if(!matches.length)return null;
+  return[Math.min(...matches),Math.max(...matches)];
+}
 function sancWeight(type){return type===2?SW_DET:type===1?SW_ONCALL:SW_CODE}
 function applySW(){
   SW_CODE=parseInt(document.getElementById('sw-code').value)||1;
@@ -2033,9 +2044,66 @@ function rP(){
   dc('pab');dc('pef');
   if(hasGrades){
   const labs=pp.map(p=>PL[PER.indexOf(p)]);
-  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
-  const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:`hsl(${i*360/act.length},58%,56%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
-  if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
+  // Determine the y-axis mode based on the pupil's current year group.
+  // Y10+ pupils: GCSE 1-9 axis (OTA-native). KS3 history (when present) renders as ribbons.
+  // Y9 and below: B-E letter axis (1-7), unchanged from before.
+  const pupilYG=curYG(ink);
+  const useGcseAxis=pupilYG>=10;
+  const axisHeaderLabel=useGcseAxis?'GCSE 1-9':'B-E (7=Excellent)';
+  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${axisHeaderLabel})</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
+  // Build datasets — for each visible subject, build the value series.
+  // GCSE-axis mode (Y10+): if entry has OTA (sc[s][2]), use it as the line point; if only letter, render as a band (upper/lower via inverted mapping).
+  // B-E-axis mode (KS3): legacy behaviour, single line per subject at AS[AM[letter]].
+  const abDS=[];
+  act.forEach((s,i)=>{
+    const colour=`hsl(${i*360/act.length},58%,56%)`;
+    const ptR=isA?2:4;
+    const bw=isA?1:2.5;
+    const subjLabel=isA?s:pu.id;
+    if(useGcseAxis){
+      // Build per-period: precise OTA point (Y10+ data) OR band (KS3 letter only)
+      const linePts=[],bandUp=[],bandLo=[];
+      pp.forEach(p=>{
+        const entry=data[p]?.sc[s];
+        if(!entry){linePts.push(null);bandUp.push(null);bandLo.push(null);return}
+        const ota=entry[2];
+        if(ota!=null&&ota!==''){
+          const otaN=typeof ota==='number'?ota:(ota==='U'?0:parseInt(ota));
+          linePts.push(isNaN(otaN)?null:otaN);
+          bandUp.push(null);bandLo.push(null);
+        }else if(entry[0]){
+          // KS3 letter — render as a band
+          const rng=letterToGcseRange(entry[0]);
+          if(rng){
+            linePts.push(null);
+            bandUp.push(rng[1]);
+            bandLo.push(rng[0]);
+          }else{linePts.push(null);bandUp.push(null);bandLo.push(null)}
+        }else{linePts.push(null);bandUp.push(null);bandLo.push(null)}
+      });
+      // Push upper bound (transparent), lower bound (transparent, fills upward into upper).
+      // Order matters in Chart.js: upper first then lower with fill:'-1' fills BETWEEN them.
+      const hasBand=bandUp.some(v=>v!=null);
+      if(hasBand){
+        abDS.push({label:`${subjLabel} (KS3 range)`,data:bandUp,borderColor:'transparent',backgroundColor:colour.replace(',58%,56%)',',58%,56%,.18)').replace('hsl(','hsla('),borderWidth:0,pointRadius:0,fill:false,yAxisID:'y',_isBand:true,_pair:`${i}`,spanGaps:false});
+        abDS.push({label:`${subjLabel} (KS3 range low)`,data:bandLo,borderColor:'transparent',backgroundColor:colour.replace(',58%,56%)',',58%,56%,.18)').replace('hsl(','hsla('),borderWidth:0,pointRadius:0,fill:'-1',yAxisID:'y',_isBand:true,_pair:`${i}`,spanGaps:false});
+      }
+      // Then the precise OTA line, on top — only includes Y10+ points, gaps for KS3 periods (handled by spanGaps:false)
+      abDS.push({label:subjLabel,data:linePts,borderColor:colour,tension:.4,pointRadius:ptR,borderWidth:bw,fill:false,yAxisID:'y',spanGaps:false});
+    }else{
+      // KS3 pupil — legacy B-E axis
+      abDS.push({label:subjLabel,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:colour,tension:.4,pointRadius:ptR,borderWidth:bw,fill:false,yAxisID:'y'});
+    }
+  });
+  // Cohort average (single-subject view only) — uses same axis logic as primary subjects
+  if(!isA){
+    if(useGcseAxis){
+      abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const otas=rs.map(r=>{const e=r[3][sf];if(!e)return null;const ota=e[2];if(ota!=null&&ota!==''){const n=typeof ota==='number'?ota:(ota==='U'?0:parseInt(ota));return isNaN(n)?null:n}// KS3 fallback — use range midpoint
+const rng=letterToGcseRange(e[0]);return rng?(rng[0]+rng[1])/2:null}).filter(v=>v!=null);return otas.length?parseFloat((otas.reduce((a,b)=>a+b,0)/otas.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'});
+    }else{
+      abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'});
+    }
+  }
   // Attendance overlay: subject-specific when single subject, overall when all
   const pAtt=ABP[String(x)];
   const pAttS=ABPS[String(x)];
@@ -2048,7 +2116,13 @@ function rP(){
     const attLabel=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     abDS.push({label:attLabel,data:attData,borderColor:'#34d399',backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:'#34d399',tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,position:'left',ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#666666',font:{size:8}},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
+  // Y-axis config switches based on mode
+  const yScale=useGcseAxis
+    ?{min:0,max:9,position:'left',ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>Number.isInteger(v)&&v>=1&&v<=9?'GCSE '+v:''},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}}
+    :{min:1,max:7,position:'left',ticks:{color:'#666666',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#d4d4d4'}};
+  // Hide band datasets from the legend (they're paired with the visible line)
+  const legendFilter=(legendItem,chartData)=>{const ds=chartData.datasets[legendItem.datasetIndex];return !ds._isBand};
+  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#666666',font:{family:'Outfit',size:9},boxWidth:7,padding:6,filter:legendFilter}},tooltip:{filter:(item)=>{const ds=item.dataset;return !ds._isBand}}},scales:{y:yScale,y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:'#34d399',font:{size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#666666',font:{size:8}},grid:{display:false},border:{color:'#d4d4d4'}}}}}));
   const efDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][1]||null:null),borderColor:`hsl(${i*360/act.length},58%,56%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay on effort chart
