@@ -5072,7 +5072,7 @@ function renderPupilNet(){
     if(!coSancSubjs[s[0]])coSancSubjs[s[0]]=new Set();
     coSancSubjs[s[0]].add(s[3]);
   });
-  const coEntries=Object.entries(coSancW).map(([px2,w])=>({px:parseInt(px2),w,subjs:[...coSancSubjs[px2]].sort()})).sort((a,b)=>b.w-a.w);
+  const coEntries=Object.entries(coSancW).map(([px2,w])=>({px:parseInt(px2),w,subjs:[...coSancSubjs[px2]].sort()})).filter(e=>e.w>=2).sort((a,b)=>b.w-a.w);
 
   // Detect groups: lessons where this pupil + 2+ others were all sanctioned
   const pnGroups=[];// [{members:[px,...], count, size}]
@@ -5102,7 +5102,7 @@ function renderPupilNet(){
   const container=document.getElementById('pnet-container');
 
   if(!coEntries.length){
-    container.innerHTML=`<div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No co-sanctions found in ${selAY}-${selAY+1}</div>`;
+    container.innerHTML=`<div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No repeated co-sanctions (2+ shared lessons) in ${selAY}-${selAY+1}</div>`;
     return;
   }
 
