@@ -4543,8 +4543,15 @@ function rPP(){
   }
 
   const lessonMap={};
+  // Identify each sanction's actual set by the slot's teaching teacher (per academic year),
+  // so different sets of the same subject in the same period aren't merged into one "lesson".
+  // Falls back to subject-level grouping for years with no teacher data yet (e.g. historical
+  // years exported before teachers were included); auto-corrects once those are imported.
+  const _stBY=DD.slotTeachersByAY||{};
+  const _ayOf2=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
+  const _slotTeacher=s=>{const g=(_stBY[_ayOf2(s[2])]||{})[String(s[0])];if(!g)return null;const dow=new Date(s[2]+'T00:00:00').getDay()-1,per=(s[4]||1)-1;if(dow<0||dow>4||per<0||per>4)return null;const cell=g[dow]&&g[dow][per];return cell&&cell.length?cell[0][0]:null;};
   SAN.filter(s=>s[2]<=_ppTodayISO&&s[3]!=null&&(!pupilSet||pupilSet.has(s[0]))).forEach(s=>{
-    const cls=pupilClassMap[s[0]+'|'+s[3]]||'?';
+    const _t=_slotTeacher(s);const cls=_t!=null?('T'+_t):'?';
     const key=`${s[2]}|${s[4]}|${s[3]}|${cls}`;
     if(!lessonMap[key])lessonMap[key]=[];
     lessonMap[key].push(s[0]);
@@ -6908,7 +6915,8 @@ function rPeer(){
   // Compute disproportionate sanctions for a pupil
   function getSanctionsConcentration(px){
     const SAN=DD.sanctions||[];
-    const pSan=SAN.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null); // Codes with subject only
+    const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
+    const pSan=SAN.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null&&_ayOf(s[2])===String(CAY)); // Codes with subject only — CURRENT academic year (matches the current-year timetable used below)
     if(pSan.length<SA_MIN_TOTAL) return[];
 
     // Get pupil's timetable to compute expected teacher share
@@ -7107,7 +7115,8 @@ function rPeer(){
       if(cell) p1Subjs[d2]=_SKR2[cell[0]]||cell[0];
     }
 
-    const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
+    const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
+    const pAbsSubj=((DD.attAbsSubj||{})[String(px)]||[]).filter(r=>_ayOf(r[0])===String(CAY)); // CURRENT academic year only (matches the current-year timetable used for LPW / P1)
     const _supp=getSuppressed(px);
 
     // Bucket absences per date to determine partial vs whole day
@@ -7408,7 +7417,7 @@ function rPeer(){
       items.push({label:'Sanctions Accelerating',severity:sev,detail:`${fn} has had ${sCount20} sanctions in the last 20 school days (a weighted score of ${s20.toFixed(1)} compared with their weighted 60 school day average of ${s60.toFixed(1)}). This is ${(s20/s60).toFixed(1)}× the rolling weighted average.`});
     }
     // 4. Absence Pattern (slot-level)
-    const absAnalysis=analyseAbsencePattern(px);
+    const absAnalysis=analyseAbsencePattern(px, String(CAY));
     if(absAnalysis&&absAnalysis.slotFlags&&absAnalysis.slotFlags.length){
       const sortedFlags=absAnalysis.slotFlags.slice().sort((a,b)=>b.rate-a.rate);
       const worst=sortedFlags[0];
@@ -8741,7 +8750,7 @@ function rPeer(){
       });
 
       // 5. Absence pattern flags
-      const absAnalysis=analyseAbsencePattern(px);
+      const absAnalysis=analyseAbsencePattern(px, String(CAY));
       if(absAnalysis.slotFlags.length){
         const worst=absAnalysis.slotFlags.sort((a,b)=>b.rate-a.rate)[0];
         const overallTxt = worst.pupilOverallRate!=null ? ` vs ${worst.pupilOverallRate.toFixed(0)}% overall` : '';
