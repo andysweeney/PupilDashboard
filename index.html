@@ -368,6 +368,27 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   const gv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const PAL={red:gv('--red'),redDeep:gv('--red-deep'),redBand:gv('--red-band'),rose:gv('--rose'),orange:gv('--orange'),orangeMid:gv('--orange-mid'),orangePale:gv('--orange-pale'),amber:gv('--amber'),gold:gv('--gold'),amberBand:gv('--amber-band'),orangeBand:gv('--orange-band'),green:gv('--green'),greenMid:gv('--green-mid'),greenDeep:gv('--green-deep'),greenDark:gv('--green-dark'),lime:gv('--lime'),greenBand:gv('--green-band'),greenBg:gv('--green-bg'),greenBg2:gv('--green-bg2'),teal:gv('--teal'),tealBright:gv('--teal-bright'),blue:gv('--blue'),sky:gv('--sky'),cyan:gv('--cyan'),blueBand:gv('--blue-band'),navy:gv('--navy'),tealDark:gv('--teal-dark'),indigo:gv('--indigo'),violet:gv('--violet'),lilac:gv('--lilac'),purple:gv('--purple'),plum:gv('--plum'),magenta:gv('--magenta'),pink:gv('--pink'),pinkDeep:gv('--pink-deep'),slate:gv('--slate'),amberBg:gv('--amber-bg')};
   Object.entries(PAL).forEach(([k,v])=>{if(!v)console.warn('PAL token empty:',k)});
+  // ── Canonical incident (sanction "code") categories: single source of truth
+  // for the Admin dropdown, short tags, colours and the B/U/E/A-style breakdowns.
+  const INC_CATS=[
+    {id:'Behaviour',     short:'B',  key:'b',  color:PAL.red},
+    {id:'Uniform',       short:'U',  key:'u',  color:PAL.orange},
+    {id:'Equipment',     short:'E',  key:'e',  color:PAL.gold},
+    {id:'Attendance',    short:'A',  key:'a',  color:PAL.sky},
+    {id:'Welfare',       short:'W',  key:'w',  color:PAL.cyan},
+    {id:'Home Learning', short:'H',  key:'hl', color:PAL.lilac},
+    {id:'On-Call',       short:'OC', key:'oc', color:PAL.magenta},
+    {id:'Other',         short:'O',  key:'o',  color:PAL.slate}
+  ];
+  const INC_BY_ID={}; INC_CATS.forEach(c=>INC_BY_ID[c.id]=c);
+  function incCatKey(cat){const c=INC_BY_ID[cat];return c?c.key:'o';}          // unknown -> Other (was Behaviour)
+  function incCatShort(cat){const c=INC_BY_ID[cat];return c?c.short:'O';}      // Other -> 'O' (was '?')
+  function incCatInc(obj,cat){const k=incCatKey(cat);obj[k]=(obj[k]||0)+1;}    // bucket increment
+  function incCatShortParts(c){return INC_CATS.map(x=>c[x.key]?c[x.key]+x.short:'').filter(Boolean);}
+  function incCatShortStr(c){return incCatShortParts(c).join(' ');}
+  function incCatLongParts(c){return INC_CATS.map(x=>c[x.key]?c[x.key]+' '+x.id:'').filter(Boolean);}
+  function incCatColonParts(c){return INC_CATS.map(x=>c[x.key]?x.id+': '+c[x.key]:'').filter(Boolean);}
+  function incCatTotal(c){return INC_CATS.reduce((s,x)=>s+(c[x.key]||0),0);}
   try{const _pd=document.getElementById('print-date');if(_pd)_pd.textContent=new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});}catch(e){}
   // Re-layout charts for print so axes/labels fit the print box instead of being bitmap-scaled
   window.addEventListener('beforeprint',()=>{try{document.querySelectorAll('#p-ch .chw').forEach(w=>{w.dataset.sh=w.style.height||'';w.style.height='210px'});document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}});
@@ -377,6 +398,17 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     const resp=await fetch('./data.json');
     if(!resp.ok)throw new Error('Failed to load data.json: '+resp.status);
     DD=await resp.json();
+    // Default category fixes: surface on-calls, welfare and home-learning as their
+    // own categories rather than lumping them under Behaviour/Other. Admin edits override.
+    try{
+      const _ic=DD.config.incident_codes||(DD.config.incident_codes={});
+      Object.keys(_ic).forEach(reason=>{
+        const r=reason.toLowerCase();
+        if(/on.?call/.test(r)) _ic[reason]='On-Call';
+        else if(/welfare/.test(r)) _ic[reason]='Welfare';
+        else if(/home.?learning/.test(r)) _ic[reason]='Home Learning';
+      });
+    }catch(e){console.warn('category seed',e);}
   }catch(e){
     document.body.innerHTML='<div style="color:var(--red);padding:2rem;font-family:sans-serif"><b>Error loading data.json</b><br>'+e.message+'<br><br>Make sure you are running via a web server (not file://) and that data.json is in the same directory.</div>';
     return;
@@ -434,7 +466,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-4 (snapshot value at review) — uses ./dismissals.json (lowercase)');
+    console.log('[dsm] build dsm-5 (incident categories: Welfare/Home Learning/On-Call/Other) — uses ./dismissals.json (lowercase)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -1312,14 +1344,14 @@ function sancTipAttrs(codes,dets,cats,label){
 }
 // Compute category breakdown for a set of sanctions
 function sancCatsFor(pxOrSet,sanArr,sanDetArr){
-  const cats={b:0,u:0,e:0,a:0,d:0};
+  const cats={b:0,u:0,e:0,a:0,w:0,hl:0,oc:0,o:0,d:0};
   const isSet=pxOrSet instanceof Set;
   sanArr.forEach((s,i)=>{
     if(isSet?!pxOrSet.has(s[0]):s[0]!==pxOrSet) return;
     if(s[1]===2){cats.d++}
     else if(s[1]===0){
       const cat=sanDetArr[i]?sanDetArr[i][1]:'Other';
-      if(cat==='Behaviour')cats.b++;else if(cat==='Uniform')cats.u++;else if(cat==='Equipment')cats.e++;else if(cat==='Attendance')cats.a++;else cats.b++;
+      incCatInc(cats,cat);
     }
   });
   return cats;
@@ -1920,8 +1952,7 @@ function renderTimetable(x, ay){
       if(r[1]===2){slotSanc[key].d++;slotSubjSanc[sk3].d++}
       else{
         const cat=s.cat;
-        const t=cat==='Uniform'?'u':cat==='Behaviour'?'b':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';
-        slotSanc[key][t]++;slotSubjSanc[sk3][t]++;
+        incCatInc(slotSanc[key],cat);incCatInc(slotSubjSanc[sk3],cat);
       }
     }
   });
@@ -2428,8 +2459,8 @@ function rP(){
   const ayDetentions=aySanc.filter(r=>r[1]===2).length;
   // Category breakdown for codes
   const _ayCats={b:0,u:0,e:0,a:0};
-  aySanc.forEach((r,ri)=>{if(r[1]===0){const si=SAN_ALL.indexOf(r);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';if(cat==='Behaviour')_ayCats.b++;else if(cat==='Uniform')_ayCats.u++;else if(cat==='Equipment')_ayCats.e++;else if(cat==='Attendance')_ayCats.a++;else _ayCats.b++}});
-  const _ayCatParts=[];if(_ayCats.b)_ayCatParts.push(_ayCats.b+' Behaviour');if(_ayCats.u)_ayCatParts.push(_ayCats.u+' Uniform');if(_ayCats.e)_ayCatParts.push(_ayCats.e+' Equipment');if(_ayCats.a)_ayCatParts.push(_ayCats.a+' Attendance');
+  aySanc.forEach((r,ri)=>{if(r[1]===0){const si=SAN_ALL.indexOf(r);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';incCatInc(_ayCats,cat)}});
+  const _ayCatParts=incCatLongParts(_ayCats);
   const _ayCatStr=_ayCatParts.length?' ('+_ayCatParts.join(', ')+')':'';
 
   // Subject-specific sanctions for current AY
@@ -2985,7 +3016,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
               if(dets)lines.push(` Detentions: ${dets}`);
               return lines;
             },
-            afterBody:c=>{if(!c?.length)return'';const wi=c[0].dataIndex;const wk=wks[wi];const cat=wmCat[wk];if(!cat)return'';const total=cat.b+cat.u+cat.e+cat.a;if(!total&&!cat.d)return'';const lines=['───────'];if(cat.b)lines.push(`  Behaviour: ${cat.b}`);if(cat.u)lines.push(`  Uniform: ${cat.u}`);if(cat.e)lines.push(`  Equipment: ${cat.e}`);if(cat.a)lines.push(`  Attendance: ${cat.a}`);if(cat.d)lines.push(`  Detentions: ${cat.d}`);return lines}
+            afterBody:c=>{if(!c?.length)return'';const wi=c[0].dataIndex;const wk=wks[wi];const cat=wmCat[wk];if(!cat)return'';const total=incCatTotal(cat);if(!total&&!cat.d)return'';const lines=['───────'].concat(incCatColonParts(cat).map(s=>'  '+s));if(cat.d)lines.push(`  Detentions: ${cat.d}`);return lines}
           }
         }
       },
@@ -3117,7 +3148,7 @@ function rHeatmaps(x,ink,subjFilter){
   const daySubjCounts={};// {date: count for selected subject}
   const dayDetails={};// {date: [{type, subj, cat},...]}
   const TN2=['Code','On-Call','Detention'];
-  const CAT_SHORT={'Behaviour':'B','Uniform':'U','Equipment':'E','Attendance':'A','Detention':'D','Other':'?'};
+  const CAT_SHORT={'Behaviour':'B','Uniform':'U','Equipment':'E','Attendance':'A','Welfare':'W','Home Learning':'H','On-Call':'OC','Detention':'D','Other':'O'};
   psWithCat.forEach(s=>{
     const r=s.r;
     dayCounts[r[2]]=(dayCounts[r[2]]||0)+1;
@@ -3216,9 +3247,9 @@ function rHeatmaps(x,ink,subjFilter){
   function typeTipHtml(items){
     const c=[0,0,0];const subjMap={};const cats={b:0,u:0,e:0,a:0};
     items.forEach(r=>{c[r.t]++;if(!subjMap[r.s])subjMap[r.s]=[0,0,0];subjMap[r.s][r.t]++;
-      if(r.t===0){if(r.cat==='Behaviour')cats.b++;else if(r.cat==='Uniform')cats.u++;else if(r.cat==='Equipment')cats.e++;else if(r.cat==='Attendance')cats.a++;else cats.b++}
+      if(r.t===0){incCatInc(cats,r.cat)}
     });
-    const catParts=[];if(cats.b)catParts.push(`${cats.b}B`);if(cats.u)catParts.push(`${cats.u}U`);if(cats.e)catParts.push(`${cats.e}E`);if(cats.a)catParts.push(`${cats.a}A`);
+    const catParts=incCatShortParts(cats);
     let h=`<div style="margin-bottom:.3rem">${TNames.map((n,i)=>c[i]?`<span style="color:${[PAL.orange,PAL.red,PAL.violet][i]};font-weight:600">${c[i]} ${n}${c[i]!==1?'s':''}</span>`:null).filter(Boolean).join(' · ')}</div>`;
     if(catParts.length)h+=`<div style="font-size:.65rem;color:var(--mu);margin-bottom:.3rem">${catParts.join(' · ')}</div>`;
     const subs=Object.entries(subjMap).sort((a,b)=>(b[1][0]+b[1][1]+b[1][2])-(a[1][0]+a[1][1]+a[1][2]));
@@ -5819,9 +5850,9 @@ function rSV(){
     const r=lr.find(r=>r[0]===parseInt(idx));
     const pid=r?r[1]:(REG[idx]?REG[idx].id:`#${idx}`);
     const pS=termSancs.filter(s=>s[0]===parseInt(idx));
-    const cats={b:0,u:0,e:0,a:0,d:0};
-    pS.forEach(s=>{if(s[1]===2){cats.d++}else{const si=_svSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';cats[t]++}});
-    const catStr=[cats.b?cats.b+'B':'',cats.u?cats.u+'U':'',cats.e?cats.e+'E':'',cats.a?cats.a+'A':''].filter(Boolean).join(' ');
+    const cats={b:0,u:0,e:0,a:0,w:0,hl:0,oc:0,o:0,d:0};
+    pS.forEach(s=>{if(s[1]===2){cats.d++}else{const si=_svSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';incCatInc(cats,cat)}});
+    const catStr=incCatShortStr(cats);
     return{idx:parseInt(idx),pid,n,flags:r||null,cats,catStr};
   }).sort((a,b)=>b.n-a.n);
 
@@ -6098,9 +6129,9 @@ function rCL(){
     const r=lr.find(r=>r[0]===parseInt(idx));
     const pid=r?r[1]:(REG[idx]?REG[idx].id:`#${idx}`);
     const pS=termSancs.filter(s=>s[0]===parseInt(idx));
-    const cats={b:0,u:0,e:0,a:0,d:0};
-    pS.forEach(s=>{if(s[1]===2){cats.d++}else{const si=_clSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';cats[t]++}});
-    const catStr=[cats.b?cats.b+'B':'',cats.u?cats.u+'U':'',cats.e?cats.e+'E':'',cats.a?cats.a+'A':''].filter(Boolean).join(' ');
+    const cats={b:0,u:0,e:0,a:0,w:0,hl:0,oc:0,o:0,d:0};
+    pS.forEach(s=>{if(s[1]===2){cats.d++}else{const si=_clSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';incCatInc(cats,cat)}});
+    const catStr=incCatShortStr(cats);
     return{idx:parseInt(idx),pid,n,flags:r||null,cats,catStr};
   }).sort((a,b)=>b.n-a.n);
   function abLabel(v){const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return v>=1&&v<=7?n[v-1]:v}
@@ -6144,9 +6175,8 @@ function rCL(){
       p.codes++;
       const si=SAN_ALL2.indexOf(s);
       const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';
-      const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';
-      p.cats[t]++;
-      if(s[3]===sub){p.sCodes++;p.sCats[t]++}
+      incCatInc(p.cats,cat);
+      if(s[3]===sub){p.sCodes++;incCatInc(p.sCats,cat)}
     }
     else if(s[1]===1){p.oncalls++;if(s[3]===sub)p.sOncalls++}
     else if(s[1]===2){p.dets++;if(s[3]===sub)p.sDets++}
@@ -6199,8 +6229,8 @@ function rCL(){
   if(dhRows.length){
     const trows=dhRows.map((p,i)=>{
       const flags=p.flags?flagBadge2(p.flags):'';
-      const catTip=p.cats?`${p.cats.b}B ${p.cats.u}U ${p.cats.e}E ${p.cats.a}A`:'';
-      const sCatTip=p.sCats?`${p.sCats.b}B ${p.sCats.u}U ${p.sCats.e}E ${p.sCats.a}A`:'';
+      const catTip=p.cats?incCatShortStr(p.cats):'';
+      const sCatTip=p.sCats?incCatShortStr(p.sCats):'';
       return`<tr>
         <td style="color:var(--mu);font-size:.7rem;text-align:center">${i+1}</td>
         <td style="font-family:'IBM Plex Mono',monospace;font-weight:500">${pLink(p.px,p.pid)}</td>
@@ -6425,10 +6455,10 @@ function rCC(){
     const clsDetentions=clsSanc.filter(s=>s[1]===2).length;
     const _clsCats={b:0,u:0,e:0,a:0};
     const _sanAll5=DD.sanctions||[];
-    clsSanc.filter(s=>s[1]===0).forEach(s=>{const si=_sanAll5.indexOf(s);const ct=SANC_DET[si]?SANC_DET[si][1]:'Other';const t=ct==='Behaviour'?'b':ct==='Uniform'?'u':ct==='Equipment'?'e':ct==='Attendance'?'a':'b';_clsCats[t]++});
+    clsSanc.filter(s=>s[1]===0).forEach(s=>{const si=_sanAll5.indexOf(s);const ct=SANC_DET[si]?SANC_DET[si][1]:'Other';incCatInc(_clsCats,ct)});
     const _ccSanAll=DD.sanctions||[];
     const clsCats={b:0,u:0,e:0,a:0};
-    clsSanc.filter(s=>s[1]===0).forEach(s=>{const si=_ccSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';clsCats[t]++});
+    clsSanc.filter(s=>s[1]===0).forEach(s=>{const si=_ccSanAll.indexOf(s);const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';incCatInc(clsCats,cat)});
 
     // Expected sanctions: based on each pupil's overall sanction rate × timetable proportion for this subject
     let expCodes=0,expOnCalls=0,expDets=0;
@@ -6931,8 +6961,7 @@ function rPeer(){
       pupilSancCounts[s[0]].codes++;
       const si=_tgSanAll.indexOf(s);
       const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';
-      const t=cat==='Behaviour'?'b':cat==='Uniform'?'u':cat==='Equipment'?'e':cat==='Attendance'?'a':'b';
-      pupilSancCounts[s[0]].cats[t]++;
+      incCatInc(pupilSancCounts[s[0]].cats,cat);
     }
     else if(s[1]===2) pupilSancCounts[s[0]].dets++;
     pupilSancCounts[s[0]].total++;
@@ -7501,14 +7530,14 @@ function rPeer(){
         const pSanT=SAN_SA.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null);
         const tEnrols=[];
         for(const[ik,e]of Object.entries(ENR)) tEnrols.push(...e.filter(er=>er.t==='cls'&&er.x===px));
-        const cats={b:0,u:0,e:0,a:0,d:0};
+        const cats={b:0,u:0,e:0,a:0,w:0,hl:0,oc:0,o:0,d:0};
         pSanT.forEach((s,si)=>{
           const subj=s[3];
           const cls=tEnrols.find(e2=>e2.s===subj&&e2.u===null);
           if(!cls||cls.tc!==f.teacher) return;
           const gsi=SAN_SA.indexOf(s);
           const cat=SANC_DET[gsi]?SANC_DET[gsi][1]:'Other';
-          if(cat==='Behaviour')cats.b++;else if(cat==='Uniform')cats.u++;else if(cat==='Equipment')cats.e++;else if(cat==='Attendance')cats.a++;else cats.b++;
+          incCatInc(cats,cat);
         });
         // Detentions from this teacher
         const pDet=SAN_SA.filter(s=>s[0]===px&&s[1]===2&&s[3]!=null);
@@ -8563,8 +8592,8 @@ function rPeer(){
 
     // Build incident codes table
     let incHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Incident Codes (Behaviour Categories)</div>`;
-    const incCategories=['Behaviour','Uniform','Equipment','Attendance','Detention','Other'];
-    const incCatColors={'Behaviour':PAL.red,'Uniform':PAL.orange,'Equipment':PAL.gold,'Attendance':PAL.sky,'Detention':PAL.violet,'Other':PAL.slate};
+    const incCategories=[...INC_CATS.map(c=>c.id),'Detention'];
+    const incCatColors=Object.assign({Detention:PAL.violet},Object.fromEntries(INC_CATS.map(c=>[c.id,c.color])));
     const unclassifiedInc=[...foundIncidentCodes].filter(c=>!incidentCodes[c]).sort();
     if(unclassifiedInc.length){
       incHtml+=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:var(--red);font-weight:600">⚠ ${unclassifiedInc.length} unclassified incident code${unclassifiedInc.length!==1?'s':''}: </span>${unclassifiedInc.map(c=>`<b>${c}</b>`).join(', ')}</div>`;
