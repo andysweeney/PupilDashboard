@@ -489,11 +489,11 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   function dsmConsiderBtn(px,type,subkey,label,detail,pupilName){
     const key=dismKey(px,type,subkey);
     window._dsmCtx[key]={px,type,subkey:(subkey||''),label,detail,pupilName};
-    return '<button onclick="event.stopPropagation();dsmOpenDialog(\''+encodeURIComponent(key)+'\')" title="Mark as already considered" '+
+    return '<button type="button" onclick="event.stopPropagation();dsmOpenDialog(\''+encodeURIComponent(key)+'\')" title="Mark as already considered" '+
       'style="background:transparent;border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.58rem;padding:.08rem .4rem;border-radius:4px;cursor:pointer;white-space:nowrap">✓ Considered</button>';
   }
   function dsmRestoreBtn(key){
-    return '<button onclick="dsmRestore(\''+encodeURIComponent(key)+'\')" title="Restore to active list" '+
+    return '<button type="button" onclick="event.stopPropagation();dsmRestore(\''+encodeURIComponent(key)+'\')" title="Restore to active list" '+
       'style="background:transparent;border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.58rem;padding:.08rem .4rem;border-radius:4px;cursor:pointer">↩ Restore</button>';
   }
   // Small marker shown on an active concern that was previously dismissed.
@@ -580,7 +580,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     DSM[_dsmPendingKey]=rec;
     dsmPersist();
     dsmCancel();
-    dsmRefresh();
+    setTimeout(dsmRefresh,0);
   }
 
   function dsmCancel(){_dsmPendingKey=null;const m=document.getElementById('dsm-modal');if(m)m.style.display='none';}
@@ -591,7 +591,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     if(!confirm('Restore this concern to the active list? The dismissal record is kept for audit.'))return;
     const who=localStorage.getItem(DSM_WHO_KEY)||'—';
     rec.history.push({who,when:new Date().toISOString(),note:'(restored to active)',expiresAt:new Date().toISOString(),restored:true});
-    dsmPersist();dsmRefresh();
+    dsmPersist();setTimeout(dsmRefresh,0); // defer: avoid replacing the just-clicked button mid-dispatch
   }
 
   // Re-render whichever concern surface is currently visible.
@@ -617,7 +617,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   }
   function dsmImport(file){
     const fr=new FileReader();
-    fr.onload=()=>{try{const j=JSON.parse(fr.result);const inc=j.dismissals||j;DSM=dsmMerge(DSM,inc);dsmPersist();dsmRefresh();alert('Dismissals imported and merged.');}catch(e){alert('Could not parse dismissals file: '+e.message);}};
+    fr.onload=()=>{try{const j=JSON.parse(fr.result);const inc=j.dismissals||j;DSM=dsmMerge(DSM,inc);dsmPersist();alert('Dismissals imported and merged.');setTimeout(dsmRefresh,0);}catch(e){alert('Could not parse dismissals file: '+e.message);}};
     fr.readAsText(file);
   }
   // Small toolbar (mounted at the top of the Concerns tab output).
