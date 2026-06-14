@@ -434,7 +434,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-2 (defer + type=button) — fetching ./dismissals.json (lowercase; rename any Dismissals.json)');
+    console.log('[dsm] build dsm-4 (snapshot value at review) — uses ./dismissals.json (lowercase)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -504,15 +504,27 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     return '<span title="Re-alerted after a previous dismissal'+(h.note?(': '+h.note.replace(/"/g,'&quot;')):'')+'" style="font-size:.55rem;color:var(--mu);border:1px dashed var(--bd);border-radius:3px;padding:0 .25rem;margin-left:.3rem;white-space:nowrap">⟳ prev. considered '+fmtWhen(h.when)+'</span>';
   }
   // One muted line for an already-considered concern (used in collapsible blocks).
+  // Compare the metric value captured at dismissal with the current live value.
+  // Amber when it has changed (so a worsened concern stands out), muted when not.
+  function dsmSnapNote(h, currentDetail){
+    const snap=(h&&h.detailSnapshot)||'';
+    if(!snap) return '';
+    if(snap===(currentDetail||'')) return ' <span style="color:var(--mu);font-style:italic">(unchanged since review)</span>';
+    return ' <span style="color:var(--orange);font-weight:600">(at review: '+snap+')</span>';
+  }
+
   function dsmDismissedLine(it){
     const h=it._dismissal||{};
     const exp=h.expiresAt?('re-alerts '+fmtWhen(h.expiresAt)):'permanent';
     const note=h.note?(' · “'+h.note+'”'):'';
     const cnt=dismCount(it._key);
     const cntTxt=cnt>1?(' · '+cnt+'× total'):'';
-    return '<div style="opacity:.55;background:var(--sf2);border-radius:5px;padding:.35rem .5rem;margin-bottom:.3rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">'+
+    const snapNote=dsmSnapNote(h, it.detail);
+    // Greyed look comes from muted colours + line-through (not opacity), so the
+    // amber "changed since review" flag stays at full strength and stands out.
+    return '<div style="background:var(--sf2);border-radius:5px;padding:.35rem .5rem;margin-bottom:.3rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">'+
       '<span style="font-size:.72rem;font-weight:600;color:var(--mu);min-width:9rem;text-decoration:line-through">'+it.label+'</span>'+
-      '<span style="font-size:.66rem;color:var(--mu);flex:1;min-width:8rem">'+(it.detail||'')+'</span>'+
+      '<span style="font-size:.66rem;color:var(--mu);flex:1;min-width:8rem">'+(it.detail||'')+snapNote+'</span>'+
       '<span style="font-size:.58rem;color:var(--mu);white-space:nowrap">✓ considered · '+h.who+', '+fmtWhen(h.when)+' · '+exp+cntTxt+note+'</span>'+
       dsmRestoreBtn(it._key)+'</div>';
   }
@@ -600,7 +612,16 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     try{
       const on=id=>{const e=document.getElementById(id);return e&&e.classList.contains('on');};
       if(on('vw-concerns')){popCNFilters();rCN();}
-      else if(on('vw-pupil')){rP();}
+      else if(on('vw-pupil')){
+        // Surgical: update ONLY the concern panel, not all of rP. A full rP() rebuilds
+        // every chart on the pupil page, and that heavy rebuild (inside the deferred
+        // tick, right after a confirm()) was blanking the view. This touches one div.
+        const panel=document.getElementById('pcn-panel');
+        const sel=document.getElementById('p-sel');
+        const x=sel?parseInt(sel.value):0;
+        if(panel&&x){panel.innerHTML=pupilOtherConcernsAlert(x);}
+        else{rP();}
+      }
       else{try{rP();}catch(e){console.error('[dsm] re-render (fallback rP) failed:',e);}}
     }catch(e){console.error('[dsm] re-render failed during restore/dismiss:',e);}
   }
@@ -2508,7 +2529,7 @@ function rP(){
   const bcLine=bcBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${bcBadges}</div>`:'';
   const otherConcernsAlert=pupilOtherConcernsAlert(x);
 
-  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}${otherConcernsAlert}${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
+  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}<div id="pcn-panel">${otherConcernsAlert}</div>${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
   renderTimetable(x);
@@ -9315,7 +9336,7 @@ function rPeer(){
             const h=c._dismissal;
             const exp=h.expiresAt?('re-alerts '+fmtWhen(h.expiresAt)):'permanent';
             const note=h.note?(' · “'+h.note+'”'):'';
-            detailCell=`<td style="font-size:.62rem;color:var(--mu);${mute}${borderStyle}">✓ considered · ${h.who}, ${fmtWhen(h.when)} · ${exp}${note}</td>`;
+            detailCell=`<td style="font-size:.66rem;color:var(--mu);${borderStyle}">${c.detail}${dsmSnapNote(h,c.detail)}<span style="display:block;font-size:.58rem;margin-top:.1rem;opacity:.85">✓ considered · ${h.who}, ${fmtWhen(h.when)} · ${exp}${note}</span></td>`;
             actionCell=`<td style="${borderStyle};text-align:right;white-space:nowrap">${dsmRestoreBtn(c._key)}</td>`;
           } else {
             detailCell=`<td style="font-size:.68rem;color:var(--mu);${borderStyle}">${c.detail}</td>`;
