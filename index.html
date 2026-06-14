@@ -434,6 +434,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
+    console.log('[dsm] build dsm-2 (defer + type=button) — fetching ./dismissals.json (lowercase; rename any Dismissals.json)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -600,8 +601,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
       const on=id=>{const e=document.getElementById(id);return e&&e.classList.contains('on');};
       if(on('vw-concerns')){popCNFilters();rCN();}
       else if(on('vw-pupil')){rP();}
-      else{try{rP();}catch(e){}}
-    }catch(e){console.warn('dsmRefresh',e);}
+      else{try{rP();}catch(e){console.error('[dsm] re-render (fallback rP) failed:',e);}}
+    }catch(e){console.error('[dsm] re-render failed during restore/dismiss:',e);}
   }
 
   // ── Export / Import (shared-sync on a static host) ──
