@@ -509,10 +509,10 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     const note=h.note?(' · “'+h.note+'”'):'';
     const cnt=dismCount(it._key);
     const cntTxt=cnt>1?(' · '+cnt+'× total'):'';
-    return '<div style="opacity:.75;background:var(--sf2);border-radius:5px;padding:.3rem .5rem;margin-top:.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">'+
-      '<span style="font-size:.68rem;font-weight:600;color:var(--mu);min-width:8.5rem">'+it.label+'</span>'+
-      '<span style="font-size:.64rem;color:var(--mu);flex:1;min-width:8rem">'+(it.detail||'')+'</span>'+
-      '<span style="font-size:.6rem;color:var(--mu)">✓ '+h.who+', '+fmtWhen(h.when)+' · '+exp+cntTxt+note+'</span>'+
+    return '<div style="opacity:.55;background:var(--sf2);border-radius:5px;padding:.35rem .5rem;margin-bottom:.3rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">'+
+      '<span style="font-size:.72rem;font-weight:600;color:var(--mu);min-width:9rem;text-decoration:line-through">'+it.label+'</span>'+
+      '<span style="font-size:.66rem;color:var(--mu);flex:1;min-width:8rem">'+(it.detail||'')+'</span>'+
+      '<span style="font-size:.58rem;color:var(--mu);white-space:nowrap">✓ considered · '+h.who+', '+fmtWhen(h.when)+' · '+exp+cntTxt+note+'</span>'+
       dsmRestoreBtn(it._key)+'</div>';
   }
 
@@ -7710,14 +7710,24 @@ function rPeer(){
     
     if(!items.length) return'';
 
-    // Separate active alerts from already-considered (dismissed) ones.
-    const {active,dismissed}=dsmSplit(px,items);
-    if(!active.length && !dismissed.length) return'';
+    // Annotate each concern with its key + dismissal state, KEEPING ORDER.
+    // Considered concerns stay in place, just greyed — they don't move or hide.
+    const annotated=items.map(it=>{
+      const sub=it.subkey||'';
+      const key=dismKey(px,it.type,sub);
+      const act=dismActive(key);
+      const last=dismLatest(key);
+      return Object.assign({},it,{_key:key,_subkey:sub,_dismissal:act||null,_resurfaced:(!act&&last)?last:null});
+    });
+    const activeCount=annotated.filter(a=>!a._dismissal).length;
+    const consideredCount=annotated.length-activeCount;
 
-    // Highest severity among ACTIVE concerns drives the panel border colour.
-    const maxSev=active.some(i=>i.severity==='red')?'red':(active.length?'amber':'amber');
+    // Border colour from active severities (fall back to amber once all considered).
+    const maxSev=annotated.some(i=>!i._dismissal&&i.severity==='red')?'red':'amber';
     const borderCol=maxSev==='red'?PAL.red:PAL.orange;
-    const rows=active.map(it=>{
+
+    const rows=annotated.map(it=>{
+      if(it._dismissal) return dsmDismissedLine(it);   // greyed, in original position
       const col=it.severity==='red'?PAL.red:PAL.orange;
       const bg=it.severity==='red'?'rgba(181,72,59,.18)':'rgba(187,107,26,.18)';
       const considerBtn=dsmConsiderBtn(px,it.type,it._subkey,it.label,it.detail,fn);
@@ -7730,13 +7740,10 @@ function rPeer(){
       </div>`;
     }).join('');
 
-    // Already-considered block (muted, collapsible) — keeps the audit trail visible.
-    const dismissedBlock=dismissed.length?`<details style="margin-top:.4rem"><summary style="cursor:pointer;font-size:.66rem;color:var(--mu);user-select:none">Already considered (${dismissed.length})</summary>${dismissed.map(dsmDismissedLine).join('')}</details>`:'';
-
-    const activeCount=active.length;
-    const titleNote=activeCount?`There ${activeCount===1?'is':'are'} ${activeCount} active Concern${activeCount===1?'':'s'} for ${fn}`:`No active Concerns for ${fn} — ${dismissed.length} already considered`;
-    const activeBlock=active.length?rows:'<div style="font-size:.66rem;color:var(--mu);padding:.2rem 0">All flagged concerns have been marked as already considered.</div>';
-    return`<div class="dw" style="margin-top:.7rem;border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${titleNote}</span></div>${activeBlock}${dismissedBlock}</div>`;
+    const titleNote=activeCount
+      ? `There ${activeCount===1?'is':'are'} ${activeCount} active Concern${activeCount===1?'':'s'} for ${fn}${consideredCount?` · ${consideredCount} already considered`:''}`
+      : `All ${annotated.length} Concern${annotated.length===1?'':'s'} for ${fn} marked already considered`;
+    return`<div class="dw" style="margin-top:.7rem;border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${titleNote}</span></div>${rows}</div>`;
   }
 
   // Pupil-level sanctions concentration alert (for use in rP)
@@ -8789,7 +8796,7 @@ function rPeer(){
 
   // ── Concerns tab UI state ──
   // Collapse state per section. Default: all expanded. Persists across rCN() re-renders within a session.
-  const _cnCollapsed = {pupil:false, 'pupil-dismissed':true, class:false, tg:false, teacher:false};
+  const _cnCollapsed = {pupil:false, class:false, tg:false, teacher:false};
   // Pupil concern type filter — empty Set means "show all".
   const _cnTypeFilter = new Set();
 
@@ -9256,15 +9263,6 @@ function rPeer(){
             .filter(p => p.concerns.length > 0)
         : pupilConcerns;
 
-      // Split each pupil's concerns into active vs already-considered.
-      const splitPupils = filteredPupils.map(p=>{
-        const s=dsmSplit(p.px,p.concerns);
-        return {...p, _active:s.active, _dismissed:s.dismissed};
-      });
-      const activePupils = splitPupils.filter(p=>p._active.length>0);
-      const dismissedFlat = [];
-      splitPupils.forEach(p=>p._dismissed.forEach(c=>dismissedFlat.push({...c,_px:p.px,_pid:p.pid,_yg:p.yg,_tg:p.tg})));
-
       // Build chip strip
       const chipsHtml = CN_TYPES.map(t => {
         const active = _cnTypeFilter.has(t.id);
@@ -9281,62 +9279,66 @@ function rPeer(){
         ${chipsHtml}${clearBtn}
       </div>`;
 
-      // Build active rows (rowspan = number of ACTIVE concerns for the pupil)
-      const pRows = activePupils.map(p=>{
-        const cs=p._active;
+      // Build rows. Every concern stays in place; CONSIDERED ones are greyed,
+      // not moved or hidden. rowspan = the pupil's full concern count.
+      let consideredCount = 0, totalConcerns = 0;
+      const pRows = filteredPupils.map(p=>{
+        const cs = p.concerns.map(c=>{
+          const sub=c.subkey||'';
+          const key=dismKey(p.px,c.type,sub);
+          const act=dismActive(key);
+          const last=dismLatest(key);
+          return Object.assign({},c,{_key:key,_subkey:sub,_dismissal:act||null,_resurfaced:(!act&&last)?last:null});
+        });
         const n=cs.length;
+        totalConcerns += n;
         const pname=String(p.pid).replace(/\s*\([^)]+\)\s*$/,'');
         return cs.map((c,ci)=>{
+          const dismissed=!!c._dismissal;
+          if(dismissed) consideredCount++;
           const col=c.severity==='red'?PAL.red:PAL.orange;
-          const sevDot=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col}"></span>`;
+          const sevDot=dismissed
+            ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mu);opacity:.5"></span>`
+            : `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col}"></span>`;
           const resurf=c._resurfaced?dsmResurfBadge(c._resurfaced):'';
-          const tag=`<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:${col}12;border:1px solid ${col}44;color:${col}">${c.label}</span>${resurf}`;
+          const tag=dismissed
+            ? `<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);text-decoration:line-through">${c.label}</span>`
+            : `<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:${col}12;border:1px solid ${col}44;color:${col}">${c.label}</span>${resurf}`;
           const pupilCells=ci===0?`<td style="font-family:'IBM Plex Mono',monospace;font-weight:500;vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">${pLink(p.px,p.pid)}${senPillShort(p.px)}</td>
           <td style="text-align:center;font-size:.72rem;color:var(--mu);vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">Y${p.yg}</td>
           <td style="font-size:.72rem;color:var(--mu);vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">${p.tg}</td>`:'';
           const borderStyle=ci<n-1?'border-bottom:1px dashed rgba(40,34,20,.15)':'';
-          const considerBtn=dsmConsiderBtn(p.px,c.type,c._subkey,c.label,c.detail,pname);
+          const mute=dismissed?'opacity:.55;':'';
+          let detailCell, actionCell;
+          if(dismissed){
+            const h=c._dismissal;
+            const exp=h.expiresAt?('re-alerts '+fmtWhen(h.expiresAt)):'permanent';
+            const note=h.note?(' · “'+h.note+'”'):'';
+            detailCell=`<td style="font-size:.62rem;color:var(--mu);${mute}${borderStyle}">✓ considered · ${h.who}, ${fmtWhen(h.when)} · ${exp}${note}</td>`;
+            actionCell=`<td style="${borderStyle};text-align:right;white-space:nowrap">${dsmRestoreBtn(c._key)}</td>`;
+          } else {
+            detailCell=`<td style="font-size:.68rem;color:var(--mu);${borderStyle}">${c.detail}</td>`;
+            actionCell=`<td style="${borderStyle};text-align:right;white-space:nowrap">${dsmConsiderBtn(p.px,c.type,c._subkey,c.label,c.detail,pname)}</td>`;
+          }
           return`<tr>${pupilCells}
-          <td style="${borderStyle}">${sevDot} ${tag}</td>
-          <td style="font-size:.68rem;color:var(--mu);${borderStyle}">${c.detail}</td>
-          <td style="${borderStyle};text-align:right;white-space:nowrap">${considerBtn}</td>
+          <td style="${mute}${borderStyle}">${sevDot} ${tag}</td>
+          ${detailCell}
+          ${actionCell}
         </tr>`;
         }).join('');
       }).join('');
 
       const subtitle = filterActive
-        ? `${activePupils.length}/${pupilConcerns.length} pupils match filter${dismissedFlat.length?` · ${dismissedFlat.length} already considered`:''}`
-        : `${activePupils.length} pupils with active concerns${dismissedFlat.length?` · ${dismissedFlat.length} already considered`:''}`;
+        ? `${filteredPupils.length}/${pupilConcerns.length} pupils match filter${consideredCount?` · ${consideredCount} of ${totalConcerns} considered`:''}`
+        : `${filteredPupils.length} pupils flagged${consideredCount?` · ${consideredCount} of ${totalConcerns} concerns already considered`:''}`;
 
-      const tableHtml = activePupils.length
+      const tableHtml = filteredPupils.length
         ? `<div style="overflow-x:auto"><table class="d"><thead><tr>
             <th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concern</th><th>Detail</th><th style="text-align:right">Review</th>
           </tr></thead><tbody>${pRows}</tbody></table></div>`
-        : `<div style="color:var(--mu);font-size:.75rem;padding:1rem;font-style:italic">${dismissedFlat.length?'No active concerns — all have been marked as already considered (see below).':'No pupils match the selected concern types.'}</div>`;
-
-      // Already-considered (muted, collapsible) — preserves the audit trail.
-      let dismissedCard='';
-      if(dismissedFlat.length){
-        const dRows=dismissedFlat.map(c=>{
-          const h=c._dismissal||{};
-          const pname=String(c._pid).replace(/\s*\([^)]+\)\s*$/,'');
-          const exp=h.expiresAt?('re-alerts '+fmtWhen(h.expiresAt)):'permanent';
-          const note=h.note?(' · “'+c._dismissal.note+'”'):'';
-          return `<tr style="opacity:.78">
-            <td style="font-family:'IBM Plex Mono',monospace;font-weight:500">${pLink(c._px,c._pid)}</td>
-            <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${c._yg}</td>
-            <td style="font-size:.72rem;color:var(--mu)">${c._tg}</td>
-            <td><span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:var(--sf2);border:1px solid var(--bd);color:var(--mu)">${c.label}</span></td>
-            <td style="font-size:.66rem;color:var(--mu)">✓ ${h.who}, ${fmtWhen(h.when)} · ${exp}${note}</td>
-            <td style="text-align:right;white-space:nowrap">${dsmRestoreBtn(c._key)}</td>
-          </tr>`;
-        }).join('');
-        const dTable=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concern</th><th>Reviewed</th><th style="text-align:right">Restore</th></tr></thead><tbody>${dRows}</tbody></table></div>`;
-        dismissedCard=_cnCard('pupil-dismissed', 'Already Considered', `${dismissedFlat.length} concern${dismissedFlat.length===1?'':'s'} logged as reviewed`, dTable);
-      }
+        : `<div style="color:var(--mu);font-size:.75rem;padding:1rem;font-style:italic">No pupils match the selected concern types.</div>`;
 
       html += _cnCard('pupil', 'Pupil Concerns', subtitle, dsmToolbar() + filterRow + tableHtml);
-      html += dismissedCard;
     }
 
     // Class concerns
