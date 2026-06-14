@@ -382,6 +382,265 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     return;
   }
 
+
+  // ════════════════════════════════════════════════════════════════════════
+  // DISMISSALS ("already considered") — shared, audit-friendly concern review
+  // ────────────────────────────────────────────────────────────────────────
+  // Persistence model. Requirement: a dismissal must be visible to the whole
+  // pastoral team. The host's backend capability is not yet confirmed, so this
+  // runs on a PURELY STATIC host today: a shared baseline file `dismissals.json`
+  // (sits next to data.json) is the team-wide source of truth, merged with this
+  // browser's not-yet-exported local changes. Export regenerates dismissals.json
+  // for re-deploy; that manual re-deploy is how the team stays in sync until a
+  // backend exists. If a backend is added later, ONLY dsmBootstrap()/dsmPersist()
+  // change — the keying, audit history, resurface logic and UI below are reused.
+  //
+  // DATA PROTECTION: dismissal notes concern named children and live in a shared
+  // file, so they are personal data. Keep notes minimal and factual; flag this
+  // store to the school DPO. (A reminder is shown in the dismiss dialog.)
+  // ════════════════════════════════════════════════════════════════════════
+  const DSM_LS_KEY  = 'pupilDashboard.dismissals.v1';
+  const DSM_WHO_KEY = 'pupilDashboard.dismissedBy.v1';
+  let   DSM = {};            // merged working map: key -> {key,px,type,subkey,label,history:[...]}
+  let   _dsmPendingKey = null;
+  window._dsmCtx = window._dsmCtx || {};
+
+  // Stable key. `detail` is volatile (live ratios/counts) so it is NEVER part of
+  // the key — only pupil + concern type + a stable discriminator (subject /
+  // teacher / slot). Once-per-pupil concern types use subkey ''.
+  function dismKey(px,type,subkey){return px+'|'+type+'|'+(subkey||'');}
+
+  function dsmLoadLocal(){try{const r=localStorage.getItem(DSM_LS_KEY);return r?JSON.parse(r):{};}catch(e){return{};}}
+  function dsmPersist(){try{localStorage.setItem(DSM_LS_KEY,JSON.stringify(DSM));}catch(e){console.warn('Could not save dismissals:',e);}}
+
+  // Merge two dismissal maps: union keys, concatenate histories (deduped by
+  // when+who+note). Lets a re-deployed dismissals.json and this browser's local
+  // edits combine without either clobbering the other; active state falls out as
+  // "latest history entry wins".
+  function dsmMerge(a,b){
+    const out={};
+    const keys=new Set([...Object.keys(a||{}),...Object.keys(b||{})]);
+    keys.forEach(k=>{
+      const ra=a&&a[k],rb=b&&b[k];
+      const base=ra||rb||{};
+      const hist=[...((ra&&ra.history)||[]),...((rb&&rb.history)||[])];
+      const seen=new Set(),merged=[];
+      hist.forEach(h=>{const sig=h.when+'|'+h.who+'|'+(h.note||'');if(!seen.has(sig)){seen.add(sig);merged.push(h);}});
+      merged.sort((x,y)=>(x.when<y.when?-1:x.when>y.when?1:0));
+      out[k]={key:k,px:base.px,type:base.type,subkey:base.subkey,label:base.label,history:merged};
+    });
+    return out;
+  }
+
+  // Boot: pull shared baseline, merge with local, persist merged copy.
+  async function dsmBootstrap(){
+    let baseline={};
+    try{
+      const r=await fetch('./dismissals.json',{cache:'no-store'});
+      if(r.ok){const j=await r.json();if(j&&typeof j==='object')baseline=j.dismissals||j;}
+    }catch(e){/* no shared file yet — that's fine */}
+    DSM=dsmMerge(baseline,dsmLoadLocal());
+    dsmPersist();
+  }
+
+  // ── Query helpers ──
+  function dismLatest(key){const r=DSM[key];return r&&r.history&&r.history.length?r.history[r.history.length-1]:null;}
+  // Currently-suppressing entry: latest, not a restore, not expired.
+  function dismActive(key){
+    const h=dismLatest(key);
+    if(!h||h.restored)return null;
+    if(h.expiresAt && h.expiresAt<=new Date().toISOString())return null;
+    return h;
+  }
+  function dismCount(key){const r=DSM[key];return r?r.history.filter(h=>!h.restored).length:0;}
+
+  // Split a concern list into {active, dismissed}, annotating each with _key and
+  // either _dismissal (the suppressing entry) or _resurfaced (a prior, now-lapsed
+  // entry). subkey is read off the concern object (both builders set it).
+  function dsmSplit(px,concerns){
+    const active=[],dismissed=[];
+    concerns.forEach(c=>{
+      const sub=c.subkey||'';
+      const key=dismKey(px,c.type,sub);
+      const ann=Object.assign({},c,{_key:key,_subkey:sub});
+      const act=dismActive(key);
+      if(act){ann._dismissal=act;dismissed.push(ann);}
+      else{const last=dismLatest(key);if(last)ann._resurfaced=last;active.push(ann);}
+    });
+    return {active,dismissed};
+  }
+
+  function fmtWhen(iso){try{return new Date(iso).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});}catch(e){return iso;}}
+
+  // End of the current term (for the "End of term" re-alert option).
+  function dsmTermEnd(){
+    try{
+      const ts=getTerms(CAY);if(!ts||!ts.length)return null;
+      const today=new Date().toISOString().slice(0,10);
+      const t=ts.find(t=>t.start<=today&&t.end>=today)||ts.find(t=>t.start>today)||null;
+      const end=t?t.end:null;
+      return (end&&end>today)?end:null;
+    }catch(e){return null;}
+  }
+
+  // ── UI fragments ──
+  // "Considered" button: registers context by key, passes only the key (safe in
+  // an inline onclick) so volatile label/detail never get string-escaped wrong.
+  function dsmConsiderBtn(px,type,subkey,label,detail,pupilName){
+    const key=dismKey(px,type,subkey);
+    window._dsmCtx[key]={px,type,subkey:(subkey||''),label,detail,pupilName};
+    return '<button onclick="event.stopPropagation();dsmOpenDialog(\''+encodeURIComponent(key)+'\')" title="Mark as already considered" '+
+      'style="background:transparent;border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.58rem;padding:.08rem .4rem;border-radius:4px;cursor:pointer;white-space:nowrap">✓ Considered</button>';
+  }
+  function dsmRestoreBtn(key){
+    return '<button onclick="dsmRestore(\''+encodeURIComponent(key)+'\')" title="Restore to active list" '+
+      'style="background:transparent;border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.58rem;padding:.08rem .4rem;border-radius:4px;cursor:pointer">↩ Restore</button>';
+  }
+  // Small marker shown on an active concern that was previously dismissed.
+  function dsmResurfBadge(h){
+    if(!h)return '';
+    if(h.restored)return '<span title="Manually restored to active" style="font-size:.55rem;color:var(--mu);border:1px solid var(--bd);border-radius:3px;padding:0 .25rem;margin-left:.3rem;white-space:nowrap">restored '+fmtWhen(h.when)+'</span>';
+    return '<span title="Re-alerted after a previous dismissal'+(h.note?(': '+h.note.replace(/"/g,'&quot;')):'')+'" style="font-size:.55rem;color:var(--mu);border:1px dashed var(--bd);border-radius:3px;padding:0 .25rem;margin-left:.3rem;white-space:nowrap">⟳ prev. considered '+fmtWhen(h.when)+'</span>';
+  }
+  // One muted line for an already-considered concern (used in collapsible blocks).
+  function dsmDismissedLine(it){
+    const h=it._dismissal||{};
+    const exp=h.expiresAt?('re-alerts '+fmtWhen(h.expiresAt)):'permanent';
+    const note=h.note?(' · “'+h.note+'”'):'';
+    const cnt=dismCount(it._key);
+    const cntTxt=cnt>1?(' · '+cnt+'× total'):'';
+    return '<div style="opacity:.75;background:var(--sf2);border-radius:5px;padding:.3rem .5rem;margin-top:.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">'+
+      '<span style="font-size:.68rem;font-weight:600;color:var(--mu);min-width:8.5rem">'+it.label+'</span>'+
+      '<span style="font-size:.64rem;color:var(--mu);flex:1;min-width:8rem">'+(it.detail||'')+'</span>'+
+      '<span style="font-size:.6rem;color:var(--mu)">✓ '+h.who+', '+fmtWhen(h.when)+' · '+exp+cntTxt+note+'</span>'+
+      dsmRestoreBtn(it._key)+'</div>';
+  }
+
+  // ── Modal ──
+  function dsmInit(){
+    if(document.getElementById('dsm-modal'))return;
+    const m=document.createElement('div');
+    m.id='dsm-modal';
+    m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:none;align-items:center;justify-content:center;padding:1rem';
+    m.addEventListener('click',e=>{if(e.target===m)dsmCancel();});
+    m.innerHTML='<div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;max-width:440px;width:100%;padding:1.1rem 1.2rem;font-family:inherit;box-shadow:0 12px 40px rgba(0,0,0,.3)">'+
+      '<div style="font-size:.9rem;font-weight:700;color:var(--tx);margin-bottom:.2rem">Mark “already considered”</div>'+
+      '<div id="dsm-ctx" style="font-size:.7rem;color:var(--mu);margin-bottom:.7rem"></div>'+
+      '<label style="display:block;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--mu);margin-bottom:.2rem">Reviewed by</label>'+
+      '<input id="dsm-who" type="text" placeholder="Your name or initials" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:.78rem;padding:.4rem .5rem;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);color:var(--tx);margin-bottom:.6rem">'+
+      '<label style="display:block;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--mu);margin-bottom:.2rem">Re-alert</label>'+
+      '<select id="dsm-realert" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:.78rem;padding:.4rem .5rem;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);color:var(--tx);margin-bottom:.6rem"></select>'+
+      '<label style="display:block;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--mu);margin-bottom:.2rem">Note (optional)</label>'+
+      '<textarea id="dsm-note" rows="2" placeholder="Brief, factual reason" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:.76rem;padding:.4rem .5rem;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);color:var(--tx);resize:vertical"></textarea>'+
+      '<div style="font-size:.6rem;color:var(--mu);margin:.3rem 0 .7rem">Shared with the pastoral team and about a named pupil — keep notes minimal and factual (personal data).</div>'+
+      '<div id="dsm-prev" style="font-size:.66rem;color:var(--orange);margin-bottom:.6rem"></div>'+
+      '<div style="display:flex;gap:.5rem;justify-content:flex-end">'+
+        '<button onclick="dsmCancel()" style="background:var(--sf2);color:var(--tx);border:1px solid var(--bd);font-family:inherit;font-size:.74rem;padding:.4rem .9rem;border-radius:6px;cursor:pointer">Cancel</button>'+
+        '<button onclick="dsmConfirm()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.4rem .9rem;border-radius:6px;cursor:pointer">Log as considered</button>'+
+      '</div></div>';
+    document.body.appendChild(m);
+  }
+
+  function dsmOpenDialog(keyEnc){
+    const key=decodeURIComponent(keyEnc);
+    const ctx=window._dsmCtx[key];
+    if(!ctx){console.warn('No dismiss context for',key);return;}
+    _dsmPendingKey=key;
+    document.getElementById('dsm-ctx').innerHTML='<b style="color:var(--tx)">'+ctx.label+'</b> — '+(ctx.pupilName||('#'+ctx.px))+(ctx.detail?('<br><span style="font-size:.66rem">'+ctx.detail+'</span>'):'');
+    const who=document.getElementById('dsm-who');
+    who.value=localStorage.getItem(DSM_WHO_KEY)||'';
+    const sel=document.getElementById('dsm-realert');
+    const te=dsmTermEnd();
+    const opts=[['42','In 6 weeks (default)'],['14','In 2 weeks'],['84','In 12 weeks']];
+    if(te)opts.push(['term:'+te,'End of this term ('+fmtWhen(te)+')']);
+    opts.push(['0','Permanent (until manually restored)']);
+    sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('');
+    document.getElementById('dsm-note').value='';
+    const cnt=dismCount(key),prev=document.getElementById('dsm-prev');
+    if(cnt>0){const last=dismLatest(key);prev.innerHTML='⟳ Previously considered '+cnt+'×. Last: '+last.who+' on '+fmtWhen(last.when)+(last.note?(' — “'+last.note+'”'):'')+'.';}
+    else prev.innerHTML='';
+    document.getElementById('dsm-modal').style.display='flex';
+    setTimeout(()=>who.focus(),0);
+  }
+
+  function dsmConfirm(){
+    if(!_dsmPendingKey)return;
+    const ctx=window._dsmCtx[_dsmPendingKey]||{};
+    const who=(document.getElementById('dsm-who').value||'').trim()||'—';
+    const note=(document.getElementById('dsm-note').value||'').trim();
+    const rv=document.getElementById('dsm-realert').value;
+    localStorage.setItem(DSM_WHO_KEY,who);
+    const now=new Date();
+    let expiresAt=null;
+    if(rv.indexOf('term:')===0)expiresAt=rv.slice(5)+'T23:59:59.000Z';
+    else{const d=parseInt(rv);if(d>0)expiresAt=new Date(now.getTime()+d*864e5).toISOString();}
+    const rec=DSM[_dsmPendingKey]||{key:_dsmPendingKey,px:ctx.px,type:ctx.type,subkey:ctx.subkey,label:ctx.label,history:[]};
+    rec.label=ctx.label;rec.px=ctx.px;rec.type=ctx.type;rec.subkey=ctx.subkey;
+    rec.history.push({who,when:now.toISOString(),note,expiresAt,detailSnapshot:ctx.detail||''});
+    DSM[_dsmPendingKey]=rec;
+    dsmPersist();
+    dsmCancel();
+    dsmRefresh();
+  }
+
+  function dsmCancel(){_dsmPendingKey=null;const m=document.getElementById('dsm-modal');if(m)m.style.display='none';}
+
+  function dsmRestore(keyEnc){
+    const key=decodeURIComponent(keyEnc);
+    const rec=DSM[key];if(!rec)return;
+    if(!confirm('Restore this concern to the active list? The dismissal record is kept for audit.'))return;
+    const who=localStorage.getItem(DSM_WHO_KEY)||'—';
+    rec.history.push({who,when:new Date().toISOString(),note:'(restored to active)',expiresAt:new Date().toISOString(),restored:true});
+    dsmPersist();dsmRefresh();
+  }
+
+  // Re-render whichever concern surface is currently visible.
+  function dsmRefresh(){
+    try{
+      const on=id=>{const e=document.getElementById(id);return e&&e.classList.contains('on');};
+      if(on('vw-concerns')){popCNFilters();rCN();}
+      else if(on('vw-pupil')){rP();}
+      else{try{rP();}catch(e){}}
+    }catch(e){console.warn('dsmRefresh',e);}
+  }
+
+  // ── Export / Import (shared-sync on a static host) ──
+  function dsmExport(){
+    const out={generated:new Date().toISOString(),dismissals:DSM};
+    const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='dismissals.json';a.click();
+  }
+  function dsmImportPick(){
+    const inp=document.createElement('input');inp.type='file';inp.accept='application/json,.json';
+    inp.onchange=()=>{if(inp.files&&inp.files[0])dsmImport(inp.files[0]);};
+    inp.click();
+  }
+  function dsmImport(file){
+    const fr=new FileReader();
+    fr.onload=()=>{try{const j=JSON.parse(fr.result);const inc=j.dismissals||j;DSM=dsmMerge(DSM,inc);dsmPersist();dsmRefresh();alert('Dismissals imported and merged.');}catch(e){alert('Could not parse dismissals file: '+e.message);}};
+    fr.readAsText(file);
+  }
+  // Small toolbar (mounted at the top of the Concerns tab output).
+  function dsmToolbar(){
+    return '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.3rem 0 .6rem;font-size:.66rem;color:var(--mu)">'+
+      '<span>Dismissals: shared <code>dismissals.json</code> + this browser’s local changes.</span>'+
+      '<button onclick="dsmExport()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.66rem;font-weight:600;padding:.25rem .6rem;border-radius:5px;cursor:pointer">Export dismissals.json</button>'+
+      '<button onclick="dsmImportPick()" style="background:var(--sf2);color:var(--tx);border:1px solid var(--bd);font-family:inherit;font-size:.66rem;padding:.25rem .6rem;border-radius:5px;cursor:pointer">Import / merge</button>'+
+      '<span style="opacity:.8">Re-deploy the exported file to share with the team.</span></div>';
+  }
+
+  // Inline-handler exposure (handlers run in global scope).
+  window.dsmOpenDialog=dsmOpenDialog;
+  window.dsmConfirm=dsmConfirm;
+  window.dsmCancel=dsmCancel;
+  window.dsmRestore=dsmRestore;
+  window.dsmExport=dsmExport;
+  window.dsmImportPick=dsmImportPick;
+
+
+  await dsmBootstrap();
+  dsmInit();
+
   // ── Validate enrichment fields ──
   // Each of these must be present for the dashboard to compute concerns correctly.
   // If any are missing, the data file was produced by an out-of-date import script.
@@ -7402,19 +7661,19 @@ function rPeer(){
     const a20=attRAMod(px,20),a60=attRAMod(px,60);
     if(a20.rate>a60.rate*CT_AT && a60.rate>0 && a20.absent>=CT_AM){
       const sev=a20.rate>a60.rate*2?'red':'amber';
-      items.push({label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} Periods in the last 20 school days (${a20.rate.toFixed(1)}% of Periods) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average).`});
+      items.push({type:'att-rising',subkey:'',label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} Periods in the last 20 school days (${a20.rate.toFixed(1)}% of Periods) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average).`});
     }
     // 2. Persistent Absence
     const aPA=attRAMod(px,CT_PA_WIN);
     if(aPA.rate>=CT_PA_PCT){
-      items.push({label:'Persistent Absence',severity:'red',detail:`${fn} has been absent for ${aPA.absent} Periods in the last ${CT_PA_WIN} school days (${aPA.rate.toFixed(1)}% absence rate).`});
+      items.push({type:'att-pa',subkey:'',label:'Persistent Absence',severity:'red',detail:`${fn} has been absent for ${aPA.absent} Periods in the last ${CT_PA_WIN} school days (${aPA.rate.toFixed(1)}% absence rate).`});
     }
     // 3. Sanctions Accelerating
     const s20=sanRAMod(px,yg,20),s60=sanRAMod(px,yg,60);
     const sCount20=sanCountInMod(px,yg,20);
     if(s20>s60*CT_SC && s60>0 && sCount20>=CT_MN){
       const sev=s20>s60*2?'red':'amber';
-      items.push({label:'Sanctions Accelerating',severity:sev,detail:`${fn} has had ${sCount20} sanctions in the last 20 school days (a weighted score of ${s20.toFixed(1)} compared with their weighted 60 school day average of ${s60.toFixed(1)}). This is ${(s20/s60).toFixed(1)}× the rolling weighted average.`});
+      items.push({type:'sanc-accel',subkey:'',label:'Sanctions Accelerating',severity:sev,detail:`${fn} has had ${sCount20} sanctions in the last 20 school days (a weighted score of ${s20.toFixed(1)} compared with their weighted 60 school day average of ${s60.toFixed(1)}). This is ${(s20/s60).toFixed(1)}× the rolling weighted average.`});
     }
     // 4. Absence Pattern (slot-level)
     const absAnalysis=analyseAbsencePattern(px, String(CAY));
@@ -7423,14 +7682,14 @@ function rPeer(){
       const worst=sortedFlags[0];
       const overallTxt=worst.pupilOverallRate!=null?`${worst.pupilOverallRate.toFixed(0)}% overall`:'their overall rate';
       const more=sortedFlags.length>1?` + ${sortedFlags.length-1} more Periods`:'';
-      items.push({label:'Absence Pattern',severity:worst.rate>=60?'red':'amber',detail:`${fn} seems to regularly miss ${worst.day} P${worst.per}. There have been ${worst.count} absences (a ${worst.rate.toFixed(0)}% rate vs ${overallTxt})${more}.`});
+      items.push({type:'abs-pattern',subkey:'',label:'Absence Pattern',severity:worst.rate>=60?'red':'amber',detail:`${fn} seems to regularly miss ${worst.day} P${worst.per}. There have been ${worst.count} absences (a ${worst.rate.toFixed(0)}% rate vs ${overallTxt})${more}.`});
     }
     // 5. Subject Avoidance
     const avoidFlags=getSubjectAvoidance(px);
     avoidFlags.forEach(a=>{
       const sev=parseFloat(a.ratio)>=4?'red':'amber';
       const breakdown=a.p1Whole?`${a.partial} partial-day and ${a.p1Whole} whole-day where ${a.subj} was P1`:`${a.partial} partial-day`;
-      items.push({label:'Possible Subject Avoidance',severity:sev,detail:`${fn} may be avoiding ${a.subj}. They have ${a.absences} subject absences (${breakdown}). This represents a ${a.actualPct}% absence rate vs an expected rate of ${a.expectedPct}%. ${a.ratio}× expectations.`});
+      items.push({type:'subj-avoid',subkey:a.subj,label:'Possible Subject Avoidance',severity:sev,detail:`${fn} may be avoiding ${a.subj}. They have ${a.absences} subject absences (${breakdown}). This represents a ${a.actualPct}% absence rate vs an expected rate of ${a.expectedPct}%. ${a.ratio}× expectations.`});
     });
     // 6. Sanctions Concentration (per-teacher)
     const scFlags=getSanctionsConcentration(px);
@@ -7446,24 +7705,38 @@ function rPeer(){
       if(eng){
         detail+=` There may also be an Engagement issue because there are ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''}).`;
       }
-      items.push({label:'Sanctions Concentration',severity:sev,detail});
+      items.push({type:'sanc-conc',subkey:f.teacher,label:'Sanctions Concentration',severity:sev,detail});
     });
     
     if(!items.length) return'';
-    
-    // Highest severity drives the panel border colour
-    const maxSev=items.some(i=>i.severity==='red')?'red':'amber';
+
+    // Separate active alerts from already-considered (dismissed) ones.
+    const {active,dismissed}=dsmSplit(px,items);
+    if(!active.length && !dismissed.length) return'';
+
+    // Highest severity among ACTIVE concerns drives the panel border colour.
+    const maxSev=active.some(i=>i.severity==='red')?'red':(active.length?'amber':'amber');
     const borderCol=maxSev==='red'?PAL.red:PAL.orange;
-    const rows=items.map(it=>{
+    const rows=active.map(it=>{
       const col=it.severity==='red'?PAL.red:PAL.orange;
       const bg=it.severity==='red'?'rgba(181,72,59,.18)':'rgba(187,107,26,.18)';
+      const considerBtn=dsmConsiderBtn(px,it.type,it._subkey,it.label,it.detail,fn);
+      const resurf=it._resurfaced?dsmResurfBadge(it._resurfaced):'';
       return`<div style="background:${bg};border-radius:5px;padding:.35rem .5rem;margin-bottom:.3rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-        <span style="font-size:.72rem;font-weight:700;color:var(--tx);min-width:9rem">${it.label}</span>
+        <span style="font-size:.72rem;font-weight:700;color:var(--tx);min-width:9rem">${it.label}${resurf}</span>
         <span style="font-size:.68rem;color:var(--tx);flex:1">${it.detail}</span>
         <span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${col};padding:.05rem .35rem;border:1px solid ${col}99;border-radius:3px;background:var(--sf)">${it.severity}</span>
+        ${considerBtn}
       </div>`;
     }).join('');
-    return`<div class="dw" style="margin-top:.7rem;border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">There are ${items.length} active Concerns for ${fn}</span></div>${rows}</div>`;
+
+    // Already-considered block (muted, collapsible) — keeps the audit trail visible.
+    const dismissedBlock=dismissed.length?`<details style="margin-top:.4rem"><summary style="cursor:pointer;font-size:.66rem;color:var(--mu);user-select:none">Already considered (${dismissed.length})</summary>${dismissed.map(dsmDismissedLine).join('')}</details>`:'';
+
+    const activeCount=active.length;
+    const titleNote=activeCount?`There ${activeCount===1?'is':'are'} ${activeCount} active Concern${activeCount===1?'':'s'} for ${fn}`:`No active Concerns for ${fn} — ${dismissed.length} already considered`;
+    const activeBlock=active.length?rows:'<div style="font-size:.66rem;color:var(--mu);padding:.2rem 0">All flagged concerns have been marked as already considered.</div>';
+    return`<div class="dw" style="margin-top:.7rem;border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${titleNote}</span></div>${activeBlock}${dismissedBlock}</div>`;
   }
 
   // Pupil-level sanctions concentration alert (for use in rP)
@@ -8516,7 +8789,7 @@ function rPeer(){
 
   // ── Concerns tab UI state ──
   // Collapse state per section. Default: all expanded. Persists across rCN() re-renders within a session.
-  const _cnCollapsed = {pupil:false, class:false, tg:false, teacher:false};
+  const _cnCollapsed = {pupil:false, 'pupil-dismissed':true, class:false, tg:false, teacher:false};
   // Pupil concern type filter — empty Set means "show all".
   const _cnTypeFilter = new Set();
 
@@ -8704,7 +8977,7 @@ function rPeer(){
         const sev=a20.rate>a60.rate*2 ? 'red' : 'amber';
         attDeclining=true;
         concerns.push({
-          type:'att-rising',
+          type:'att-rising', subkey:'',
           severity:sev,
           label:'Attendance Declining',
           detail:`20sd ${a20.rate.toFixed(1)}% absent vs 60sd ${a60.rate.toFixed(1)}% (${a20.absent} absent periods in last 20sd, ${(a20.rate/a60.rate).toFixed(1)}× older window)`
@@ -8714,7 +8987,7 @@ function rPeer(){
       // 2. Persistent Absence — rolling window absence rate ≥ threshold
       const aPA=attRA(px,CT_PA_WIN);
       if(aPA.rate>=CT_PA_PCT){
-        concerns.push({type:'att-pa',severity:'red',label:'Persistent Absence',detail:`${CT_PA_WIN}sd absence ${aPA.rate.toFixed(1)}% (${aPA.absent} absent periods)`});
+        concerns.push({type:'att-pa', subkey:'',severity:'red',label:'Persistent Absence',detail:`${CT_PA_WIN}sd absence ${aPA.rate.toFixed(1)}% (${aPA.absent} absent periods)`});
       }
 
       // 3. Sanctions Accelerating — rolling 20sd vs 60sd weighted sanction score
@@ -8726,7 +8999,7 @@ function rPeer(){
         const sev=s20>s60*2 ? 'red' : 'amber';
         sancAccel=true;
         concerns.push({
-          type:'sanc-accel',
+          type:'sanc-accel', subkey:'',
           severity:sev,
           label:'Sanctions Accelerating',
           detail:`20sd weighted ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)} (${sanCount20} sanctions in last 20sd, ${(s20/s60).toFixed(1)}× older window)`
@@ -8736,7 +9009,7 @@ function rPeer(){
       // 4. Possible Disengagement — derived: both Attendance Declining AND Sanctions Accelerating fire
       if(attDeclining && sancAccel){
         concerns.push({
-          type:'disengage',
+          type:'disengage', subkey:'',
           severity:'red',
           label:'Possible Disengagement',
           detail:`Absence ↑ (20sd ${a20.rate.toFixed(0)}% vs 60sd ${a60.rate.toFixed(0)}%) + Sanctions ↑ (20sd ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)})`
@@ -8746,7 +9019,7 @@ function rPeer(){
       // 4. Sanctions concentration
       const scFlags=getSanctionsConcentration(px);
       scFlags.filter(f=>f.teacher!=='Unknown').forEach(f=>{
-        concerns.push({type:'sanc-conc',severity:parseFloat(f.ratio)>=4?'red':'amber',label:'Sanctions Concentration',detail:`${f.actualPct}% of codes from ${f.teacher} (${f.subjects.join(', ')}) — expected ${f.expectedPct}%, ratio ${f.ratio}×`});
+        concerns.push({type:'sanc-conc', subkey:f.teacher,severity:parseFloat(f.ratio)>=4?'red':'amber',label:'Sanctions Concentration',detail:`${f.actualPct}% of codes from ${f.teacher} (${f.subjects.join(', ')}) — expected ${f.expectedPct}%, ratio ${f.ratio}×`});
       });
 
       // 5. Absence pattern flags
@@ -8754,20 +9027,20 @@ function rPeer(){
       if(absAnalysis.slotFlags.length){
         const worst=absAnalysis.slotFlags.sort((a,b)=>b.rate-a.rate)[0];
         const overallTxt = worst.pupilOverallRate!=null ? ` vs ${worst.pupilOverallRate.toFixed(0)}% overall` : '';
-        concerns.push({type:'abs-pattern',severity:worst.rate>=60?'red':'amber',label:'Absence Pattern',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate${overallTxt})${absAnalysis.slotFlags.length>1?' + '+(absAnalysis.slotFlags.length-1)+' more':''}`});
+        concerns.push({type:'abs-pattern', subkey:'',severity:worst.rate>=60?'red':'amber',label:'Absence Pattern',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate${overallTxt})${absAnalysis.slotFlags.length>1?' + '+(absAnalysis.slotFlags.length-1)+' more':''}`});
       }
 
       // 6. Subject Engagement — correlated absences with sanctions
       const engFlags=getSubjectEngagement(px);
       engFlags.forEach(e=>{
-        concerns.push({type:'subj-engage',severity:'red',label:'Subject Engagement',detail:`${e.subj}: ${e.totalCorr} correlated absences (${e.corrPartial} partial-day${e.corrP1Whole?', '+e.corrP1Whole+' P1 whole-day':''}) — ${e.codes}/${e.totalCodes} codes, ${e.ratio}×`});
+        concerns.push({type:'subj-engage', subkey:e.subj,severity:'red',label:'Subject Engagement',detail:`${e.subj}: ${e.totalCorr} correlated absences (${e.corrPartial} partial-day${e.corrP1Whole?', '+e.corrP1Whole+' P1 whole-day':''}) — ${e.codes}/${e.totalCodes} codes, ${e.ratio}×`});
       });
 
       // 7. Subject Avoidance — disproportionate skipping of one subject (no sanctions required)
       const avoidFlags=getSubjectAvoidance(px);
       avoidFlags.forEach(a=>{
         const sev=parseFloat(a.ratio)>=4?'red':'amber';
-        concerns.push({type:'subj-avoid',severity:sev,label:'Subject Avoidance',detail:`Avoiding ${a.subj} — ${a.absences} qualifying absences (${a.partial} partial-day${a.p1Whole?', '+a.p1Whole+' P1 whole-day':''}), ${a.actualPct}% of qualifying absences vs expected ${a.expectedPct}%, ratio ${a.ratio}×`});
+        concerns.push({type:'subj-avoid', subkey:a.subj,severity:sev,label:'Subject Avoidance',detail:`Avoiding ${a.subj} — ${a.absences} qualifying absences (${a.partial} partial-day${a.p1Whole?', '+a.p1Whole+' P1 whole-day':''}), ${a.actualPct}% of qualifying absences vs expected ${a.expectedPct}%, ratio ${a.ratio}×`});
       });
 
       if(concerns.length){
@@ -8983,6 +9256,15 @@ function rPeer(){
             .filter(p => p.concerns.length > 0)
         : pupilConcerns;
 
+      // Split each pupil's concerns into active vs already-considered.
+      const splitPupils = filteredPupils.map(p=>{
+        const s=dsmSplit(p.px,p.concerns);
+        return {...p, _active:s.active, _dismissed:s.dismissed};
+      });
+      const activePupils = splitPupils.filter(p=>p._active.length>0);
+      const dismissedFlat = [];
+      splitPupils.forEach(p=>p._dismissed.forEach(c=>dismissedFlat.push({...c,_px:p.px,_pid:p.pid,_yg:p.yg,_tg:p.tg})));
+
       // Build chip strip
       const chipsHtml = CN_TYPES.map(t => {
         const active = _cnTypeFilter.has(t.id);
@@ -8999,35 +9281,62 @@ function rPeer(){
         ${chipsHtml}${clearBtn}
       </div>`;
 
-      // Build rows from filtered pupils
-      const pRows = filteredPupils.map(p=>{
-        const n=p.concerns.length;
-        return p.concerns.map((c,ci)=>{
+      // Build active rows (rowspan = number of ACTIVE concerns for the pupil)
+      const pRows = activePupils.map(p=>{
+        const cs=p._active;
+        const n=cs.length;
+        const pname=String(p.pid).replace(/\s*\([^)]+\)\s*$/,'');
+        return cs.map((c,ci)=>{
           const col=c.severity==='red'?PAL.red:PAL.orange;
           const sevDot=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col}"></span>`;
-          const tag=`<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:${col}12;border:1px solid ${col}44;color:${col}">${c.label}</span>`;
+          const resurf=c._resurfaced?dsmResurfBadge(c._resurfaced):'';
+          const tag=`<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:${col}12;border:1px solid ${col}44;color:${col}">${c.label}</span>${resurf}`;
           const pupilCells=ci===0?`<td style="font-family:'IBM Plex Mono',monospace;font-weight:500;vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">${pLink(p.px,p.pid)}${senPillShort(p.px)}</td>
           <td style="text-align:center;font-size:.72rem;color:var(--mu);vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">Y${p.yg}</td>
           <td style="font-size:.72rem;color:var(--mu);vertical-align:top;border-bottom:${n>1?'none':''};" rowspan="${n}">${p.tg}</td>`:'';
           const borderStyle=ci<n-1?'border-bottom:1px dashed rgba(40,34,20,.15)':'';
+          const considerBtn=dsmConsiderBtn(p.px,c.type,c._subkey,c.label,c.detail,pname);
           return`<tr>${pupilCells}
           <td style="${borderStyle}">${sevDot} ${tag}</td>
           <td style="font-size:.68rem;color:var(--mu);${borderStyle}">${c.detail}</td>
+          <td style="${borderStyle};text-align:right;white-space:nowrap">${considerBtn}</td>
         </tr>`;
         }).join('');
       }).join('');
 
       const subtitle = filterActive
-        ? `${filteredPupils.length}/${pupilConcerns.length} pupils match filter`
-        : `${pupilConcerns.length} pupils flagged`;
+        ? `${activePupils.length}/${pupilConcerns.length} pupils match filter${dismissedFlat.length?` · ${dismissedFlat.length} already considered`:''}`
+        : `${activePupils.length} pupils with active concerns${dismissedFlat.length?` · ${dismissedFlat.length} already considered`:''}`;
 
-      const tableHtml = filteredPupils.length
+      const tableHtml = activePupils.length
         ? `<div style="overflow-x:auto"><table class="d"><thead><tr>
-            <th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concern</th><th>Detail</th>
+            <th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concern</th><th>Detail</th><th style="text-align:right">Review</th>
           </tr></thead><tbody>${pRows}</tbody></table></div>`
-        : `<div style="color:var(--mu);font-size:.75rem;padding:1rem;font-style:italic">No pupils match the selected concern types.</div>`;
+        : `<div style="color:var(--mu);font-size:.75rem;padding:1rem;font-style:italic">${dismissedFlat.length?'No active concerns — all have been marked as already considered (see below).':'No pupils match the selected concern types.'}</div>`;
 
-      html += _cnCard('pupil', 'Pupil Concerns', subtitle, filterRow + tableHtml);
+      // Already-considered (muted, collapsible) — preserves the audit trail.
+      let dismissedCard='';
+      if(dismissedFlat.length){
+        const dRows=dismissedFlat.map(c=>{
+          const h=c._dismissal||{};
+          const pname=String(c._pid).replace(/\s*\([^)]+\)\s*$/,'');
+          const exp=h.expiresAt?('re-alerts '+fmtWhen(h.expiresAt)):'permanent';
+          const note=h.note?(' · “'+c._dismissal.note+'”'):'';
+          return `<tr style="opacity:.78">
+            <td style="font-family:'IBM Plex Mono',monospace;font-weight:500">${pLink(c._px,c._pid)}</td>
+            <td style="text-align:center;font-size:.72rem;color:var(--mu)">Y${c._yg}</td>
+            <td style="font-size:.72rem;color:var(--mu)">${c._tg}</td>
+            <td><span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:var(--sf2);border:1px solid var(--bd);color:var(--mu)">${c.label}</span></td>
+            <td style="font-size:.66rem;color:var(--mu)">✓ ${h.who}, ${fmtWhen(h.when)} · ${exp}${note}</td>
+            <td style="text-align:right;white-space:nowrap">${dsmRestoreBtn(c._key)}</td>
+          </tr>`;
+        }).join('');
+        const dTable=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Pupil</th><th style="text-align:center">Year</th><th>TG</th><th>Concern</th><th>Reviewed</th><th style="text-align:right">Restore</th></tr></thead><tbody>${dRows}</tbody></table></div>`;
+        dismissedCard=_cnCard('pupil-dismissed', 'Already Considered', `${dismissedFlat.length} concern${dismissedFlat.length===1?'':'s'} logged as reviewed`, dTable);
+      }
+
+      html += _cnCard('pupil', 'Pupil Concerns', subtitle, dsmToolbar() + filterRow + tableHtml);
+      html += dismissedCard;
     }
 
     // Class concerns
