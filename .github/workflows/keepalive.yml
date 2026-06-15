@@ -1,18 +1,14 @@
 name: Supabase keep-alive
 
 # Pings the Supabase project twice a week so the free-tier project is not
-# paused after 7 days of inactivity (which would otherwise happen over a
-# school holiday and leave the dashboard unreachable until someone restores it).
+# paused after 7 days of inactivity.
 #
 # Place this file at:  .github/workflows/keepalive.yml
 
 on:
   schedule:
-    # 06:00 UTC every Monday and Thursday.
-    # Gaps are 3 and 4 days — comfortably under the 7-day pause limit, with
-    # enough margin to survive GitHub occasionally delaying or skipping a run.
-    - cron: '0 6 * * 1,4'
-  workflow_dispatch:        # lets you press "Run workflow" in the Actions tab to test it
+    - cron: '0 6 * * 1,4'        # 06:00 UTC every Monday and Thursday
+  workflow_dispatch:
 
 jobs:
   ping:
@@ -21,15 +17,23 @@ jobs:
       - name: Query Supabase (touches Postgres, resets the inactivity timer)
         run: |
           URL="https://tpgzfdvholuhgrzkdmxe.supabase.co"
-          # Publishable key — safe to expose (it's already public in index.html;
-          # RLS protects the data). Move it to a repo variable if you prefer.
+          # Publishable key — safe to expose (already public in index.html).
           KEY="sb_publishable_gO94qgi7b30TeCfaVe3fHw_oKv71PyA"
 
-          # The trailing _=<timestamp> is a cache-buster so we never get a cached response.
-          curl --fail --show-error --silent --retry 3 --retry-delay 10 \
+          # Capture the body AND the HTTP status so failures are readable in the log.
+          resp=$(curl --show-error --silent -w $'\n%{http_code}' \
             "$URL/rest/v1/keepalive?select=ping&limit=1&_=$(date +%s)" \
             -H "apikey: $KEY" \
             -H "Authorization: Bearer $KEY" \
-            -H "Cache-Control: no-cache"
+            -H "Cache-Control: no-cache")
 
-          echo "Keep-alive ping sent at $(date -u)"
+          code=$(printf '%s' "$resp" | tail -n1)
+          body=$(printf '%s' "$resp" | sed '$d')
+          echo "HTTP status: $code"
+          echo "Response body: $body"
+
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::Keep-alive ping failed (HTTP $code)"
+            exit 1
+          fi
+          echo "Keep-alive ping OK at $(date -u)"
