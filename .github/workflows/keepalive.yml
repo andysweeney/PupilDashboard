@@ -20,9 +20,8 @@ jobs:
           # Publishable key — safe to expose (already public in index.html).
           KEY="sb_publishable_gO94qgi7b30TeCfaVe3fHw_oKv71PyA"
 
-          # Capture the body AND the HTTP status so failures are readable in the log.
           resp=$(curl --show-error --silent -w $'\n%{http_code}' \
-            "$URL/rest/v1/keepalive?select=ping&limit=1&_=$(date +%s)" \
+            "$URL/rest/v1/keepalive?select=ping&limit=1" \
             -H "apikey: $KEY" \
             -H "Authorization: Bearer $KEY" \
             -H "Cache-Control: no-cache")
