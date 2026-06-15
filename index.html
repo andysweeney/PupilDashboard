@@ -481,7 +481,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-27 (Admin editing restricted to users in the Supabase admins table; non-admins never see the Admin tab; dismissals stay open to all)');
+    console.log('[dsm] build dsm-28 (On-Call-categorised codes reclassified to On-Call type at ingest; Admin editing restricted to users in the Supabase admins table; non-admins never see the Admin tab; dismissals stay open to all)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -1155,7 +1155,7 @@ const _DKcfg=await _resolveDataKeys();
 DD.config.att_codes=_DKcfg.att_codes;
 DD.config.sen_codes=_DKcfg.sen_codes;
 DD.config.incident_codes=_DKcfg.incident_codes;
-{const _ICm=DD.config.incident_codes;(DD.sanctionDetails||[]).forEach(d=>{if(d&&_ICm[d[0]]) d[1]=_ICm[d[0]];});}
+{/* dsm:oncall-reclass:start */const _ICm=DD.config.incident_codes;let _ocReclass=0;(DD.sanctionDetails||[]).forEach((d,i)=>{if(d&&_ICm[d[0]]){d[1]=_ICm[d[0]];if(d[1]==='On-Call'&&DD.sanctions&&DD.sanctions[i]&&DD.sanctions[i][1]===0){DD.sanctions[i][1]=1;_ocReclass++;}}});DD._ocReclass=_ocReclass;try{if(_ocReclass)console.info('[dsm] reclassified '+_ocReclass+' On-Call-categorised code(s) to On-Call type');}catch(e){}/* dsm:oncall-reclass:end */}
 const _c={};function dc(i){if(_c[i])try{_c[i].destroy()}catch(e){}_c[i]=null}function sc2(i,c){_c[i]=c}
 
 function ygAt(ink,ay){return ay-ink+7}
