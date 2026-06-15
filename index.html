@@ -394,17 +394,38 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   // Re-layout charts for print so axes/labels fit the print box instead of being bitmap-scaled
   window.addEventListener('beforeprint',()=>{try{document.querySelectorAll('#p-ch .chw').forEach(w=>{w.dataset.sh=w.style.height||'';w.style.height='210px'});document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}});
   window.addEventListener('afterprint',()=>{try{document.querySelectorAll('#p-ch .chw').forEach(w=>{w.style.height=w.dataset.sh||''});document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}});
+  // ── Auth gate + data load ──────────────────────────────────────────────────
+  // Nothing loads until the user is signed in. The pupil data lives in a PRIVATE
+  // Supabase Storage bucket and is fetched with the signed-in user's JWT, so the
+  // public host only ever serves this empty shell. Blank SB_URL/SB_KEY for local
+  // dev to fall back to ./data.json.
+  const SB_URL='https://tpgzfdvholuhgrzkdmxe.supabase.co';
+  const SB_KEY='sb_publishable_gO94qgi7b30TeCfaVe3fHw_oKv71PyA';
+  const SB_ON=!!(SB_URL&&SB_KEY);
+  const AUTH_LS='pupilDashboard.session.v1';
+  const DATA_BUCKET='dashboard-data';
+  let _SESSION=null;
+  window.authDoLogin=authDoLogin;   // login handler must exist before the gate renders the login screen
+  if(SB_ON){
+    _SESSION=authLoad();
+    if(_SESSION&&authExpired()) await authRefresh();
+    if(!authToken()){ renderLoginScreen(); return; }
+    setInterval(function(){authRefresh();}, 45*60*1000); // keep long sessions alive
+  }
   let DD;
   try{
-    const resp=await fetch('./data.json');
-    if(!resp.ok)throw new Error('Failed to load data.json: '+resp.status);
+    let resp;
+    if(SB_ON){
+      resp=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/data.json',
+                       {headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()},cache:'no-store'});
+    }else{
+      resp=await fetch('./data.json');
+    }
+    if(!resp.ok)throw new Error('Failed to load data: '+resp.status);
     DD=await resp.json();
-    // NOTE: admin "data-key" settings (att_codes / sen_codes / incident_codes) are NOT
-    // read from the export here. They are resolved in the Boot section from the admin-owned
-    // store (default <- legacy export <- ./data_key_config.json <- localStorage). The export
-    // need not carry any of them. See _resolveDataKeys() below.
+    // admin "data-key" settings are resolved later from the admin-owned store, not here.
   }catch(e){
-    document.body.innerHTML='<div style="color:var(--red);padding:2rem;font-family:sans-serif"><b>Error loading data.json</b><br>'+e.message+'<br><br>Make sure you are running via a web server (not file://) and that data.json is in the same directory.</div>';
+    document.body.innerHTML='<div style="color:var(--red);padding:2rem;font-family:sans-serif"><b>Error loading data</b><br>'+e.message+'<br><br>If you are signed in and still see this, check that data.json exists in the Supabase bucket "'+DATA_BUCKET+'" and that its read policy allows authenticated users.</div>';
     return;
   }
 
@@ -460,7 +481,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-25 (Admin: consistent per-section Save buttons; grade map now syncs cross-device; data-key Save relabelled Export)');
+    console.log('[dsm] build dsm-26 (pupil data now loads from a private Supabase Storage bucket behind the login gate — public host serves only the shell)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -932,20 +953,17 @@ const SCALES_LS_KEY='pupilDashboard.scales.v1';
 // of truth for Admin settings, so a user sees the SAME config on any device/browser.
 // localStorage is demoted to an offline cache. Blank these two to revert to local-only.
 // The publishable key is meant to be public; security is enforced by Row-Level Security.
-const SB_URL='https://tpgzfdvholuhgrzkdmxe.supabase.co';
-const SB_KEY='sb_publishable_gO94qgi7b30TeCfaVe3fHw_oKv71PyA';
-const SB_ON=!!(SB_URL&&SB_KEY);
+// SB_URL / SB_KEY / SB_ON are declared at the top of boot (needed before the data load).
 
 // ── Auth (demo mode): email + password against Supabase Auth ────────────────
 // Accounts are created by hand in the Supabase dashboard. A successful sign-in
 // yields a per-user JWT; from then on every Supabase request carries that token
 // (see _SBHEAD) instead of the bare publishable key — which is what lets the
 // app_settings RLS policy be tightened to "authenticated only" so the shared
-// dismissals/settings store stops being world-readable. This gates the UI and the
-// Supabase store; on a static host data.json itself is still public, so it is
-// demo-grade protection (gate data.json via a serverless route for production).
-const AUTH_LS='pupilDashboard.session.v1';
-let _SESSION=null;
+// dismissals/settings store stops being world-readable. The pupil data itself now
+// loads from a private Supabase Storage bucket using the user's JWT at the top of
+// boot, so the public host serves only this empty shell.
+// AUTH_LS / _SESSION are declared at the top of boot (needed by the login gate).
 function authLoad(){try{const r=localStorage.getItem(AUTH_LS);return r?JSON.parse(r):null;}catch(e){return null;}}
 function authSave(s){try{localStorage.setItem(AUTH_LS,JSON.stringify(s));}catch(e){}}
 function authClear(){try{localStorage.removeItem(AUTH_LS);}catch(e){}}
@@ -971,7 +989,7 @@ async function authSignOut(){
   authClear();_SESSION=null;location.reload();
 }
 window.authSignOut=authSignOut;
-window.authDoLogin=async function(){
+async function authDoLogin(){
   const emEl=document.getElementById('lg-email'),pwEl=document.getElementById('lg-pass');
   const em=(emEl&&emEl.value||'').trim(),pw=(pwEl&&pwEl.value||'');
   const btn=document.getElementById('lg-btn'),err=document.getElementById('lg-err');
@@ -1067,13 +1085,7 @@ async function _resolveScales(){
   try{const ls=loadCfg('scales',SCALES_LS_KEY);if(ls){const s=_sanitiseScales(ls);if(s)cfg=s;}}catch(e){}
   return cfg;
 }
-// ── LOGIN GATE (demo) ── Block the dashboard until a valid session exists.
-_SESSION=authLoad();
-if(SB_ON){
-  if(_SESSION&&authExpired()) await authRefresh();
-  if(!authToken()){ renderLoginScreen(); return; }
-  setInterval(function(){authRefresh();}, 45*60*1000); // keep long sessions alive
-}
+// ── Login gate now runs at the top of boot, before any data is fetched. ──
 await sbPrefetch(['scales','dataKeys','thresholds','gcseMap']);
 // Two-way dismissal sync: pull the team's shared dismissals in and push any local-only
 // ones up. Non-blocking so first paint isn't gated on the network; refresh on landing.
