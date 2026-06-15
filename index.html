@@ -459,7 +459,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-17 (dismiss/restore re-render now binds to the panel\u2019s own pupil via data-px + console diagnostics to trace the disappearing-flags issue) \u2014 VERIFY in browser');
+    console.log('[dsm] build dsm-18 (adds per-detector diagnostics to pupilOtherConcernsAlert to pinpoint why the re-render returns empty) \u2014 VERIFY in browser');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -7843,7 +7843,7 @@ function rPeer(){
   // brief detail. Mirrors the Concerns tab logic so the same triggers apply.
   function pupilOtherConcernsAlert(px){
     const yg=curYG(REG[String(px)]?.intake);
-    if(!yg) return'';
+    if(!yg){console.log('[dsm] pcn px=%s -> NO year-group (intake=%o)',px,REG[String(px)]&&REG[String(px)].intake);return'';}
     const fn=firstName(px);
     const items=[];
     
@@ -7898,6 +7898,7 @@ function rPeer(){
       items.push({type:'sanc-conc',subkey:f.teacher,label:'Sanctions Concentration',severity:sev,detail});
     });
     
+    try{console.log('[dsm] pcn px=%s yg=%s items=%s | a20=%s a60=%s aPA=%s | s20=%s s60=%s sc20=%s | abs=%s avoid=%s sconc=%s',px,yg,items.length,a20&&a20.rate,a60&&a60.rate,aPA&&aPA.rate,s20,s60,sCount20,absAnalysis&&absAnalysis.slotFlags&&absAnalysis.slotFlags.length,avoidFlags&&avoidFlags.length,scFlags&&scFlags.length);}catch(_){}
     if(!items.length) return'';
 
     // Annotate each concern with its key + dismissal state, KEEPING ORDER.
