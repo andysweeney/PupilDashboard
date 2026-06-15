@@ -1,0 +1,88 @@
+{
+  "_README": "Admin-owned grading-scale config. Lives ALONGSIDE data.json but is NOT part of the school's data export. Edit here to deploy a baseline scale, or use the in-app Admin > Grading Scales editor (saves to the browser and overrides this file). Rank = array order; the FIRST row is rank 1 = best. Each row: label (descriptor staff see), csv (raw token(s) from the export that map to it), colour (hex), optional note (meaning).",
+  "ability": [
+    {
+      "label": "Excellent",
+      "csv": [
+        "E"
+      ],
+      "colour": "#2e9469"
+    },
+    {
+      "label": "Skilful",
+      "csv": [
+        "S"
+      ],
+      "colour": "#8a74c8"
+    },
+    {
+      "label": "Confident",
+      "csv": [
+        "C"
+      ],
+      "colour": "#4e6bc8"
+    },
+    {
+      "label": "Meeting",
+      "csv": [
+        "M"
+      ],
+      "colour": "#3b8fb5"
+    },
+    {
+      "label": "Working",
+      "csv": [
+        "W"
+      ],
+      "colour": "#9c8211"
+    },
+    {
+      "label": "Developing",
+      "csv": [
+        "D"
+      ],
+      "colour": "#bb6b1a"
+    },
+    {
+      "label": "Below",
+      "csv": [
+        "B"
+      ],
+      "colour": "#b5483b"
+    }
+  ],
+  "effort": [
+    {
+      "label": "1",
+      "csv": [
+        "1"
+      ],
+      "colour": "#b5483b",
+      "note": "Excellent"
+    },
+    {
+      "label": "2",
+      "csv": [
+        "2"
+      ],
+      "colour": "#bb6b1a",
+      "note": "Good"
+    },
+    {
+      "label": "3",
+      "csv": [
+        "3"
+      ],
+      "colour": "#3b8fb5",
+      "note": "Developing"
+    },
+    {
+      "label": "4",
+      "csv": [
+        "4"
+      ],
+      "colour": "#2e9469",
+      "note": "Low"
+    }
+  ]
+}
