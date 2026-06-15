@@ -459,7 +459,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-15 (dismiss/restore re-render is now panel-surgical only — removed the rP() fallback that could blank the pupil view; admin settings decoupled from data.json) — VERIFY in browser');
+    console.log('[dsm] build dsm-16 (Admin settings now persist to Supabase \u2014 shared across devices/browsers; localStorage demoted to offline cache; dismiss/restore surgical; data.json decoupled) \u2014 VERIFY in browser');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -899,6 +899,53 @@ function _mkScale(levels){
 const _ABCOL_DEFAULT={Below:PAL.red,Developing:PAL.orange,Working:PAL.gold,Meeting:PAL.sky,Confident:PAL.blue,Skilful:PAL.lilac,Excellent:PAL.green};
 const _ABMAP_DEFAULT={B:'Below',D:'Developing',W:'Working',M:'Meeting',C:'Confident',S:'Skilful',E:'Excellent'};
 const SCALES_LS_KEY='pupilDashboard.scales.v1';
+// ── Shared server-side settings store (Supabase) ───────────────────────────────
+// When SB_URL/SB_KEY are set, the Supabase table 'app_settings' is the single source
+// of truth for Admin settings, so a user sees the SAME config on any device/browser.
+// localStorage is demoted to an offline cache. Blank these two to revert to local-only.
+// The publishable key is meant to be public; security is enforced by Row-Level Security.
+const SB_URL='https://tpgzfdvholuhgrzkdmxe.supabase.co';
+const SB_KEY='sb_publishable_gO94qgi7b30TeCfaVe3fHw_oKv71PyA';
+const SB_ON=!!(SB_URL&&SB_KEY);
+const _SBHEAD=()=>({apikey:SB_KEY,Authorization:'Bearer '+SB_KEY});
+async function sbGet(id){
+  const r=await fetch(SB_URL+'/rest/v1/app_settings?id=eq.'+encodeURIComponent(id)+'&select=value',{headers:_SBHEAD(),cache:'no-store'});
+  if(!r.ok) throw new Error('sbGet '+id+' '+r.status);
+  const rows=await r.json(); return (rows&&rows.length)?rows[0].value:null;
+}
+async function sbSet(id,value){
+  const r=await fetch(SB_URL+'/rest/v1/app_settings',{method:'POST',headers:Object.assign(_SBHEAD(),{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({id,value,updated_at:new Date().toISOString()})});
+  if(!r.ok) throw new Error('sbSet '+id+' '+r.status); return true;
+}
+async function sbDel(id){
+  const r=await fetch(SB_URL+'/rest/v1/app_settings?id=eq.'+encodeURIComponent(id),{method:'DELETE',headers:_SBHEAD()}); return r.ok;
+}
+const _SBCACHE={};
+async function sbPrefetch(ids){
+  if(!SB_ON) return;
+  await Promise.all(ids.map(async id=>{try{_SBCACHE[id]=await sbGet(id);}catch(e){console.warn('[cfg] server prefetch failed for',id,e.message);}}));
+}
+// Authoritative stored override for a group (or null = use code/deployed baseline).
+// Server wins. If the server is reachable but EMPTY, migrate any existing local value up,
+// so a school's per-browser settings get promoted into shared storage on first run.
+function loadCfg(id,lsKey){
+  if(SB_ON&&(id in _SBCACHE)){
+    if(_SBCACHE[id]!=null) return _SBCACHE[id];
+    try{const ls=localStorage.getItem(lsKey);if(ls){const v=JSON.parse(ls);sbSet(id,v).then(()=>{_SBCACHE[id]=v;}).catch(()=>{});return v;}}catch(e){}
+    return null;
+  }
+  try{const ls=localStorage.getItem(lsKey);return ls?JSON.parse(ls):null;}catch(e){return null;}
+}
+// Persist a group: localStorage cache + server (authoritative). await before any reload.
+async function saveCfg(id,lsKey,value){
+  try{localStorage.setItem(lsKey,JSON.stringify(value));}catch(e){}
+  if(SB_ON){try{await sbSet(id,value);_SBCACHE[id]=value;}catch(e){console.warn('[cfg] server save failed for',id,e.message);return false;}}
+  return true;
+}
+async function resetCfg(id,lsKey){
+  try{localStorage.removeItem(lsKey);}catch(e){}
+  if(SB_ON){try{await sbDel(id);delete _SBCACHE[id];}catch(e){console.warn('[cfg] server reset failed for',id,e.message);}}
+}
 function _defaultScales(){
   return {
     ability:Object.entries((CFG.ability_map&&Object.keys(CFG.ability_map).length)?CFG.ability_map:_ABMAP_DEFAULT).map(([code,label])=>({csv:[code],label,colour:_ABCOL_DEFAULT[label]||PAL.slate})).reverse(),
@@ -923,9 +970,10 @@ function _sanitiseScales(cfg){
 async function _resolveScales(){
   let cfg=_defaultScales();
   try{const r=await fetch('./scales.json',{cache:'no-store'});if(r&&r.ok){const s=_sanitiseScales(await r.json());if(s)cfg=s;}}catch(e){}
-  try{const ls=localStorage.getItem(SCALES_LS_KEY);if(ls){const s=_sanitiseScales(JSON.parse(ls));if(s)cfg=s;}}catch(e){}
+  try{const ls=loadCfg('scales',SCALES_LS_KEY);if(ls){const s=_sanitiseScales(ls);if(s)cfg=s;}}catch(e){}
   return cfg;
 }
+await sbPrefetch(['scales','dataKeys','thresholds']);
 const SCALE_CFG=await _resolveScales();
 const ABILITY=_mkScale(SCALE_CFG.ability.map(r=>({csv:r.csv.slice(),label:r.label,colour:r.colour,note:r.note})));
 const EFFORT=_mkScale(SCALE_CFG.effort.map(r=>({csv:r.csv.slice(),label:r.label,colour:r.colour,note:r.note})));
@@ -964,10 +1012,10 @@ async function _resolveDataKeys(){
   };
   const apply=src=>{if(src&&typeof src==='object')['att_codes','sen_codes','incident_codes'].forEach(k=>{if(src[k]&&typeof src[k]==='object')out[k]=src[k];});};
   try{const r=await fetch('./data_key_config.json',{cache:'no-store'});if(r&&r.ok)apply(await r.json());}catch(e){}
-  try{const ls=localStorage.getItem(DATAKEYS_LS_KEY);if(ls)apply(JSON.parse(ls));}catch(e){}
+  try{const ls=loadCfg('dataKeys',DATAKEYS_LS_KEY);if(ls)apply(ls);}catch(e){}
   return out;
 }
-function _persistDataKeys(){try{localStorage.setItem(DATAKEYS_LS_KEY,JSON.stringify({att_codes:DD.config.att_codes,sen_codes:DD.config.sen_codes,incident_codes:DD.config.incident_codes}));}catch(e){console.warn('persist data-keys',e);}}
+function _persistDataKeys(){saveCfg('dataKeys',DATAKEYS_LS_KEY,{att_codes:DD.config.att_codes,sen_codes:DD.config.sen_codes,incident_codes:DD.config.incident_codes});}
 const _DKcfg=await _resolveDataKeys();
 DD.config.att_codes=_DKcfg.att_codes;
 DD.config.sen_codes=_DKcfg.sen_codes;
@@ -1204,7 +1252,7 @@ function saveThresholds(){
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
       SW_CODE, SW_ONCALL, SW_DET
     };
-    localStorage.setItem(_LS_KEY, JSON.stringify(obj));
+    saveCfg('thresholds', _LS_KEY, obj);
   } catch(e){
     console.warn('Could not save thresholds to localStorage:', e);
   }
@@ -1288,9 +1336,8 @@ function _refreshThresholdDisplays(){
 // Silently skips malformed/missing entries so saved state can never break boot.
 function loadThresholds(){
   try {
-    const raw = localStorage.getItem(_LS_KEY);
-    if(!raw) return;
-    const obj = JSON.parse(raw);
+    const obj = loadCfg('thresholds', _LS_KEY);
+    if(!obj) return;
     applyThresholdValues(obj);
   } catch(e){
     console.warn('Could not load thresholds from localStorage:', e);
@@ -1312,7 +1359,7 @@ function loadThresholds(){
 function resetThresholds(){
   if(!confirm('Reset all Admin thresholds to defaults? This cannot be undone.')) return;
   applyThresholdValues(_THRESHOLD_DEFAULTS);
-  try { localStorage.removeItem(_LS_KEY); } catch(e){}
+  resetCfg('thresholds', _LS_KEY);
   // Push values back into any Admin inputs that are currently rendered
   for(const [name, inputId] of Object.entries(_THRESHOLD_INPUTS)){
     const el = document.getElementById(inputId);
@@ -8917,7 +8964,7 @@ function rPeer(){
     const em=new Set();(cfg.effort||[]).forEach(r=>(r.csv||[]).forEach(c=>em.add(String(c))));
     return {ability:[...abU].filter(t=>!am.has(t)).sort(),effort:[...efU].filter(t=>!em.has(t)).sort()};
   };
-  window._saveScales=function(){
+  window._saveScales=async function(){
     const read=key=>{const rows=[];for(let i=0;i<9;i++){
       const lab=(document.getElementById('scl-'+key+'-label-'+i)?.value||'').trim();
       const csv=(document.getElementById('scl-'+key+'-csv-'+i)?.value||'').split(',').map(x=>x.trim()).filter(Boolean);
@@ -8938,12 +8985,12 @@ function rPeer(){
         +'\nPupils with those values will show blank for that grade. Save anyway?';
       if(!confirm(m))return;
     }
-    try{localStorage.setItem(SCALES_LS_KEY,JSON.stringify(cfg));}catch(e){alert('Could not save: '+e.message);return;}
+    try{await saveCfg('scales',SCALES_LS_KEY,cfg);}catch(e){alert('Could not save: '+e.message);return;}
     location.reload();
   };
-  window._resetScales=function(){
+  window._resetScales=async function(){
     if(!confirm('Reset both scales to the built-in defaults? This clears your saved scale settings.'))return;
-    try{localStorage.removeItem(SCALES_LS_KEY);}catch(e){}
+    await resetCfg('scales',SCALES_LS_KEY);
     location.reload();
   };
   window._adminSetInc=function(code,cat){
