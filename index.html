@@ -459,7 +459,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-14 (admin settings fully decoupled from data.json: att/sen/incident persist to localStorage + optional ./data_key_config.json; ability_map derived from scale store) — VERIFY in browser');
+    console.log('[dsm] build dsm-15 (dismiss/restore re-render is now panel-surgical only — removed the rP() fallback that could blank the pupil view; admin settings decoupled from data.json) — VERIFY in browser');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -636,18 +636,17 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   function dsmRefresh(){
     try{
       const on=id=>{const e=document.getElementById(id);return e&&e.classList.contains('on');};
-      if(on('vw-concerns')){popCNFilters();rCN();}
-      else if(on('vw-pupil')){
-        // Surgical: update ONLY the concern panel, not all of rP. A full rP() rebuilds
-        // every chart on the pupil page, and that heavy rebuild (inside the deferred
-        // tick, right after a confirm()) was blanking the view. This touches one div.
-        const panel=document.getElementById('pcn-panel');
-        const sel=document.getElementById('p-sel');
-        const x=sel?parseInt(sel.value):0;
-        if(panel&&x){panel.innerHTML=pupilOtherConcernsAlert(x);}
-        else{rP();}
-      }
-      else{try{rP();}catch(e){console.error('[dsm] re-render (fallback rP) failed:',e);}}
+      if(on('vw-concerns')){popCNFilters();rCN();return;}
+      // Surgical refresh of the pupil Concern-Flags panel ONLY. We deliberately NEVER call
+      // rP() from here: a full pupil re-render rebuilds every chart inside this deferred tick
+      // (fired right after a confirm()/click) and that heavy rebuild has been observed to
+      // blank the whole pupil view. If the panel or the selected pupil can't be resolved we
+      // leave the panel exactly as it is — a stale row is recoverable, a blank page is not.
+      const panel=document.getElementById('pcn-panel');
+      if(!panel) return;
+      const sel=document.getElementById('p-sel');
+      const x=sel?parseInt(sel.value):0;
+      if(x) panel.innerHTML=pupilOtherConcernsAlert(x);
     }catch(e){console.error('[dsm] re-render failed during restore/dismiss:',e);}
   }
 
