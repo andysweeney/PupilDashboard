@@ -1,0 +1,35 @@
+name: Supabase keep-alive
+
+# Pings the Supabase project twice a week so the free-tier project is not
+# paused after 7 days of inactivity (which would otherwise happen over a
+# school holiday and leave the dashboard unreachable until someone restores it).
+#
+# Place this file at:  .github/workflows/keepalive.yml
+
+on:
+  schedule:
+    # 06:00 UTC every Monday and Thursday.
+    # Gaps are 3 and 4 days — comfortably under the 7-day pause limit, with
+    # enough margin to survive GitHub occasionally delaying or skipping a run.
+    - cron: '0 6 * * 1,4'
+  workflow_dispatch:        # lets you press "Run workflow" in the Actions tab to test it
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query Supabase (touches Postgres, resets the inactivity timer)
+        run: |
+          URL="https://tpgzfdvholuhgrzkdmxe.supabase.co"
+          # Publishable key — safe to expose (it's already public in index.html;
+          # RLS protects the data). Move it to a repo variable if you prefer.
+          KEY="sb_publishable_gO94qgi7b30TeCfaVe3fHw_oKv71PyA"
+
+          # The trailing _=<timestamp> is a cache-buster so we never get a cached response.
+          curl --fail --show-error --silent --retry 3 --retry-delay 10 \
+            "$URL/rest/v1/keepalive?select=ping&limit=1&_=$(date +%s)" \
+            -H "apikey: $KEY" \
+            -H "Authorization: Bearer $KEY" \
+            -H "Cache-Control: no-cache"
+
+          echo "Keep-alive ping sent at $(date -u)"
