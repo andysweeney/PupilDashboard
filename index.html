@@ -125,7 +125,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <header>
 <div class="logo">Pupil Progress <span>Dashboard</span></div>
 <div class="tabs">
-<button class="tb" onclick="sw('admin',this)">🔧 Admin</button>
+<button id="tab-admin" class="tb" style="display:none" onclick="sw('admin',this)">🔧 Admin</button>
 <button class="tb on" onclick="sw('pupil',this)">👤 Pupil</button>
 <button class="tb" onclick="sw('subject',this)">📚 Subject</button>
 <button class="tb" onclick="sw('class',this)">🏫 Class</button>
@@ -481,7 +481,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-26 (pupil data now loads from a private Supabase Storage bucket behind the login gate — public host serves only the shell)');
+    console.log('[dsm] build dsm-27 (Admin editing restricted to users in the Supabase admins table; non-admins never see the Admin tab; dismissals stay open to all)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -1087,6 +1087,25 @@ async function _resolveScales(){
 }
 // ── Login gate now runs at the top of boot, before any data is fetched. ──
 await sbPrefetch(['scales','dataKeys','thresholds','gcseMap']);
+// ── Admin-write gating: only users listed in the Supabase `admins` table may edit
+//    Admin settings. Non-admins never see the Admin tab; RLS is the real enforcement
+//    (any config write from a non-admin is rejected server-side). Dismissals stay open. ──
+let IS_ADMIN=false;
+async function checkAdmin(){
+  IS_ADMIN=false;
+  if(!SB_ON){ IS_ADMIN=true; }            // local/no-Supabase dev: don't lock yourself out
+  else{
+    try{
+      const u=authUser();
+      if(u&&u.id){
+        const r=await fetch(SB_URL+'/rest/v1/admins?select=user_id&user_id=eq.'+encodeURIComponent(u.id),{headers:_SBHEAD()});
+        if(r.ok){const rows=await r.json();IS_ADMIN=Array.isArray(rows)&&rows.length>0;}
+      }
+    }catch(e){ IS_ADMIN=false; }          // fail closed: treat as non-admin on any error
+  }
+  try{const b=document.getElementById('tab-admin'); if(b) b.style.display=IS_ADMIN?'':'none';}catch(e){}
+}
+await checkAdmin();
 // Two-way dismissal sync: pull the team's shared dismissals in and push any local-only
 // ones up. Non-blocking so first paint isn't gated on the network; refresh on landing.
 dsmServerPush().then(()=>{try{dsmRefresh()}catch(e){}});
@@ -5944,6 +5963,7 @@ function renderNet(){
 }
 
 function sw(v,btn){
+  if(v==='admin' && !IS_ADMIN) return;   // non-admins cannot open Admin
   document.querySelectorAll('.vw').forEach(v2=>v2.classList.remove('on'));
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
