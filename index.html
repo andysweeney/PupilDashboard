@@ -466,7 +466,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-5 (incident categories: Welfare/Home Learning/On-Call/Other) — uses ./dismissals.json (lowercase)');
+    console.log('[dsm] build dsm-7 (ability flip: 1=best) — VERIFY ability charts/concerns in browser — uses ./dismissals.json (lowercase)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -883,7 +883,25 @@ const SUBS=CFG.subjects,AM=CFG.ability_map,PER=CFG.periods,PL=CFG.period_labels,
 const ABP=DD.attByPeriod||{}; // {pupilIdx: {period: overall attendance%}}
 const ABPS=DD.attByPeriodSubj||{}; // {pupilIdx: {period: {subject: attendance%}}}
 const AG=Object.keys(AM),AN=Object.values(AM);
-const AS={};Object.entries(AM).forEach(([k,v],i)=>{AS[v]=i+1;AS[k]=i+1});
+// ── Grading-scale foundation (1 = BEST convention). Single source of truth for
+//    rank/label/short/colour/tick-names; each level lists the raw CSV token(s) that
+//    map to it, rank = position (1 = best). ABILITY derives from ability_map (best
+//    first); EFFORT from a default 1..n. NOTE: this block is intentionally inert wrt
+//    the current display — the 1=best *flip* is applied as a separate, verified pass. ──
+function _mkScale(levels){
+  levels.forEach((lv,i)=>{lv.rank=i+1; if(!lv.short)lv.short=String(lv.label||'').slice(0,3);});
+  const byTok={},byLabel={};
+  levels.forEach(lv=>{(lv.csv||[]).forEach(c=>byTok[String(c)]=lv); byLabel[lv.label]=lv;});
+  const get=t=>byTok[String(t)]||byLabel[t]||null;
+  return {levels,n:levels.length,
+    rank:t=>{const l=get(t);return l?l.rank:null;},
+    label:t=>{const l=get(t);return l?l.label:null;},
+    short:t=>{const l=get(t);return l?l.short:null;},
+    names:()=>levels.map(l=>l.short)};            // best-first (rank 1 -> index 0)
+}
+const ABILITY=_mkScale(Object.entries(AM).map(([code,label])=>({csv:[code],label})).reverse());
+const EFFORT=_mkScale([['1','Excellent'],['2','Good'],['3','Developing'],['4','Low']].map(([c,l])=>({csv:[c],label:l})));
+const AS={};Object.entries(AM).forEach(([k,v])=>{const r=ABILITY.rank(k);AS[k]=r;AS[v]=r;});
 const GC={Below:PAL.red,Developing:PAL.orange,Working:PAL.gold,Meeting:PAL.sky,Confident:PAL.blue,Skilful:PAL.lilac,Excellent:PAL.green};
 const _c={};function dc(i){if(_c[i])try{_c[i].destroy()}catch(e){}_c[i]=null}function sc2(i,c){_c[i]=c}
 
@@ -1303,7 +1321,7 @@ function applyGM(){
 function showSWModal(){}
 function hideSWModal(){}
 function fN(v,d=1){return v!=null?v.toFixed(d):'No Data'}
-function aC(v){return v==null?'var(--mu)':v>=4?PAL.green:v<=2?PAL.red:'var(--mu)'}
+function aC(v){return v==null?'var(--mu)':v<=4?PAL.green:v>=6?PAL.red:'var(--mu)'}
 function eC(v){return v==null?'var(--mu)':v<=1.5?PAL.green:v>=3?PAL.red:'var(--mu)'}
 function chB(v,l){if(v===null)return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span style="font-family:'IBM Plex Mono',monospace;color:var(--mu)">No Data</span></div>`;const c=v>0?'pos':v<0?'neg':'flat';return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span class="chg ${c}">${v>0?'+':''}${v.toFixed(2)}</span></div>`}
 function abAvg(row,subs){if(!row)return null;const s=subs.map(s2=>row.sc[s2]?AS[AM[row.sc[s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
@@ -2317,7 +2335,7 @@ function rP(){
     // Filter to the fixed set of pupils who are currently in this TG
     const tgRows=allPRows.filter(r=>curTGPupils.has(r[0]));
     if(metric==='ab'){
-      return tgRows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return{x:r[0],v:s.length?s.reduce((a,b)=>a+b,0)/s.length:0}}).sort((a,b)=>b.v-a.v);
+      return tgRows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return{x:r[0],v:s.length?s.reduce((a,b)=>a+b,0)/s.length:0}}).sort((a,b)=>a.v-b.v);
     }else{
       return tgRows.map(r=>{const v=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:null).filter(e=>e!=null&&e>0);return{x:r[0],v:v.length?v.reduce((a,b)=>a+b,0)/v.length:0}}).sort((a,b)=>a.v-b.v);
     }
@@ -2370,7 +2388,7 @@ function rP(){
       const clsPups=new Set((ENR[inkKey(ink)]||[]).filter(r=>r.t==='cls'&&r.s===sf&&r.c===cls.c&&r.u===null).map(r=>r.x));
       const pRows=allR(ink,p).filter(r=>clsPups.has(r[0]));
       if(metric==='ab'){
-        const ranked=pRows.map(r=>({x:r[0],v:r[3][sf]?AS[AM[r[3][sf][0]]]||0:0})).filter(r=>r.v>0).sort((a,b)=>b.v-a.v);
+        const ranked=pRows.map(r=>({x:r[0],v:r[3][sf]?AS[AM[r[3][sf][0]]]||0:0})).filter(r=>r.v>0).sort((a,b)=>a.v-b.v);
         const ri=ranked.findIndex(r=>r.x===x)+1;
         return ri?`${ord(ri)}/${ranked.length}`:'—';
       }else{
@@ -2406,7 +2424,7 @@ function rP(){
           // Inverted: drop=value increased, gain=value decreased
           return dir==='drop'?x.diff>=thresh:x.diff<=-thresh;
         }else{
-          return dir==='drop'?x.diff<=-thresh:x.diff>=thresh;
+          return dir==='drop'?x.diff>=thresh:x.diff<=-thresh;
         }
       });if(!f2.length)return no;
       return f2.map(x=>{const col=dir==='drop'?PAL.red:PAL.green;const bg=dir==='drop'?'rgba(181,72,59,.08)':'rgba(46,148,105,.08)';const bd=dir==='drop'?'rgba(181,72,59,.2)':'rgba(46,148,105,.2)';const sign=x.diff>0?'+':'';return`<span style="display:inline-flex;gap:.15rem;background:${bg};border:1px solid ${bd};border-radius:3px;padding:.08rem .35rem;font-size:.7rem;color:${col}">${x.s} ${sign}${x.diff}</span>`}).join(' ');
@@ -2588,7 +2606,7 @@ function rP(){
 
   if(hasGrades&&isA){
     document.getElementById('p-crds').innerHTML=`
-    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div>
+    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${fN(a6)}<span style="font-size:.8rem;color:var(--mu)">/7</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
@@ -2608,7 +2626,7 @@ function rP(){
       const clsPups=new Set((ENR[inkKey(ink)]||[]).filter(r=>r.t==='cls'&&r.s===sf&&r.c===curCls.c&&r.u===null).map(r=>r.x));
       const clsRows=allR(ink,lp).filter(r=>clsPups.has(r[0]));
       // Ability rank
-      const abRanked=clsRows.map(r=>({x:r[0],v:r[3][sf]?AS[AM[r[3][sf][0]]]||0:0})).filter(r=>r.v>0).sort((a,b)=>b.v-a.v);
+      const abRanked=clsRows.map(r=>({x:r[0],v:r[3][sf]?AS[AM[r[3][sf][0]]]||0:0})).filter(r=>r.v>0).sort((a,b)=>a.v-b.v);
       const abRi=abRanked.findIndex(r=>r.x===x)+1;
       abClsRkStr=abRi?`${ord(abRi)}/${abRanked.length}`:'—';
       // Effort rank
@@ -2638,7 +2656,7 @@ function rP(){
   dc('pab');dc('pef');
   if(hasGrades){
   const labs=pp.map(p=>PL[PER.indexOf(p)]);
-  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
+  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
   const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay: subject-specific when single subject, overall when all
@@ -2653,7 +2671,7 @@ function rP(){
     const attLabel=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     abDS.push({label:attLabel,data:attData,borderColor:PAL.green,backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:PAL.green,tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,reverse:true,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const names=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   const efDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][1]||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay on effort chart
@@ -3628,7 +3646,7 @@ function rCmp(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Year ${targetYG} ${subLabel} \u2014 Cohort Comparison Over Time</div>
-    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpef"></canvas></div></div></div>`;
 
@@ -3705,7 +3723,7 @@ function rCmp(){
   const efMin=Math.max(0.5,Math.floor((efMinV-0.1)*10)/10);
   const efMax=Math.min(4.5,Math.ceil((efMaxV+0.1)*10)/10);
 
-  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets)},scales:{y:{min:abMin,max:abMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const names=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
+  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets)},scales:{y:{min:abMin,max:abMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const names=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
 
   sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
 }
@@ -3956,7 +3974,7 @@ function rPrg(){
     },
     scales:{
       y:{min:yMin,max:yMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1,
-        callback:isAb?v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}:undefined},
+        callback:isAb?v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}:undefined},
         grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},
       x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}
     }
@@ -5824,10 +5842,10 @@ function rSV(){
       if(metric==='ef'){
         if(diff>=threshold)return{idx:r[0],pid:r[1],cur:cv,prev:pv,diff,flags:r};
       }else{
-        if(diff<=-threshold)return{idx:r[0],pid:r[1],cur:cv,prev:pv,diff,flags:r};
+        if(diff>=threshold)return{idx:r[0],pid:r[1],cur:cv,prev:pv,diff,flags:r};
       }
       return null;
-    }).filter(Boolean).sort((a,b)=>metric==='ef'?b.diff-a.diff:a.diff-b.diff);
+    }).filter(Boolean).sort((a,b)=>b.diff-a.diff);
   }
 
   const abTT=concerns('ab',lr,p5,CT_AB);
@@ -5856,7 +5874,7 @@ function rSV(){
     return{idx:parseInt(idx),pid,n,flags:r||null,cats,catStr};
   }).sort((a,b)=>b.n-a.n);
 
-  function abLabel(v){const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return v>=1&&v<=7?n[v-1]:v}
+  function abLabel(v){const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return v>=1&&v<=7?n[v-1]:v}
   function efLabel(v){return v>=1&&v<=4?['Exc','Good','Dev','Low'][v-1]:v}
 
   // Helper: get class/teacher for a pupil in this subject
@@ -5941,7 +5959,7 @@ function rSV(){
   }else{
 
   document.getElementById('sv-cards').innerHTML=`
-    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div>
+    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${fN(avg)}<span style="font-size:.8rem;color:var(--mu)">/7</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
@@ -5957,12 +5975,12 @@ function rSV(){
     <div class="crd"><div class="ct2">Effort Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${efRows}</div></div>`;
 
   dc('svab');dc('svef');dc('svst');dc('svefst');
-  document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
+  document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
 
   // Distribution section title
   document.getElementById('sv-dist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Distribution Over Time</div>`;
 
-  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
+  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
 
   // Build per-period data points for all pupils and each sub-group
   function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
@@ -6000,7 +6018,7 @@ function rSV(){
 
   const showLegend={labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:8,padding:8}};
 
-  sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('svef',new Chart(document.getElementById('c-svef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('svst',new Chart(document.getElementById('c-svst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
 
@@ -6111,10 +6129,10 @@ function rCL(){
       if(metric==='ef'){
         if(diff>=threshold)return{idx:r[0],pid:r[1],cur:cv,prev:pv,diff,flags:r};
       }else{
-        if(diff<=-threshold)return{idx:r[0],pid:r[1],cur:cv,prev:pv,diff,flags:r};
+        if(diff>=threshold)return{idx:r[0],pid:r[1],cur:cv,prev:pv,diff,flags:r};
       }
       return null;
-    }).filter(Boolean).sort((a,b)=>metric==='ef'?b.diff-a.diff:a.diff-b.diff);
+    }).filter(Boolean).sort((a,b)=>b.diff-a.diff);
   }
   const abTT=concerns('ab',lr,p5,CT_AB),abYoY=concerns('ab',lr,p3,CT_AB);
   const efTT=concerns('ef',lr,p5,CT_EF),efYoY=concerns('ef',lr,p3,CT_EF);
@@ -6134,7 +6152,7 @@ function rCL(){
     const catStr=incCatShortStr(cats);
     return{idx:parseInt(idx),pid,n,flags:r||null,cats,catStr};
   }).sort((a,b)=>b.n-a.n);
-  function abLabel(v){const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return v>=1&&v<=7?n[v-1]:v}
+  function abLabel(v){const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return v>=1&&v<=7?n[v-1]:v}
   function efLabel(v){return v>=1&&v<=4?['Exc','Good','Dev','Low'][v-1]:v}
   function concernRow(item,metric){
     const curL=metric==='ab'?abLabel(item.cur):efLabel(item.cur);
@@ -6374,7 +6392,7 @@ function rCL(){
 
   dc('clab');dc('clef');dc('clst');dc('clefst');
   if(hasGradesCL){
-  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
+  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
 
   function ptAb(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
   function ptEf(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}
@@ -6394,7 +6412,7 @@ function rCL(){
   const efYMin=allEfV.length?Math.max(0.5,Math.floor((Math.min(...allEfV)-0.3)*10)/10):0.5;
   const efYMax=allEfV.length?Math.min(4.5,Math.ceil((Math.max(...allEfV)+0.3)*10)/10):4.5;
   const showLegend={labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:8,padding:8}};
-  sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('clef',new Chart(document.getElementById('c-clef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('clst',new Chart(document.getElementById('c-clst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
   const effortColors2={'1':PAL.red,'2':PAL.orange,'3':PAL.sky,'4':PAL.green};
@@ -6767,7 +6785,7 @@ function rPeer(){
     return;
   }
 
-  const abNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(7 = Excellent)</span>';
+  const abNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span>';
   const efNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span>';
 
   document.getElementById('peer-charts').innerHTML=`
@@ -6783,7 +6801,7 @@ function rPeer(){
   const allAbVals=allSeries.flatMap(s=>s.abData.filter(v=>v!=null));
   const abMinP=allAbVals.length?Math.max(1,Math.floor(Math.min(...allAbVals)-.5)):1;
   const abMaxP=allAbVals.length?Math.min(7,Math.ceil(Math.max(...allAbVals)+.5)):7;
-  sc2('peerAb',new Chart(document.getElementById('c-peerAb'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'abData')},options:chartOpts(abMinP,abMaxP,false,false)}));
+  sc2('peerAb',new Chart(document.getElementById('c-peerAb'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'abData')},options:chartOpts(abMinP,abMaxP,true,false)}));
 
   // Effort chart (inverted) - 1 to 4
   sc2('peerEf',new Chart(document.getElementById('c-peerEf'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'efData')},options:chartOpts(1,4,true,false)}));
@@ -6846,7 +6864,7 @@ function rPeer(){
     return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
   }
   function fN(v){return v!=null?v.toFixed(1):'—'}
-  function aC(v){if(v==null)return'var(--mu)';if(v>=6)return'var(--exc)';if(v>=5)return'var(--skl)';if(v>=4)return'var(--con)';if(v>=3)return'var(--met)';if(v>=2)return'var(--wrk)';return'var(--bel)'}
+  function aC(v){if(v==null)return'var(--mu)';if(v<=2)return'var(--exc)';if(v<=3)return'var(--skl)';if(v<=4)return'var(--con)';if(v<=5)return'var(--met)';if(v<=6)return'var(--wrk)';return'var(--bel)'}
   function eC(v){if(v==null)return'var(--mu)';if(v<=1.5)return'var(--exc)';if(v<=2)return'var(--con)';if(v<=3)return'var(--wrk)';return'var(--bel)'}
 
   // Get pupils in this TG (or all TGs in the year group if '__all' selected)
@@ -6908,7 +6926,7 @@ function rPeer(){
       <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?PAL.green:parseFloat(tgYtdAtt)>=90?'var(--tx)':PAL.red}">${tgYtdAtt}%</div>
       <div style="font-size:.72rem;color:var(--mu)">Codes: <span style="color:var(--orange);font-weight:600">${tgCodes}</span> · Detentions: <span style="color:var(--violet);font-weight:600">${tgDets}</span></div>
     </div>
-    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(7 = Excellent)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${fN(avg)}</div></div>
+    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${fN(avg)}</div></div>
     <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)}</div></div>`:''}
   </div>`;
 
@@ -7079,11 +7097,11 @@ function rPeer(){
     const efYMin=allEfVals.length?Math.max(1,Math.floor(Math.min(...allEfVals)-.5)):1;
     const efYMax=allEfVals.length?Math.min(4,Math.ceil(Math.max(...allEfVals)+.5)):4;
 
-    document.getElementById('tg-charts').innerHTML=`<div class="chc"><div class="cht">${tgName} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(7 = Excellent)</span></div><div class="chw"><canvas id="c-tgab"></canvas></div></div><div class="chc"><div class="cht">${tgName} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-tgef"></canvas></div></div>`;
+    document.getElementById('tg-charts').innerHTML=`<div class="chc"><div class="cht">${tgName} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = best)</span></div><div class="chw"><canvas id="c-tgab"></canvas></div></div><div class="chc"><div class="cht">${tgName} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-tgef"></canvas></div></div>`;
 
     dc('tgab');dc('tgef');
     const showLegend={labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:8,padding:6}};
-    sc2('tgab',new Chart(document.getElementById('c-tgab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Bel','Dev','Wrk','Met','Con','Skl','Exc'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+    sc2('tgab',new Chart(document.getElementById('c-tgab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
     sc2('tgef',new Chart(document.getElementById('c-tgef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   }else{
     document.getElementById('tg-perf-title').innerHTML='';
@@ -8757,7 +8775,14 @@ function rPeer(){
       <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><button onclick="applyCT();applySW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.75rem;font-weight:600;padding:.5rem 1rem;border-radius:6px;cursor:pointer">Apply Changes</button><button onclick="resetThresholds()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.5rem .9rem;border-radius:6px;cursor:pointer" title="Restore all thresholds to factory defaults and clear saved values">Reset to Defaults</button><span style="font-size:.65rem;color:var(--mu);margin-left:.5rem">Saved values persist across hard refreshes (this browser only).</span></div>
     </div>`;
 
-    out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml;
+    // Read-only preview of the configurable grading scales (editors come later).
+    const _scaleTable=(title,S)=>{
+      let h=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">${title} Scale <span style="font-weight:400;font-size:.62rem;color:var(--mu)">(rank 1 = best \u00b7 ${S.n} levels \u00b7 read-only preview)</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th style="text-align:center">Rank</th><th>Label</th><th>CSV value(s)</th></tr></thead><tbody>`;
+      S.levels.forEach(lv=>{h+=`<tr><td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-weight:600">${lv.rank}</td><td style="font-weight:500">${lv.label}</td><td style="font-family:'IBM Plex Mono',monospace;font-size:.68rem">${(lv.csv||[]).join(', ')}</td></tr>`;});
+      h+=`</tbody></table></div></div>`;return h;
+    };
+    const scalesHtml=`<div class="dwt" style="font-size:.95rem;margin:.5rem 0 .75rem">Grading Scales</div>`+_scaleTable('Ability',ABILITY)+_scaleTable('Effort',EFFORT);
+    out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml+scalesHtml;
   }
 
   // Admin change handlers
