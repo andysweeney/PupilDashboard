@@ -459,7 +459,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-16 (Admin settings now persist to Supabase \u2014 shared across devices/browsers; localStorage demoted to offline cache; dismiss/restore surgical; data.json decoupled) \u2014 VERIFY in browser');
+    console.log('[dsm] build dsm-17 (dismiss/restore re-render now binds to the panel\u2019s own pupil via data-px + console diagnostics to trace the disappearing-flags issue) \u2014 VERIFY in browser');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -603,6 +603,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   function dsmConfirm(){
     if(!_dsmPendingKey)return;
+    console.log('[dsm] CONSIDERED confirmed for key:',_dsmPendingKey);
     const ctx=window._dsmCtx[_dsmPendingKey]||{};
     const who=(document.getElementById('dsm-who').value||'').trim()||'—';
     const note=(document.getElementById('dsm-note').value||'').trim();
@@ -625,6 +626,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   function dsmRestore(keyEnc){
     const key=decodeURIComponent(keyEnc);
+    console.log('[dsm] RESTORE clicked for key:',key);
     const rec=DSM[key];if(!rec)return;
     if(!confirm('Restore this concern to the active list? The dismissal record is kept for audit.'))return;
     const who=localStorage.getItem(DSM_WHO_KEY)||'—';
@@ -636,18 +638,22 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   function dsmRefresh(){
     try{
       const on=id=>{const e=document.getElementById(id);return e&&e.classList.contains('on');};
-      if(on('vw-concerns')){popCNFilters();rCN();return;}
-      // Surgical refresh of the pupil Concern-Flags panel ONLY. We deliberately NEVER call
-      // rP() from here: a full pupil re-render rebuilds every chart inside this deferred tick
-      // (fired right after a confirm()/click) and that heavy rebuild has been observed to
-      // blank the whole pupil view. If the panel or the selected pupil can't be resolved we
-      // leave the panel exactly as it is — a stale row is recoverable, a blank page is not.
+      if(on('vw-concerns')){console.log('[dsm] refresh -> concerns dashboard');popCNFilters();rCN();return;}
+      // Surgical refresh of the pupil Concern-Flags panel ONLY. We NEVER call rP() here.
+      // Bind to the pupil the PANEL was rendered for (data-px), not the dropdown, so a stale
+      // or changed p-sel can never make us render a different pupil's (often empty) concerns.
       const panel=document.getElementById('pcn-panel');
-      if(!panel) return;
+      if(!panel){console.log('[dsm] refresh -> no #pcn-panel, skipping');return;}
+      const panelX=parseInt(panel.getAttribute('data-px')||'')||0;
       const sel=document.getElementById('p-sel');
-      const x=sel?parseInt(sel.value):0;
-      if(x) panel.innerHTML=pupilOtherConcernsAlert(x);
-    }catch(e){console.error('[dsm] re-render failed during restore/dismiss:',e);}
+      const selX=sel?parseInt(sel.value):0;
+      const x=panelX||selX;
+      const beforeLen=panel.innerHTML.length;
+      const out=x?pupilOtherConcernsAlert(x):'';
+      console.log('[dsm] refresh pupil panel: panelX=%s selX=%s using=%s | beforeLen=%s newLen=%s empty=%s',panelX,selX,x,beforeLen,out.length,out.length===0);
+      if(!x){console.log('[dsm] refresh -> no pupil id resolved, leaving panel as-is');return;}
+      panel.innerHTML=out;
+    }catch(e){console.error('[dsm] re-render FAILED during restore/dismiss:',e);}
   }
 
   // ── Export / Import (shared-sync on a static host) ──
@@ -2699,7 +2705,7 @@ function rP(){
   const bcLine=bcBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${bcBadges}</div>`:'';
   const otherConcernsAlert=pupilOtherConcernsAlert(x);
 
-  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}<div id="pcn-panel">${otherConcernsAlert}</div>${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
+  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}<div id="pcn-panel" data-px="${x}">${otherConcernsAlert}</div>${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
   renderTimetable(x);
