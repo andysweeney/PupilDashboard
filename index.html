@@ -143,6 +143,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <button class="tb" onclick="sw('slotavoid',this)">🎯 Slot Avoidance</button>
 <button class="tb" onclick="sw('rebalance',this)">🎚 Rebalance</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
+<button class="tb" onclick="window.authSignOut&&window.authSignOut()" style="margin-left:auto" title="Sign out">🔑 Sign out</button>
 </div>
 <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
   <span id="ct-display" style="font-size:.72rem;color:#ffffff"></span>
@@ -459,7 +460,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-21 (fix: load saved thresholds before first pupil render \u2014 stops boot-pupil concerns vanishing on dismiss/restore)');
+    console.log('[dsm] build dsm-23 (demo login gate: Supabase email+password auth; requests now carry the user token)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -467,6 +468,31 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     }catch(e){/* no shared file yet — that's fine */}
     DSM=dsmMerge(baseline,dsmLoadLocal());
     dsmPersist();
+  }
+
+  // ── Shared-store sync (Supabase) ──────────────────────────────────────────
+  // Dismissals accumulate across the WHOLE pastoral team, so the shared store is
+  // just another merge source — NOT an authoritative overwrite like Admin settings.
+  // Each push is a serialised read-merge-write: pull the current server map, union
+  // it with our local DSM (histories deduped by dsmMerge), adopt the result, persist
+  // a local cache, and write it back. Serialising via _dsmPushChain stops two quick
+  // clicks in THIS browser from racing. (Two DIFFERENT browsers writing within the
+  // same ~200ms round-trip share a last-write-wins window; a lost dismissal merely
+  // resurfaces as active and can be re-applied — no corruption. Per-key rows would
+  // remove even that, and are the upgrade path if simultaneous use grows.)
+  let _dsmPushChain = Promise.resolve();
+  async function dsmServerPush(){
+    if(typeof SB_ON==='undefined' || !SB_ON) return;
+    _dsmPushChain = _dsmPushChain.then(async ()=>{
+      try{
+        const remote = await sbGet('dismissals');
+        const merged = dsmMerge((remote&&(remote.dismissals||remote))||{}, DSM);
+        DSM = merged;
+        dsmPersist();
+        await sbSet('dismissals', {dismissals:merged, updatedBy:(localStorage.getItem(DSM_WHO_KEY)||''), updatedAt:new Date().toISOString()});
+      }catch(e){ console.warn('[dsm] shared-store sync failed:', e.message); }
+    });
+    return _dsmPushChain;
   }
 
   // ── Query helpers ──
@@ -617,6 +643,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     rec.history.push({who,when:now.toISOString(),note,expiresAt,detailSnapshot:ctx.detail||''});
     DSM[_dsmPendingKey]=rec;
     dsmPersist();
+    dsmServerPush();            // propagate to the shared store (read-merge-write)
     dsmCancel();
     setTimeout(dsmRefresh,0);
   }
@@ -629,7 +656,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     if(!confirm('Restore this concern to the active list? The dismissal record is kept for audit.'))return;
     const who=localStorage.getItem(DSM_WHO_KEY)||'—';
     rec.history.push({who,when:new Date().toISOString(),note:'(restored to active)',expiresAt:new Date().toISOString(),restored:true});
-    dsmPersist();setTimeout(dsmRefresh,0); // defer: avoid replacing the just-clicked button mid-dispatch
+    dsmPersist();dsmServerPush();setTimeout(dsmRefresh,0); // defer: avoid replacing the just-clicked button mid-dispatch
   }
 
   // Re-render whichever concern surface is currently visible.
@@ -664,16 +691,16 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   }
   function dsmImport(file){
     const fr=new FileReader();
-    fr.onload=()=>{try{const j=JSON.parse(fr.result);const inc=j.dismissals||j;DSM=dsmMerge(DSM,inc);dsmPersist();alert('Dismissals imported and merged.');setTimeout(dsmRefresh,0);}catch(e){alert('Could not parse dismissals file: '+e.message);}};
+    fr.onload=()=>{try{const j=JSON.parse(fr.result);const inc=j.dismissals||j;DSM=dsmMerge(DSM,inc);dsmPersist();dsmServerPush();alert('Dismissals imported and merged.');setTimeout(dsmRefresh,0);}catch(e){alert('Could not parse dismissals file: '+e.message);}};
     fr.readAsText(file);
   }
   // Small toolbar (mounted at the top of the Concerns tab output).
   function dsmToolbar(){
     return '<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.3rem 0 .6rem;font-size:.66rem;color:var(--mu)">'+
-      '<span>Dismissals: shared <code>dismissals.json</code> + this browser’s local changes.</span>'+
+      '<span>Dismissals sync automatically across devices via the shared database.</span>'+
       '<button onclick="dsmExport()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.66rem;font-weight:600;padding:.25rem .6rem;border-radius:5px;cursor:pointer">Export dismissals.json</button>'+
       '<button onclick="dsmImportPick()" style="background:var(--sf2);color:var(--tx);border:1px solid var(--bd);font-family:inherit;font-size:.66rem;padding:.25rem .6rem;border-radius:5px;cursor:pointer">Import / merge</button>'+
-      '<span style="opacity:.8">Re-deploy the exported file to share with the team.</span></div>';
+      '<span style="opacity:.8">Export/import is for backups or offline transfer only.</span></div>';
   }
 
   // Inline-handler exposure (handlers run in global scope).
@@ -908,7 +935,73 @@ const SCALES_LS_KEY='pupilDashboard.scales.v1';
 const SB_URL='https://tpgzfdvholuhgrzkdmxe.supabase.co';
 const SB_KEY='sb_publishable_gO94qgi7b30TeCfaVe3fHw_oKv71PyA';
 const SB_ON=!!(SB_URL&&SB_KEY);
-const _SBHEAD=()=>({apikey:SB_KEY,Authorization:'Bearer '+SB_KEY});
+
+// ── Auth (demo mode): email + password against Supabase Auth ────────────────
+// Accounts are created by hand in the Supabase dashboard. A successful sign-in
+// yields a per-user JWT; from then on every Supabase request carries that token
+// (see _SBHEAD) instead of the bare publishable key — which is what lets the
+// app_settings RLS policy be tightened to "authenticated only" so the shared
+// dismissals/settings store stops being world-readable. This gates the UI and the
+// Supabase store; on a static host data.json itself is still public, so it is
+// demo-grade protection (gate data.json via a serverless route for production).
+const AUTH_LS='pupilDashboard.session.v1';
+let _SESSION=null;
+function authLoad(){try{const r=localStorage.getItem(AUTH_LS);return r?JSON.parse(r):null;}catch(e){return null;}}
+function authSave(s){try{localStorage.setItem(AUTH_LS,JSON.stringify(s));}catch(e){}}
+function authClear(){try{localStorage.removeItem(AUTH_LS);}catch(e){}}
+function authToken(){return (_SESSION&&_SESSION.access_token)||null;}
+function authUser(){return (_SESSION&&_SESSION.user)||null;}
+function authExpired(){if(!_SESSION)return true;const exp=_SESSION.expires_at?_SESSION.expires_at*1000:0;return !exp||Date.now()>(exp-60000);}
+async function authSignIn(email,password){
+  const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email:email,password:password})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error_description||j.msg||j.error||('Sign-in failed ('+r.status+')'));
+  _SESSION=j; authSave(j); return j;
+}
+async function authRefresh(){
+  if(!_SESSION||!_SESSION.refresh_token) return null;
+  try{
+    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:_SESSION.refresh_token})});
+    if(!r.ok){authClear();_SESSION=null;return null;}
+    const j=await r.json();_SESSION=j;authSave(j);return j;
+  }catch(e){return null;}
+}
+async function authSignOut(){
+  try{if(authToken())await fetch(SB_URL+'/auth/v1/logout',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()}});}catch(e){}
+  authClear();_SESSION=null;location.reload();
+}
+window.authSignOut=authSignOut;
+window.authDoLogin=async function(){
+  const emEl=document.getElementById('lg-email'),pwEl=document.getElementById('lg-pass');
+  const em=(emEl&&emEl.value||'').trim(),pw=(pwEl&&pwEl.value||'');
+  const btn=document.getElementById('lg-btn'),err=document.getElementById('lg-err');
+  if(err)err.style.display='none';
+  if(!em||!pw){if(err){err.textContent='Enter your email and password.';err.style.display='block';}return;}
+  if(btn){btn.disabled=true;btn.textContent='Signing in\u2026';}
+  try{await authSignIn(em,pw);location.reload();}
+  catch(e){if(err){err.textContent=String(e&&e.message||e);err.style.display='block';}if(btn){btn.disabled=false;btn.textContent='Sign in';}}
+};
+function renderLoginScreen(){
+  const D=document;
+  D.body.innerHTML=
+    '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);font-family:system-ui,sans-serif;padding:1rem">'+
+      '<div style="width:100%;max-width:360px;background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:1.6rem 1.5rem;box-shadow:0 8px 30px rgba(0,0,0,.18)">'+
+        '<div style="font-weight:800;font-size:1.05rem;color:var(--tx);margin-bottom:.2rem">Pupil Progress Dashboard</div>'+
+        '<div style="font-size:.72rem;color:var(--mu);margin-bottom:1.1rem">Sign in to continue</div>'+
+        '<label style="display:block;font-size:.66rem;color:var(--mu);margin-bottom:.2rem">Email</label>'+
+        '<input id="lg-email" type="email" autocomplete="username" style="width:100%;box-sizing:border-box;margin-bottom:.7rem;padding:.5rem .6rem;border:1px solid var(--bd);border-radius:7px;background:var(--sf2);color:var(--tx);font-family:inherit;font-size:.8rem">'+
+        '<label style="display:block;font-size:.66rem;color:var(--mu);margin-bottom:.2rem">Password</label>'+
+        '<input id="lg-pass" type="password" autocomplete="current-password" style="width:100%;box-sizing:border-box;margin-bottom:1rem;padding:.5rem .6rem;border:1px solid var(--bd);border-radius:7px;background:var(--sf2);color:var(--tx);font-family:inherit;font-size:.8rem">'+
+        '<div id="lg-err" style="display:none;color:var(--red);font-size:.7rem;margin-bottom:.7rem"></div>'+
+        '<button id="lg-btn" style="width:100%;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.82rem;font-weight:700;padding:.6rem;border-radius:8px;cursor:pointer">Sign in</button>'+
+        '<div style="font-size:.62rem;color:var(--mu);margin-top:.9rem;line-height:1.4">Accounts are issued by your administrator. Pupil data is confidential \u2014 do not share your login.</div>'+
+      '</div>'+
+    '</div>';
+  const btn=D.getElementById('lg-btn');if(btn)btn.addEventListener('click',window.authDoLogin);
+  const pw=D.getElementById('lg-pass');if(pw)pw.addEventListener('keydown',function(ev){if(ev.key==='Enter')window.authDoLogin();});
+  setTimeout(function(){const e=D.getElementById('lg-email');if(e)e.focus();},0);
+}
+const _SBHEAD=()=>({apikey:SB_KEY,Authorization:'Bearer '+(authToken()||SB_KEY)});
 async function sbGet(id){
   const r=await fetch(SB_URL+'/rest/v1/app_settings?id=eq.'+encodeURIComponent(id)+'&select=value',{headers:_SBHEAD(),cache:'no-store'});
   if(!r.ok) throw new Error('sbGet '+id+' '+r.status);
@@ -974,7 +1067,17 @@ async function _resolveScales(){
   try{const ls=loadCfg('scales',SCALES_LS_KEY);if(ls){const s=_sanitiseScales(ls);if(s)cfg=s;}}catch(e){}
   return cfg;
 }
+// ── LOGIN GATE (demo) ── Block the dashboard until a valid session exists.
+_SESSION=authLoad();
+if(SB_ON){
+  if(_SESSION&&authExpired()) await authRefresh();
+  if(!authToken()){ renderLoginScreen(); return; }
+  setInterval(function(){authRefresh();}, 45*60*1000); // keep long sessions alive
+}
 await sbPrefetch(['scales','dataKeys','thresholds']);
+// Two-way dismissal sync: pull the team's shared dismissals in and push any local-only
+// ones up. Non-blocking so first paint isn't gated on the network; refresh on landing.
+dsmServerPush().then(()=>{try{dsmRefresh()}catch(e){}});
 const SCALE_CFG=await _resolveScales();
 const ABILITY=_mkScale(SCALE_CFG.ability.map(r=>({csv:r.csv.slice(),label:r.label,colour:r.colour,note:r.note})));
 const EFFORT=_mkScale(SCALE_CFG.effort.map(r=>({csv:r.csv.slice(),label:r.label,colour:r.colour,note:r.note})));
