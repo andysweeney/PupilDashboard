@@ -459,7 +459,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-19 (logs TT_DATA timetable-map state on entry to pinpoint the disappearing concern flags) \u2014 VERIFY in browser');
+    console.log('[dsm] build dsm-20 (logs exact bail point + grid-cell LPW in both avoidance and sanctions detectors) \u2014 VERIFY in browser');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -7366,6 +7366,7 @@ function rPeer(){
     const SAN=DD.sanctions||[];
     const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
     const pSan=SAN.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null&&_ayOf(s[2])===String(CAY)); // Codes with subject only — CURRENT academic year (matches the current-year timetable used below)
+    try{console.log('[dsm] SCONC px=%s pSan=%s SA_MIN_TOTAL=%s SA_RATIO=%s',px,pSan.length,SA_MIN_TOTAL,SA_RATIO);}catch(_){}
     if(pSan.length<SA_MIN_TOTAL) return[];
 
     // Get pupil's timetable to compute expected teacher share
@@ -7384,7 +7385,7 @@ function rPeer(){
       }
     }
     const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0);
-    if(totalLPW===0) return[]; // Pupil has a timetable but no actual lessons recorded — cannot compute expected share
+    if(totalLPW===0){try{console.log('[dsm] SCONC BAIL totalLPW=0 px=%s subjLPW=%s',px,JSON.stringify(subjLPW));}catch(_){}return[]}
 
     // Get teacher per sanction from slotTeachers
     // Each sanction has [px, type, date, subject, period]
@@ -7555,7 +7556,7 @@ function rPeer(){
       if(cell){const subj=_SKR2[cell[0]]||cell[0];subjLPW[subj]=(subjLPW[subj]||0)+1}
     }
     const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0);
-    if(totalLPW===0) return[];
+    if(totalLPW===0){try{console.log('[dsm] AVOID BAIL totalLPW=0 px=%s subjLPW=%s',px,JSON.stringify(subjLPW));}catch(_){}return[]}
 
     // P1 subjects per day (Mon..Fri)
     const p1Subjs={};
@@ -7611,6 +7612,7 @@ function rPeer(){
       }
     });
 
+    try{console.log('[dsm] AVOID px=%s pAbs=%s supp=%s totalQ=%s totalLPW=%s SAV_MIN=%s SAV_RATIO=%s subjAbs=%s subjLPW=%s',px,pAbsSubj.length,_supp.size,totalQualifying,totalLPW,SAV_MIN,SAV_RATIO,JSON.stringify(subjAbs),JSON.stringify(subjLPW));}catch(_){}
     if(totalQualifying===0) return[];
 
     const results=[];
