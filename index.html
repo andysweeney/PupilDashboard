@@ -459,7 +459,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-18 (adds per-detector diagnostics to pupilOtherConcernsAlert to pinpoint why the re-render returns empty) \u2014 VERIFY in browser');
+    console.log('[dsm] build dsm-19 (logs TT_DATA timetable-map state on entry to pinpoint the disappearing concern flags) \u2014 VERIFY in browser');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -7842,6 +7842,7 @@ function rPeer(){
   // single bordered panel listing each one that has fired, with severity colour and
   // brief detail. Mirrors the Concerns tab logic so the same triggers apply.
   function pupilOtherConcernsAlert(px){
+    try{console.log('[dsm] pcn ENTER px=%o type=%s | TT_DATA size=%s hasGrid[px]=%s sampleKeys=%o',px,typeof px,Object.keys(TT_DATA||{}).length,!!(TT_DATA&&TT_DATA[String(px)]),Object.keys(TT_DATA||{}).slice(0,3));}catch(_){}
     const yg=curYG(REG[String(px)]?.intake);
     if(!yg){console.log('[dsm] pcn px=%s -> NO year-group (intake=%o)',px,REG[String(px)]&&REG[String(px)].intake);return'';}
     const fn=firstName(px);
