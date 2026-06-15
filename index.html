@@ -459,7 +459,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-20 (logs exact bail point + grid-cell LPW in both avoidance and sanctions detectors) \u2014 VERIFY in browser');
+    console.log('[dsm] build dsm-21 (fix: load saved thresholds before first pupil render \u2014 stops boot-pupil concerns vanishing on dismiss/restore)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -603,7 +603,6 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   function dsmConfirm(){
     if(!_dsmPendingKey)return;
-    console.log('[dsm] CONSIDERED confirmed for key:',_dsmPendingKey);
     const ctx=window._dsmCtx[_dsmPendingKey]||{};
     const who=(document.getElementById('dsm-who').value||'').trim()||'—';
     const note=(document.getElementById('dsm-note').value||'').trim();
@@ -626,7 +625,6 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   function dsmRestore(keyEnc){
     const key=decodeURIComponent(keyEnc);
-    console.log('[dsm] RESTORE clicked for key:',key);
     const rec=DSM[key];if(!rec)return;
     if(!confirm('Restore this concern to the active list? The dismissal record is kept for audit.'))return;
     const who=localStorage.getItem(DSM_WHO_KEY)||'—';
@@ -638,21 +636,18 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   function dsmRefresh(){
     try{
       const on=id=>{const e=document.getElementById(id);return e&&e.classList.contains('on');};
-      if(on('vw-concerns')){console.log('[dsm] refresh -> concerns dashboard');popCNFilters();rCN();return;}
+      if(on('vw-concerns')){popCNFilters();rCN();return;}
       // Surgical refresh of the pupil Concern-Flags panel ONLY. We NEVER call rP() here.
       // Bind to the pupil the PANEL was rendered for (data-px), not the dropdown, so a stale
       // or changed p-sel can never make us render a different pupil's (often empty) concerns.
       const panel=document.getElementById('pcn-panel');
-      if(!panel){console.log('[dsm] refresh -> no #pcn-panel, skipping');return;}
+      if(!panel) return;
       const panelX=parseInt(panel.getAttribute('data-px')||'')||0;
       const sel=document.getElementById('p-sel');
       const selX=sel?parseInt(sel.value):0;
       const x=panelX||selX;
-      const beforeLen=panel.innerHTML.length;
-      const out=x?pupilOtherConcernsAlert(x):'';
-      console.log('[dsm] refresh pupil panel: panelX=%s selX=%s using=%s | beforeLen=%s newLen=%s empty=%s',panelX,selX,x,beforeLen,out.length,out.length===0);
-      if(!x){console.log('[dsm] refresh -> no pupil id resolved, leaving panel as-is');return;}
-      panel.innerHTML=out;
+      if(!x) return;
+      panel.innerHTML=x?pupilOtherConcernsAlert(x):'';
     }catch(e){console.error('[dsm] re-render FAILED during restore/dismiss:',e);}
   }
 
@@ -6683,9 +6678,12 @@ function rCC(){
   const prgSub=document.getElementById('prg-sub');
   const ao3=document.createElement('option');ao3.value='all';ao3.textContent='All Subjects';prgSub.appendChild(ao3);
   SUBS.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;prgSub.appendChild(o)});
-  rP();
-  // Load saved thresholds (from a previous session) BEFORE refreshing the displays
+  // Load saved thresholds (from prefetched server/local config) BEFORE the first pupil
+  // render, so concern detectors use the real thresholds, not code defaults. Otherwise the
+  // boot-selected pupil renders against defaults and any later re-render (e.g. dismiss/restore)
+  // silently uses the stricter saved thresholds, making borderline concerns "disappear".
   loadThresholds();
+  rP();
   // Initialise concern threshold display
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
@@ -7366,7 +7364,6 @@ function rPeer(){
     const SAN=DD.sanctions||[];
     const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
     const pSan=SAN.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null&&_ayOf(s[2])===String(CAY)); // Codes with subject only — CURRENT academic year (matches the current-year timetable used below)
-    try{console.log('[dsm] SCONC px=%s pSan=%s SA_MIN_TOTAL=%s SA_RATIO=%s',px,pSan.length,SA_MIN_TOTAL,SA_RATIO);}catch(_){}
     if(pSan.length<SA_MIN_TOTAL) return[];
 
     // Get pupil's timetable to compute expected teacher share
@@ -7385,7 +7382,7 @@ function rPeer(){
       }
     }
     const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0);
-    if(totalLPW===0){try{console.log('[dsm] SCONC BAIL totalLPW=0 px=%s subjLPW=%s',px,JSON.stringify(subjLPW));}catch(_){}return[]}
+    if(totalLPW===0) return[]; // Pupil has a timetable but no actual lessons recorded — cannot compute expected share
 
     // Get teacher per sanction from slotTeachers
     // Each sanction has [px, type, date, subject, period]
@@ -7556,7 +7553,7 @@ function rPeer(){
       if(cell){const subj=_SKR2[cell[0]]||cell[0];subjLPW[subj]=(subjLPW[subj]||0)+1}
     }
     const totalLPW=Object.values(subjLPW).reduce((a,b)=>a+b,0);
-    if(totalLPW===0){try{console.log('[dsm] AVOID BAIL totalLPW=0 px=%s subjLPW=%s',px,JSON.stringify(subjLPW));}catch(_){}return[]}
+    if(totalLPW===0) return[];
 
     // P1 subjects per day (Mon..Fri)
     const p1Subjs={};
@@ -7612,7 +7609,6 @@ function rPeer(){
       }
     });
 
-    try{console.log('[dsm] AVOID px=%s pAbs=%s supp=%s totalQ=%s totalLPW=%s SAV_MIN=%s SAV_RATIO=%s subjAbs=%s subjLPW=%s',px,pAbsSubj.length,_supp.size,totalQualifying,totalLPW,SAV_MIN,SAV_RATIO,JSON.stringify(subjAbs),JSON.stringify(subjLPW));}catch(_){}
     if(totalQualifying===0) return[];
 
     const results=[];
@@ -7844,9 +7840,8 @@ function rPeer(){
   // single bordered panel listing each one that has fired, with severity colour and
   // brief detail. Mirrors the Concerns tab logic so the same triggers apply.
   function pupilOtherConcernsAlert(px){
-    try{console.log('[dsm] pcn ENTER px=%o type=%s | TT_DATA size=%s hasGrid[px]=%s sampleKeys=%o',px,typeof px,Object.keys(TT_DATA||{}).length,!!(TT_DATA&&TT_DATA[String(px)]),Object.keys(TT_DATA||{}).slice(0,3));}catch(_){}
     const yg=curYG(REG[String(px)]?.intake);
-    if(!yg){console.log('[dsm] pcn px=%s -> NO year-group (intake=%o)',px,REG[String(px)]&&REG[String(px)].intake);return'';}
+    if(!yg) return'';
     const fn=firstName(px);
     const items=[];
     
@@ -7901,7 +7896,6 @@ function rPeer(){
       items.push({type:'sanc-conc',subkey:f.teacher,label:'Sanctions Concentration',severity:sev,detail});
     });
     
-    try{console.log('[dsm] pcn px=%s yg=%s items=%s | a20=%s a60=%s aPA=%s | s20=%s s60=%s sc20=%s | abs=%s avoid=%s sconc=%s',px,yg,items.length,a20&&a20.rate,a60&&a60.rate,aPA&&aPA.rate,s20,s60,sCount20,absAnalysis&&absAnalysis.slotFlags&&absAnalysis.slotFlags.length,avoidFlags&&avoidFlags.length,scFlags&&scFlags.length);}catch(_){}
     if(!items.length) return'';
 
     // Annotate each concern with its key + dismissal state, KEEPING ORDER.
