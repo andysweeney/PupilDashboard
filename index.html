@@ -408,6 +408,9 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
         else if(/welfare/.test(r)) _ic[reason]='Welfare';
         else if(/home.?learning/.test(r)) _ic[reason]='Home Learning';
       });
+      // Re-stamp every sanction's baked category from the (now-updated) mapping, so the
+      // remap reaches the actual records — not just the Admin table.
+      (DD.sanctionDetails||[]).forEach(d=>{if(d&&_ic[d[0]]) d[1]=_ic[d[0]];});
     }catch(e){console.warn('category seed',e);}
   }catch(e){
     document.body.innerHTML='<div style="color:var(--red);padding:2rem;font-family:sans-serif"><b>Error loading data.json</b><br>'+e.message+'<br><br>Make sure you are running via a web server (not file://) and that data.json is in the same directory.</div>';
@@ -466,7 +469,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-7 (ability flip: 1=best) — VERIFY ability charts/concerns in browser — uses ./dismissals.json (lowercase)');
+    console.log('[dsm] build dsm-13 (Stage 4: editable grading-scale editor, admin-owned store) — VERIFY in browser — uses ./dismissals.json (lowercase)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -899,10 +902,49 @@ function _mkScale(levels){
     short:t=>{const l=get(t);return l?l.short:null;},
     names:()=>levels.map(l=>l.short)};            // best-first (rank 1 -> index 0)
 }
-const ABILITY=_mkScale(Object.entries(AM).map(([code,label])=>({csv:[code],label})).reverse());
-const EFFORT=_mkScale([['1','Excellent'],['2','Good'],['3','Developing'],['4','Low']].map(([c,l])=>({csv:[c],label:l})));
-const AS={};Object.entries(AM).forEach(([k,v])=>{const r=ABILITY.rank(k);AS[k]=r;AS[v]=r;});
-const GC={Below:PAL.red,Developing:PAL.orange,Working:PAL.gold,Meeting:PAL.sky,Confident:PAL.blue,Skilful:PAL.lilac,Excellent:PAL.green};
+// ── Scale config lives OUTSIDE data.json (admin-owned). Resolution order:
+//    code default (seeded from ability_map / default 1..n effort)
+//      -> ./scales.json (deployed admin config)  -> localStorage (in-app edits).
+//    data.json supplies ONLY the raw grade tokens; the scale interprets them. ──
+const _ABCOL_DEFAULT={Below:PAL.red,Developing:PAL.orange,Working:PAL.gold,Meeting:PAL.sky,Confident:PAL.blue,Skilful:PAL.lilac,Excellent:PAL.green};
+const SCALES_LS_KEY='pupilDashboard.scales.v1';
+function _defaultScales(){
+  return {
+    ability:Object.entries(AM).map(([code,label])=>({csv:[code],label,colour:_ABCOL_DEFAULT[label]||PAL.slate})).reverse(),
+    effort:[
+      {csv:['1'],label:'1',note:'Excellent',colour:PAL.red},
+      {csv:['2'],label:'2',note:'Good',colour:PAL.orange},
+      {csv:['3'],label:'3',note:'Developing',colour:PAL.sky},
+      {csv:['4'],label:'4',note:'Low',colour:PAL.green}
+    ]
+  };
+}
+function _sanitiseScales(cfg){
+  const clean=k=>(cfg&&Array.isArray(cfg[k])?cfg[k]:[]).map(r=>({
+    csv:(Array.isArray(r.csv)?r.csv:String(r.csv==null?'':r.csv).split(',')).map(x=>String(x).trim()).filter(Boolean),
+    label:String(r&&r.label!=null?r.label:'').trim(),
+    colour:(r&&r.colour)||PAL.slate,
+    note:(r&&r.note)?String(r.note).trim():undefined
+  })).filter(r=>r.label!==''&&r.csv.length);
+  const out={ability:clean('ability'),effort:clean('effort')};
+  return (out.ability.length&&out.effort.length)?out:null;
+}
+async function _resolveScales(){
+  let cfg=_defaultScales();
+  try{const r=await fetch('./scales.json',{cache:'no-store'});if(r&&r.ok){const s=_sanitiseScales(await r.json());if(s)cfg=s;}}catch(e){}
+  try{const ls=localStorage.getItem(SCALES_LS_KEY);if(ls){const s=_sanitiseScales(JSON.parse(ls));if(s)cfg=s;}}catch(e){}
+  return cfg;
+}
+const SCALE_CFG=await _resolveScales();
+const ABILITY=_mkScale(SCALE_CFG.ability.map(r=>({csv:r.csv.slice(),label:r.label,colour:r.colour,note:r.note})));
+const EFFORT=_mkScale(SCALE_CFG.effort.map(r=>({csv:r.csv.slice(),label:r.label,colour:r.colour,note:r.note})));
+EFFORT.vals=EFFORT.levels.map(l=>+l.csv[0]);
+EFFORT.byVal={};EFFORT.levels.forEach(l=>{EFFORT.byVal[+l.csv[0]]=l;});
+function efColor(v){const l=EFFORT.byVal[v];return l?l.colour:PAL.slate;}
+function efLeg(v){const l=EFFORT.byVal[v];return l?(l.note?l.label+' \u2014 '+l.note:l.label):String(v);}
+function efValid(v){return EFFORT.byVal[v]!=null;}
+const AS={};ABILITY.levels.forEach(lv=>{lv.csv.forEach(c=>{AS[c]=lv.rank;});AS[lv.label]=lv.rank;});
+const GC={};ABILITY.levels.forEach(lv=>{GC[lv.label]=lv.colour||PAL.slate;});
 const _c={};function dc(i){if(_c[i])try{_c[i].destroy()}catch(e){}_c[i]=null}function sc2(i,c){_c[i]=c}
 
 function ygAt(ink,ay){return ay-ink+7}
@@ -1325,6 +1367,10 @@ function aC(v){return v==null?'var(--mu)':v<=4?PAL.green:v>=6?PAL.red:'var(--mu)
 function eC(v){return v==null?'var(--mu)':v<=1.5?PAL.green:v>=3?PAL.red:'var(--mu)'}
 function chB(v,l){if(v===null)return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span style="font-family:'IBM Plex Mono',monospace;color:var(--mu)">No Data</span></div>`;const c=v>0?'pos':v<0?'neg':'flat';return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span class="chg ${c}">${v>0?'+':''}${v.toFixed(2)}</span></div>`}
 function abAvg(row,subs){if(!row)return null;const s=subs.map(s2=>row.sc[s2]?AS[AM[row.sc[s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
+function abDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(ABILITY.n,Math.max(1,Math.round(v)));const lv=ABILITY.levels[r-1];return lv?lv.label:'';}
+function abAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return abDesc(n)+' ('+fN(n)+')';}
+function efDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(EFFORT.n,Math.max(1,Math.round(v)));const lv=EFFORT.levels[r-1];return lv?(lv.note||lv.label):'';}
+function efAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return efDesc(n)+' ('+fN(n)+')';}
 function efAvg(row,subs){if(!row)return null;const v=subs.map(s2=>row.sc[s2]?row.sc[s2][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 function ord(n){const s=['th','st','nd','rd'];const v=n%100;return n+(s[(v-20)%10]||s[v]||s[0])}
 function toggleAll(chartKey,show){const ch=_c[chartKey];if(!ch)return;ch.data.datasets.forEach((_,i)=>{ch.setDatasetVisibility(i,show)});ch.update()}
@@ -2607,12 +2653,12 @@ function rP(){
   if(hasGrades&&isA){
     document.getElementById('p-crds').innerHTML=`
     <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${fN(a6)}<span style="font-size:.8rem;color:var(--mu)">/7</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${fN(a6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(a6)}</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
     </div>
     <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)}<span style="font-size:.8rem;color:var(--mu)">/4</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efRkStr}</b> in ${ctg}</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
     </div>`;
@@ -2636,13 +2682,13 @@ function rP(){
     }
     document.getElementById('p-crds').innerHTML=`
     <div class="crd"><div class="ct2">${sf} Ability (${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${fN(a6)}<span style="font-size:.8rem;color:var(--mu)">/7</span></span>${abClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abClsRkStr}</b> in class</span>`:''}</div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${fN(a6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(a6)}</span></span>${abClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abClsRkStr}</b> in class</span>`:''}</div>
       ${clsInfo?`<div style="margin-top:.15rem">${clsInfo}</div>`:''}
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
     </div>
     <div class="crd g"><div class="ct2">${sf} Effort (${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)}<span style="font-size:.8rem;color:var(--mu)">/4</span></span>${efClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efClsRkStr}</b> in class</span>`:''}</div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span>${efClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efClsRkStr}</b> in class</span>`:''}</div>
       ${clsInfo?`<div style="margin-top:.15rem">${clsInfo}</div>`:''}
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -2686,7 +2732,7 @@ function rP(){
     const attLabelE=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     efDS.push({label:attLabelE,data:attDataE,borderColor:PAL.green,backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:PAL.green,tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pef',new Chart(document.getElementById('c-pef'),{type:'line',data:{labels:labs,datasets:efDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{reverse:true,min:1,max:4,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(efDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('pef',new Chart(document.getElementById('c-pef'),{type:'line',data:{labels:labs,datasets:efDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{reverse:true,min:1,max:EFFORT.n,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(efDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   }else{
     // No grades — clear chart area
     document.getElementById('p-ch').innerHTML='';
@@ -3630,8 +3676,8 @@ function rCmp(){
       <td>Intake ${c.ink}</td>
       <td>${c.pupils}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${c.male}M · ${c.female}F</div></td>
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:var(--green);font-weight:600':c.ytdAtt>=90?'':'color:var(--red);font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
-      <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${fV(c.avg,2)}</td>
-      <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${fV(c.avgE,2)}</td>
+      <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${abAvgD(c.avg)}</td>
+      <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${efAvgD(c.avgE)}</td>
       <td>${c.gb.map(x=>{const tip=`${x.g}: ${x.n}${x.sendN?`&#10;SEND: ${x.sendN}`:''}${x.ehcpN?`&#10;EHCP: ${x.ehcpN}`:''}${x.fsmN?`&#10;FSM: ${x.fsmN}`:''}`;return`<span style="display:inline-block;margin:.1rem;padding:.08rem .3rem;border-radius:3px;font-size:.65rem;background:${GC[x.g]}22;color:${GC[x.g]};cursor:help" title="${tip}">${x.g.slice(0,3)} ${x.n}</span>`}).join('')}</td>
       <td style="text-align:center;${c.send?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
       <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.K||'\u2014'}</td>
@@ -3843,8 +3889,8 @@ function rPrg(){
       <td style="font-weight:500">Y${c.yg} — ${c.ayLabel}${c.isCurrent?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
       <td>${c.pupils}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${c.male}M · ${c.female}F</div></td>
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:var(--green);font-weight:600':c.ytdAtt>=90?'':'color:var(--red);font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
-      <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${fV(c.avg,2)}</td>
-      <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${fV(c.avgE,2)}</td>
+      <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${abAvgD(c.avg)}</td>
+      <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${efAvgD(c.avgE)}</td>
       <td>${c.gb.map(x=>{const tip=`${x.g}: ${x.n}${x.sendN?`&#10;SEND: ${x.sendN}`:''}${x.ehcpN?`&#10;EHCP: ${x.ehcpN}`:''}${x.fsmN?`&#10;FSM: ${x.fsmN}`:''}`;return`<span style="display:inline-block;margin:.1rem;padding:.08rem .3rem;border-radius:3px;font-size:.65rem;background:${GC[x.g]}22;color:${GC[x.g]};cursor:help" title="${tip}">${x.g.slice(0,3)} ${x.n}</span>`}).join('')}</td>
       <td style="text-align:center;${c.send?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
       <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.K||'\u2014'}</td>
@@ -4045,30 +4091,28 @@ function rPrg(){
 
   // ── Stacked effort distribution bar chart ──
   dc('prgefgrade');
-  const effortColors={'1':PAL.red,'2':PAL.orange,'3':PAL.sky,'4':PAL.green};
-  const effortLabels=['1 — Excellent','2 — Good','3 — Developing','4 — Low'];
-  const effortData={1:[],2:[],3:[],4:[]};
+  const effortData={};EFFORT.vals.forEach(e=>effortData[e]=[]);
   termLabels.forEach(stage=>{
     const[ygStr,term]=stage.split(' ');
     const stageYG=parseInt(ygStr.slice(1));
     const stageAY=ink+(stageYG-7);
     const period=`${term} ${stageAY}`;
     const rows=(PRG[inkK]||{})[period];
-    if(!rows||!rows.length){[1,2,3,4].forEach(e=>effortData[e].push(null));return}
-    const counts={1:0,2:0,3:0,4:0};
+    if(!rows||!rows.length){EFFORT.vals.forEach(e=>effortData[e].push(null));return}
+    const counts={};EFFORT.vals.forEach(e=>counts[e]=0);
     if(isAll){
-      rows.forEach(r=>{SUBS.forEach(s2=>{if(r[3][s2]&&r[3][s2][1]>=1&&r[3][s2][1]<=4)counts[r[3][s2][1]]++})});
+      rows.forEach(r=>{SUBS.forEach(s2=>{if(r[3][s2]&&efValid(r[3][s2][1]))counts[r[3][s2][1]]++})});
     }else{
-      rows.forEach(r=>{if(r[3][sub]&&r[3][sub][1]>=1&&r[3][sub][1]<=4)counts[r[3][sub][1]]++});
+      rows.forEach(r=>{if(r[3][sub]&&efValid(r[3][sub][1]))counts[r[3][sub][1]]++});
     }
-    [1,2,3,4].forEach(e=>effortData[e].push(counts[e]||0));
+    EFFORT.vals.forEach(e=>effortData[e].push(counts[e]||0));
   });
 
-  const effortDatasets=[1,2,3,4].map(e=>({
-    label:effortLabels[e-1],
+  const effortDatasets=EFFORT.vals.map(e=>({
+    label:efLeg(e),
     data:effortData[e],
-    backgroundColor:effortColors[e]+'cc',
-    borderColor:effortColors[e],
+    backgroundColor:efColor(e)+'cc',
+    borderColor:efColor(e),
     borderWidth:0,
     stack:'effort'
   }));
@@ -4083,7 +4127,7 @@ function rPrg(){
         tooltip:{callbacks:{
           title:ctx=>ctx[0]?.label||'',
           label:ctx=>{
-            const total=[1,2,3,4].reduce((s,e)=>{const d=effortData[e][ctx.dataIndex];return s+(d||0)},0);
+            const total=EFFORT.vals.reduce((s,e)=>{const d=effortData[e][ctx.dataIndex];return s+(d||0)},0);
             const pct=total>0?((ctx.parsed.y/total)*100).toFixed(1):'0';
             return` ${ctx.dataset.label}: ${ctx.parsed.y} (${pct}%)`;
           }
@@ -4654,13 +4698,13 @@ function rSEND(){
 
     // Summary header rows
     const hdrStyle='font-size:.62rem;font-family:"IBM Plex Mono",monospace;text-align:center;color:var(--mu);padding:.2rem .3rem';
-    const yearRow=yearAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">Year Average</td><td style="${hdrStyle}">${yearAvgs.codes}</td><td style="${hdrStyle}">${yearAvgs.oncalls}</td><td style="${hdrStyle}">${yearAvgs.dets}</td><td style="${hdrStyle};${attCol(yearAvgs.ytdAtt)}">${yearAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(yearAvgs.ttdAtt)}">${yearAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(yearAvgs.avgEf))}">${yearAvgs.avgEf}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(yearAvgs.avgAb))}">${yearAvgs.avgAb}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
+    const yearRow=yearAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">Year Average</td><td style="${hdrStyle}">${yearAvgs.codes}</td><td style="${hdrStyle}">${yearAvgs.oncalls}</td><td style="${hdrStyle}">${yearAvgs.dets}</td><td style="${hdrStyle};${attCol(yearAvgs.ytdAtt)}">${yearAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(yearAvgs.ttdAtt)}">${yearAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(yearAvgs.avgEf))}">${efAvgD(yearAvgs.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(yearAvgs.avgAb))}">${abAvgD(yearAvgs.avgAb)}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
     const nonLabel=`Non-${flagName}`;
-    const nonRow=nonFlagAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">${nonLabel} Average</td><td style="${hdrStyle}">${nonFlagAvgs.codes}</td><td style="${hdrStyle}">${nonFlagAvgs.oncalls}</td><td style="${hdrStyle}">${nonFlagAvgs.dets}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ytdAtt)}">${nonFlagAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ttdAtt)}">${nonFlagAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(nonFlagAvgs.avgEf))}">${nonFlagAvgs.avgEf}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(nonFlagAvgs.avgAb))}">${nonFlagAvgs.avgAb}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
+    const nonRow=nonFlagAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">${nonLabel} Average</td><td style="${hdrStyle}">${nonFlagAvgs.codes}</td><td style="${hdrStyle}">${nonFlagAvgs.oncalls}</td><td style="${hdrStyle}">${nonFlagAvgs.dets}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ytdAtt)}">${nonFlagAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ttdAtt)}">${nonFlagAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(nonFlagAvgs.avgEf))}">${efAvgD(nonFlagAvgs.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(nonFlagAvgs.avgAb))}">${abAvgD(nonFlagAvgs.avgAb)}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
     const extraHtml=(extraRows||[]).map(er=>{
       const a=er.avgs;
       if(!a) return'';
-      return`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:${er.color||'var(--mu)'}" colspan="4">${er.label} Average</td><td style="${hdrStyle}">${a.codes}</td><td style="${hdrStyle}">${a.oncalls}</td><td style="${hdrStyle}">${a.dets}</td><td style="${hdrStyle};${attCol(a.ytdAtt)}">${a.ytdAtt}</td><td style="${hdrStyle};${attCol(a.ttdAtt)}">${a.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(a.avgEf))}">${a.avgEf}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(a.avgAb))}">${a.avgAb}</td><td style="${hdrStyle}" colspan="2"></td></tr>`;
+      return`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:${er.color||'var(--mu)'}" colspan="4">${er.label} Average</td><td style="${hdrStyle}">${a.codes}</td><td style="${hdrStyle}">${a.oncalls}</td><td style="${hdrStyle}">${a.dets}</td><td style="${hdrStyle};${attCol(a.ytdAtt)}">${a.ytdAtt}</td><td style="${hdrStyle};${attCol(a.ttdAtt)}">${a.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(a.avgEf))}">${efAvgD(a.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(a.avgAb))}">${abAvgD(a.avgAb)}</td><td style="${hdrStyle}" colspan="2"></td></tr>`;
     }).join('');
 
     const rows=pupils.map((p,i)=>{
@@ -4692,10 +4736,10 @@ function rSEND(){
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${p.ytdDets?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${p.ytdDets||'—'}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${attCol(p.ytdAttPct)}">${p.ytdAttPct}%</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${attCol(p.ttdAttPct)}">${p.ttdAttPct}%</td>
-        <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${efCol(p.avgEf)}">${vf(p.avgEf)}</td>
+        <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${efCol(p.avgEf)}">${efAvgD(p.avgEf)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:var(--mu)">${vf(p.avgEfLT)}${efChgArrow(p.avgEf,p.avgEfLT)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:var(--mu)">${vf(p.avgEfLY)}${efChgArrow(p.avgEf,p.avgEfLY)}</td>
-        <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${abCol(p.avgAb)}">${vf(p.avgAb)}</td>
+        <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${abCol(p.avgAb)}">${abAvgD(p.avgAb)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:var(--mu)">${vf(p.avgAbLT)}${chgArrow(p.avgAb,p.avgAbLT)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:var(--mu)">${vf(p.avgAbLY)}${chgArrow(p.avgAb,p.avgAbLY)}</td>
       </tr>
@@ -5099,8 +5143,8 @@ function renderDistCharts(){
   document.getElementById('dist-subj').innerHTML=subjGrid;
 
   // Sanctions by Type chart
-  const typeCats=['Behaviour','Uniform','Equipment','Attendance'];
-  const typeCatColors=[PAL.red,PAL.orange,PAL.gold,PAL.sky];
+  const typeCats=INC_CATS.map(c=>c.id);
+  const typeCatColors=INC_CATS.map(c=>c.color);
   const typeCounts=typeCats.map(cat=>filtered.filter(r=>r.t===0&&r.cat===cat).length);
   const detCount=filtered.filter(r=>r.t===2).length;
   const typeLabels=[...typeCats,'Detentions'];
@@ -5937,7 +5981,7 @@ function rSV(){
   // Effort breakdown with bar chart
   const efLabels=['Excellent','Good','Developing','Low'];
   const efColors=[PAL.green,PAL.blue,PAL.orange,PAL.red];
-  const efCounts=[1,2,3,4].map(e=>lr.filter(r=>r[3][sub]&&r[3][sub][1]===e).length);
+  const efCounts=EFFORT.vals.map(e=>lr.filter(r=>r[3][sub]&&r[3][sub][1]===e).length);
   const efTotal=efCounts.reduce((a,b)=>a+b,0);
   const maxEfCount=Math.max(...efCounts,1);
   const efRows=efLabels.map((label,i)=>{const c=efCounts[i];const p=efTotal?(c/efTotal*100).toFixed(0):0;const barW=Math.round(c/maxEfCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${efColors[i]}"></span><span style="color:var(--mu);min-width:3.5rem">${label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${efColors[i]}44;border-left:2px solid ${efColors[i]}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
@@ -5960,13 +6004,13 @@ function rSV(){
 
   document.getElementById('sv-cards').innerHTML=`
     <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${fN(avg)}<span style="font-size:.8rem;color:var(--mu)">/7</span></span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${fN(avg)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(avg)}</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
     </div>
     <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)}<span style="font-size:.8rem;color:var(--mu)">/4</span></span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
       ${sgBlockEf}
@@ -6022,9 +6066,7 @@ function rSV(){
   sc2('svef',new Chart(document.getElementById('c-svef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('svst',new Chart(document.getElementById('c-svst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
 
-  const effortColors2={'1':PAL.red,'2':PAL.orange,'3':PAL.sky,'4':PAL.green};
-  const effortLabels2=['1 — Excellent','2 — Good','3 — Developing','4 — Low'];
-  sc2('svefst',new Chart(document.getElementById('c-svefst'),{type:'bar',data:{labels:labs,datasets:[1,2,3,4].map(e=>({label:effortLabels2[e-1],data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]&&r[3][sub][1]>=1&&r[3][sub][1]<=4).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:effortColors2[e]+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
+  sc2('svefst',new Chart(document.getElementById('c-svefst'),{type:'bar',data:{labels:labs,datasets:EFFORT.vals.map(e=>({label:efLeg(e),data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]&&efValid(r[3][sub][1])).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:efColor(e)+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
   } // end hasGradesSV else
 }
 
@@ -6372,13 +6414,13 @@ function rCL(){
   if(hasGradesCL){
   document.getElementById('cl-cards').innerHTML=`
     <div class="crd"><div class="ct2">${sub} Class ${cl} Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${fN(avg)}<span style="font-size:.8rem;color:var(--mu)">/7</span></span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${fN(avg)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(avg)}</span></span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
     </div>
     <div class="crd g"><div class="ct2">${sub} Class ${cl} Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)}<span style="font-size:.8rem;color:var(--mu)">/4</span></span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
       ${sgBlockEf}
@@ -6415,9 +6457,7 @@ function rCL(){
   sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('clef',new Chart(document.getElementById('c-clef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('clst',new Chart(document.getElementById('c-clst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
-  const effortColors2={'1':PAL.red,'2':PAL.orange,'3':PAL.sky,'4':PAL.green};
-  const effortLabels2=['1 — Excellent','2 — Good','3 — Developing','4 — Low'];
-  sc2('clefst',new Chart(document.getElementById('c-clefst'),{type:'bar',data:{labels:labs,datasets:[1,2,3,4].map(e=>({label:effortLabels2[e-1],data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]&&r[3][sub][1]>=1&&r[3][sub][1]<=4).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:effortColors2[e]+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
+  sc2('clefst',new Chart(document.getElementById('c-clefst'),{type:'bar',data:{labels:labs,datasets:EFFORT.vals.map(e=>({label:efLeg(e),data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]&&efValid(r[3][sub][1])).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:efColor(e)+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
   }else{
     document.getElementById('cl-charts').innerHTML='';
     document.getElementById('cl-perf-title').innerHTML='';
@@ -6507,7 +6547,7 @@ function rCC(){
     const dotD=clsDetentions>eDets?PAL.red:clsDetentions<eDets?PAL.green:'var(--mu)';
     const dot=(col)=>`<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${col};vertical-align:middle;margin-left:.3rem"></span>`;
 
-    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${(()=>{let m=0,f=0;info.pups.forEach(px=>{const g=REG[String(px)]?.gender;if(g==='M')m++;else if(g==='F')f++});return`${m}M · ${f}F`})()}</div></td><td style="text-align:center;font-family:'IBM Plex Mono',monospace;${ytdAttCol}">${ytdAttCC!=null?ytdAttCC+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${fV(avg,2)}</td><td style="font-weight:600;color:${eC(avgE)}">${fV(avgE,2)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:var(--blue);font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:var(--orange);font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:var(--red);font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
+    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${(()=>{let m=0,f=0;info.pups.forEach(px=>{const g=REG[String(px)]?.gender;if(g==='M')m++;else if(g==='F')f++});return`${m}M · ${f}F`})()}</div></td><td style="text-align:center;font-family:'IBM Plex Mono',monospace;${ytdAttCol}">${ytdAttCC!=null?ytdAttCC+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${abAvgD(avg)}</td><td style="font-weight:600;color:${eC(avgE)}">${efAvgD(avgE)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:var(--blue);font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:var(--orange);font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:var(--red);font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
 
   document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--orange)">Exp.</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--red)">Exp.</th><th style="color:var(--violet)">Det.</th><th style="color:var(--violet)">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -6926,8 +6966,8 @@ function rPeer(){
       <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?PAL.green:parseFloat(tgYtdAtt)>=90?'var(--tx)':PAL.red}">${tgYtdAtt}%</div>
       <div style="font-size:.72rem;color:var(--mu)">Codes: <span style="color:var(--orange);font-weight:600">${tgCodes}</span> · Detentions: <span style="color:var(--violet);font-weight:600">${tgDets}</span></div>
     </div>
-    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${fN(avg)}</div></div>
-    <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)}</div></div>`:''}
+    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${fN(avg)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(avg)}</span></div></div>
+    <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></div></div>`:''}
   </div>`;
 
   // ── PUPIL TABLE ──
@@ -8776,12 +8816,45 @@ function rPeer(){
     </div>`;
 
     // Read-only preview of the configurable grading scales (editors come later).
-    const _scaleTable=(title,S)=>{
-      let h=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">${title} Scale <span style="font-weight:400;font-size:.62rem;color:var(--mu)">(rank 1 = best \u00b7 ${S.n} levels \u00b7 read-only preview)</span></div><div style="overflow-x:auto"><table class="d"><thead><tr><th style="text-align:center">Rank</th><th>Label</th><th>CSV value(s)</th></tr></thead><tbody>`;
-      S.levels.forEach(lv=>{h+=`<tr><td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-weight:600">${lv.rank}</td><td style="font-weight:500">${lv.label}</td><td style="font-family:'IBM Plex Mono',monospace;font-size:.68rem">${(lv.csv||[]).join(', ')}</td></tr>`;});
+    // ── Editable grading-scale editor. Writes to the admin-owned scale store
+    //    (localStorage / scales.json), NEVER back to data.json. Rank = row order. ──
+    const _hexOf=c=>{c=String(c||'').trim();return /^#[0-9a-fA-F]{6}$/.test(c)?c:(/^#[0-9a-fA-F]{3}$/.test(c)?c:'#888888');};
+    const _scaleEditor=(title,key,S)=>{
+      const inp="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.72rem;padding:.25rem .35rem;border-radius:4px;width:100%;box-sizing:border-box";
+      let h=`<div class="dw" style="margin-bottom:1rem"><div class="dwt">${title} Scale <span style="font-weight:400;font-size:.62rem;color:var(--mu)">(rank 1 = best · top row = best · blank rows ignored · up to 9)</span></div>`;
+      h+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th style="text-align:center">Rank</th><th>Descriptor</th><th>CSV value(s)</th><th style="text-align:center">Colour</th><th>Meaning <span style="font-weight:400;color:var(--mu)">(optional)</span></th></tr></thead><tbody>`;
+      for(let i=0;i<9;i++){
+        const lv=S.levels[i]||{};
+        const lab=(lv.label!=null?String(lv.label):'').replace(/"/g,'&quot;');
+        const csv=((lv.csv||[]).join(', ')).replace(/"/g,'&quot;');
+        const note=(lv.note!=null?String(lv.note):'').replace(/"/g,'&quot;');
+        const col=_hexOf(lv.colour);
+        h+=`<tr><td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--mu)">${i+1}</td>`
+         +`<td><input id="scl-${key}-label-${i}" value="${lab}" style="${inp}"></td>`
+         +`<td><input id="scl-${key}-csv-${i}" value="${csv}" placeholder="${key==='ability'?'e.g. E':'e.g. 1'}" style="${inp};font-family:'IBM Plex Mono',monospace"></td>`
+         +`<td style="text-align:center"><input type="color" id="scl-${key}-col-${i}" value="${col}" style="width:34px;height:24px;border:1px solid var(--bd);border-radius:4px;background:none;cursor:pointer;padding:0;vertical-align:middle"></td>`
+         +`<td><input id="scl-${key}-note-${i}" value="${note}" placeholder="${key==='effort'?'e.g. Excellent':''}" style="${inp}"></td></tr>`;
+      }
       h+=`</tbody></table></div></div>`;return h;
     };
-    const scalesHtml=`<div class="dwt" style="font-size:.95rem;margin:.5rem 0 .75rem">Grading Scales</div>`+_scaleTable('Ability',ABILITY)+_scaleTable('Effort',EFFORT);
+    // strict: which grade tokens in the data are not mapped by the CURRENT saved scale
+    const _useAb=new Set(),_useEf=new Set();
+    Object.values(PRG).forEach(bp=>Object.values(bp||{}).forEach(rows=>(rows||[]).forEach(r=>{const sc=r&&r[3]||{};SUBS.forEach(s=>{const g=sc[s];if(g){if(g[0]!=null&&g[0]!=='')_useAb.add(String(g[0]));if(g[1]!=null&&g[1]!=='')_useEf.add(String(g[1]));}});})));
+    const _mapAb=new Set();ABILITY.levels.forEach(l=>(l.csv||[]).forEach(c=>_mapAb.add(String(c))));
+    const _mapEf=new Set();EFFORT.levels.forEach(l=>(l.csv||[]).forEach(c=>_mapEf.add(String(c))));
+    const _unAb=[..._useAb].filter(t=>!_mapAb.has(t)).sort(),_unEf=[..._useEf].filter(t=>!_mapEf.has(t)).sort();
+    let _warnHtml='';
+    if(_unAb.length||_unEf.length){
+      _warnHtml=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:var(--red);font-weight:600">⚠ Unmapped grade values in the data: </span>`
+        +(_unAb.length?`Ability: ${_unAb.map(t=>`<b>${t}</b>`).join(', ')}. `:'')
+        +(_unEf.length?`Effort: ${_unEf.map(t=>`<b>${t}</b>`).join(', ')}. `:'')
+        +`These show blank until a row maps them.</div>`;
+    }
+    const scalesHtml=`<div class="dwt" style="font-size:.95rem;margin:.5rem 0 .75rem">Grading Scales <span style="font-weight:400;font-size:.62rem;color:var(--mu)">(saved to the app's scale store — never written back to data.json)</span></div>`
+      +_warnHtml
+      +_scaleEditor('Ability','ability',ABILITY)
+      +_scaleEditor('Effort','effort',EFFORT)
+      +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.4rem .9rem;border-radius:5px;cursor:pointer">Save &amp; reload</button><button onclick="window._resetScales()" style="background:var(--sf2);color:var(--tx);border:1px solid var(--bd);font-family:inherit;font-size:.74rem;padding:.4rem .9rem;border-radius:5px;cursor:pointer">Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads to apply the new scale.</span></div>`;
     out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml+scalesHtml;
   }
 
@@ -8806,6 +8879,42 @@ function rPeer(){
       SEN_LABELS[code]=label;
     }
     rAdmin();
+  };
+  window._scaleUnmapped=function(cfg){
+    const abU=new Set(),efU=new Set();
+    Object.values(PRG).forEach(bp=>Object.values(bp||{}).forEach(rows=>(rows||[]).forEach(r=>{const sc=r&&r[3]||{};SUBS.forEach(s=>{const g=sc[s];if(g){if(g[0]!=null&&g[0]!=='')abU.add(String(g[0]));if(g[1]!=null&&g[1]!=='')efU.add(String(g[1]));}});})));
+    const am=new Set();(cfg.ability||[]).forEach(r=>(r.csv||[]).forEach(c=>am.add(String(c))));
+    const em=new Set();(cfg.effort||[]).forEach(r=>(r.csv||[]).forEach(c=>em.add(String(c))));
+    return {ability:[...abU].filter(t=>!am.has(t)).sort(),effort:[...efU].filter(t=>!em.has(t)).sort()};
+  };
+  window._saveScales=function(){
+    const read=key=>{const rows=[];for(let i=0;i<9;i++){
+      const lab=(document.getElementById('scl-'+key+'-label-'+i)?.value||'').trim();
+      const csv=(document.getElementById('scl-'+key+'-csv-'+i)?.value||'').split(',').map(x=>x.trim()).filter(Boolean);
+      const col=document.getElementById('scl-'+key+'-col-'+i)?.value||'';
+      const note=(document.getElementById('scl-'+key+'-note-'+i)?.value||'').trim();
+      if(lab===''&&!csv.length)continue;
+      rows.push({label:lab,csv:csv,colour:col,note:note||undefined});
+    }return rows;};
+    const cfg={ability:read('ability'),effort:read('effort')};
+    const bad=[];
+    ['ability','effort'].forEach(k=>{cfg[k].forEach((r,i)=>{if(!r.label)bad.push(k+' row '+(i+1)+': descriptor is blank');if(!r.csv.length)bad.push(k+' row '+(i+1)+' ("'+r.label+'"): no CSV value');});if(!cfg[k].length)bad.push(k+' scale has no rows');});
+    if(bad.length){alert('Cannot save:\n\n- '+bad.join('\n- '));return;}
+    const un=window._scaleUnmapped(cfg);
+    if(un.ability.length||un.effort.length){
+      const m='These grade values are in the data but no row maps them:\n'
+        +(un.ability.length?'  Ability: '+un.ability.join(', ')+'\n':'')
+        +(un.effort.length?'  Effort: '+un.effort.join(', ')+'\n':'')
+        +'\nPupils with those values will show blank for that grade. Save anyway?';
+      if(!confirm(m))return;
+    }
+    try{localStorage.setItem(SCALES_LS_KEY,JSON.stringify(cfg));}catch(e){alert('Could not save: '+e.message);return;}
+    location.reload();
+  };
+  window._resetScales=function(){
+    if(!confirm('Reset both scales to the built-in defaults? This clears your saved scale settings.'))return;
+    try{localStorage.removeItem(SCALES_LS_KEY);}catch(e){}
+    location.reload();
   };
   window._adminSetInc=function(code,cat){
     DD.config.incident_codes[code]=cat;
