@@ -7008,14 +7008,38 @@ function peerLabel(filters,count){
   return`${parts.join(' · ')} (n=${count})`;
 }
 
+// Weekly sanction buckets for the peer view. The x-axis is consecutive Mondays across the
+// current academic year; each group's value is sanctions-per-pupil that week, normalised so
+// differently-sized peer groups stay comparable (consistent with the attendance % chart).
+function _peerMonday(iso){
+  const d=new Date(iso+'T12:00:00');const off=(d.getDay()+6)%7;d.setDate(d.getDate()-off);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function peerWeekAxis(){
+  const end=`${CAY+1}-07-31`;const weeks=[];let d=new Date(_peerMonday(`${CAY}-09-01`)+'T12:00:00');
+  for(let i=0;i<60;i++){
+    const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if(iso>end)break;weeks.push(iso);d.setDate(d.getDate()+7);
+  }
+  return weeks;
+}
+function peerSancWeekly(pupils,weeks){
+  const pxSet=new Set(pupils.map(r=>r[0]));const idx={};weeks.forEach((w,i)=>idx[w]=i);
+  const codes=new Array(weeks.length).fill(0),det=new Array(weeks.length).fill(0);
+  (DD.sanctions||[]).forEach(s=>{if(!pxSet.has(s[0]))return;const i=idx[_peerMonday(s[2])];if(i==null)return;if(s[1]===2)det[i]++;else codes[i]++;});
+  const n=pupils.length||1;
+  return{codes:codes.map(c=>parseFloat((c/n).toFixed(3))),det:det.map(c=>parseFloat((c/n).toFixed(3)))};
+}
+
 function rPeer(){
-  dc('peerAb');dc('peerEf');dc('peerAtt');
+  dc('peerAb');dc('peerEf');dc('peerAtt');dc('peerSanc');
   if(!peerGroups.length){
     document.getElementById('peer-charts').innerHTML='<div style="color:var(--mu);padding:1rem">Add a comparison group to begin</div>';
     return;
   }
 
   const allSeries=[];
+  const peerWeeks=peerWeekAxis();
   peerGroups.forEach((g,gi)=>{
     const filters=peerGetFilters(g.id);
     const result=peerFilterPupils(filters);
@@ -7023,11 +7047,12 @@ function rPeer(){
     const countEl=document.getElementById('peer-count-'+g.id);
     if(countEl) countEl.textContent=`n=${result.pupils.length}`;
     if(!result.pupils.length){
-      allSeries.push({label,abData:[],efData:[],attData:[],labs:[],color:PEER_COLORS[gi%PEER_COLORS.length]});
+      allSeries.push({label,abData:[],efData:[],attData:[],sanc:{codes:[],det:[]},labs:[],color:PEER_COLORS[gi%PEER_COLORS.length]});
       return;
     }
     const series=peerComputeSeries(result);
-    allSeries.push({...series,label,color:PEER_COLORS[gi%PEER_COLORS.length]});
+    const sanc=peerSancWeekly(result.pupils,peerWeeks);
+    allSeries.push({...series,sanc,label,color:PEER_COLORS[gi%PEER_COLORS.length]});
   });
 
   // Use longest labels array
@@ -7040,10 +7065,13 @@ function rPeer(){
   const abNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span>';
   const efNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span>';
 
+  const sancNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(weekly · per pupil · codes + detentions)</span>';
+
   document.getElementById('peer-charts').innerHTML=`
     <div class="chc"><div class="cht">Ability Over Time ${abNote}</div><div class="chw"><canvas id="c-peerAb"></canvas></div></div>
     <div class="chc"><div class="cht">Effort Over Time ${efNote}</div><div class="chw"><canvas id="c-peerEf"></canvas></div></div>
-    <div class="chc"><div class="cht">Attendance Over Time</div><div class="chw"><canvas id="c-peerAtt"></canvas></div></div>`;
+    <div class="chc"><div class="cht">Attendance Over Time</div><div class="chw"><canvas id="c-peerAtt"></canvas></div></div>
+    <div class="chc"><div class="cht">Sanctions ${sancNote}</div><div class="chw"><canvas id="c-peerSanc"></canvas></div></div>`;
 
   const mkDS=(series,key)=>series.map(s=>({label:s.label,data:s[key],borderColor:s.color,backgroundColor:s.color+'18',borderWidth:2,pointRadius:3,pointBackgroundColor:s.color,tension:.3,fill:false,spanGaps:true}));
 
@@ -7062,6 +7090,21 @@ function rPeer(){
   const allAttVals=allSeries.flatMap(s=>s.attData.filter(v=>v!=null));
   const attMin=allAttVals.length?Math.max(0,Math.min(80,Math.min(...allAttVals)-3)):80;
   sc2('peerAtt',new Chart(document.getElementById('c-peerAtt'),{type:'line',data:{labels:maxLabs,datasets:mkDS(allSeries,'attData')},options:chartOpts(attMin,100,false,true)}));
+
+  // Sanctions chart — weekly buckets (current academic year), per pupil, split codes vs detentions.
+  // Each peer group is its own side-by-side stack; codes (group colour) + detentions (darker tip)
+  // stack to the group's weekly total.
+  const weekLabels=peerWeeks.map(w=>new Date(w+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
+  const _shade=(hex,f)=>{const m=hex.replace('#','');const r=Math.round(parseInt(m.slice(0,2),16)*f),g=Math.round(parseInt(m.slice(2,4),16)*f),b=Math.round(parseInt(m.slice(4,6),16)*f);return`rgb(${r},${g},${b})`};
+  const sancDS=[];
+  allSeries.forEach((s,gi)=>{
+    const col=s.color,st='g'+gi,cd=(s.sanc&&s.sanc.codes)||[],dd=(s.sanc&&s.sanc.det)||[];
+    sancDS.push({label:s.label+' · codes',data:cd,backgroundColor:col+'cc',stack:st,borderWidth:0});
+    sancDS.push({label:s.label+' · detentions',data:dd,backgroundColor:_shade(col,0.5),stack:st,borderWidth:0});
+  });
+  const sancTot=allSeries.flatMap(s=>(s.sanc&&s.sanc.codes)?s.sanc.codes.map((c,i)=>c+((s.sanc.det[i])||0)):[]);
+  const sancMax=sancTot.length?Math.max(0.5,Math.ceil(Math.max(...sancTot)*10)/10):1;
+  sc2('peerSanc',new Chart(document.getElementById('c-peerSanc'),{type:'bar',data:{labels:weekLabels,datasets:sancDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:8},boxWidth:10,padding:6}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686',font:{size:7},autoSkip:true,maxRotation:0},grid:{display:false},border:{color:'#e6dfd0'}},y:{stacked:true,min:0,max:sancMax,ticks:{color:'#6e7686',font:{size:11}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
 }
 
   window.sw=sw;
