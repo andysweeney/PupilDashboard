@@ -4061,12 +4061,17 @@ function rPrg(){
     const nOnCalls=coSanc.filter(s=>s[1]===1).length;
     const nDetentions=coSanc.filter(s=>s[1]===2).length;
 
-    // YTD attendance — only available for current academic year
+    // Attendance — the current year is year-to-date (up to today); past years use the full
+    // year. Historic absence records and weekLessons span every year in the data, so this
+    // resolves for any academic year up to and including the current one.
     let ytdAtt=null;
-    if(ay===CAY){
-      const _todayD=new Date();
-      const _todayISO=`${_todayD.getFullYear()}-${String(_todayD.getMonth()+1).padStart(2,'0')}-${String(_todayD.getDate()).padStart(2,'0')}`;
-      const _endDate=_todayISO<ayEnd?_todayISO:ayEnd;
+    if(ay<=CAY){
+      let _endDate=ayEnd;
+      if(ay===CAY){
+        const _todayD=new Date();
+        const _todayISO=`${_todayD.getFullYear()}-${String(_todayD.getMonth()+1).padStart(2,'0')}-${String(_todayD.getDate()).padStart(2,'0')}`;
+        _endDate=_todayISO<ayEnd?_todayISO:ayEnd;
+      }
       let totalAbs=0;
       rows.forEach(r=>{const a=countAbsPeriods(r[0],ayStart,_endDate);totalAbs+=a.total});
       let totalLessons=0;
@@ -4111,7 +4116,7 @@ function rPrg(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Intake ${ink} — ${subLabel} Progression</div>
-    <table class="d ctr"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th style="text-align:center">Att.</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgef"></canvas></div></div></div>
     <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">${subLabel} Grade Distribution Over Time — Intake ${ink}</div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prggrade"></canvas></div></div>
