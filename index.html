@@ -139,7 +139,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
 <button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
 <button class="tb" onclick="sw('sanctions',this)">⚖ Sanctions Analysis</button>
-<button class="tb" onclick="sw('concerns',this)">🚨 Concerns</button>
+<button class="tb" onclick="sw('concerns',this)">🚨 Concerns & Congrats</button>
 <button class="tb" onclick="sw('slotavoid',this)">🎯 Slot Avoidance</button>
 <button class="tb" onclick="sw('rebalance',this)">🎚 Rebalance</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
@@ -152,6 +152,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   <span id="sa-display" style="font-size:.72rem;color:#ffffff"></span>
   <span id="cl-display" style="font-size:.72rem;color:#ffffff"></span>
   <span id="tg-display" style="font-size:.72rem;color:#ffffff"></span>
+  <span id="cg-display" style="font-size:.72rem;color:#ffffff"></span>
 </div>
 </header>
 
@@ -1364,6 +1365,9 @@ let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
 let AP_MULT=2.0, AP_HIGH_ABS=40;
 let CT_AT=1.3, CT_AM=3;
 let CT_PA_WIN=20, CT_PA_PCT=10;
+// Congrats / praise thresholds — fully independent of the concern thresholds above.
+// Defaults match their concern counterparts; lower them to make praise easier to earn.
+let CG_AT=1.3, CG_PA_PCT=10, CG_SC=1.5, CG_MN=3, CG_EX_PCT=99;
 let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0, SA_ENGAGE=3;
 let SAV_RATIO=2.0, SAV_MIN=3;
 let CL_MIN_PUPILS=5, CL_MIN_CODES=5, CL_RATIO_AMBER=2.0, CL_RATIO_RED=3.0;
@@ -1380,6 +1384,7 @@ function saveThresholds(){
   try {
     const obj = {
       CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT,
+      CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT,
       AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
       SAV_RATIO, SAV_MIN,
@@ -1409,6 +1414,11 @@ function applyThresholdValues(v){
   if((n=safeI(v.CT_AM))!=null) CT_AM=n;
   if((n=safeI(v.CT_PA_WIN))!=null) CT_PA_WIN=n;
   if((n=safeF(v.CT_PA_PCT))!=null) CT_PA_PCT=n;
+  if((n=safeF(v.CG_AT))!=null) CG_AT=n;
+  if((n=safeF(v.CG_PA_PCT))!=null) CG_PA_PCT=n;
+  if((n=safeF(v.CG_SC))!=null) CG_SC=n;
+  if((n=safeI(v.CG_MN))!=null) CG_MN=n;
+  if((n=safeF(v.CG_EX_PCT))!=null) CG_EX_PCT=n;
   if((n=safeI(v.AP_MIN))!=null) AP_MIN=n;
   if((n=safeI(v.AP_PCT))!=null) AP_PCT=n;
   if((n=safeI(v.AP_SLOT))!=null) AP_SLOT=n;
@@ -1437,6 +1447,7 @@ function applyThresholdValues(v){
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
   CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:3, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10,
+  CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
   SA_MIN_TOTAL:6, SA_MIN_TEACHER:3, SA_RATIO:2.0, SA_ENGAGE:3,
   SAV_RATIO:2.0, SAV_MIN:3,
@@ -1449,6 +1460,7 @@ const _THRESHOLD_DEFAULTS = {
 const _THRESHOLD_INPUTS = {
   CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
   CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct',
+  CG_AT:'cg-at', CG_PA_PCT:'cg-pa-pct', CG_SC:'cg-sc', CG_MN:'cg-mn', CG_EX_PCT:'cg-ex-pct',
   AP_MIN:'ct-ap-min', AP_PCT:'ct-ap-pct', AP_SLOT:'ct-ap-slot', AP_MULT:'ap-mult', AP_HIGH_ABS:'ap-high-abs',
   SA_MIN_TOTAL:'sa-min-total', SA_MIN_TEACHER:'sa-min-teacher', SA_RATIO:'sa-ratio', SA_ENGAGE:'sa-engage',
   SAV_RATIO:'sav-ratio', SAV_MIN:'sav-min',
@@ -1465,6 +1477,7 @@ function _refreshThresholdDisplays(){
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
   document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
+  const _cgd=document.getElementById('cg-display'); if(_cgd) _cgd.innerHTML=`Praise: <b style="color:#fff">Att ×${CG_AT}/${CG_PA_PCT}%</b> · <b style="color:#fff">Sanc ×${CG_SC}/${CG_MN}</b> · <b style="color:#fff">Exc ${CG_EX_PCT}%</b>`;
 }
 
 // Load thresholds from localStorage and apply to globals. Called once at boot.
@@ -1507,6 +1520,11 @@ function applyCT(){
   CT_AM=parseInt(document.getElementById('ct-am').value)||3;
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
   CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
+  CG_AT=parseFloat(document.getElementById('cg-at').value)||1.3;
+  CG_PA_PCT=parseFloat(document.getElementById('cg-pa-pct').value)||10;
+  CG_SC=parseFloat(document.getElementById('cg-sc').value)||1.5;
+  CG_MN=parseInt(document.getElementById('cg-mn').value)||3;
+  CG_EX_PCT=parseFloat(document.getElementById('cg-ex-pct').value)||99;
   AP_MIN=parseInt(document.getElementById('ct-ap-min').value)||3;
   AP_PCT=parseInt(document.getElementById('ct-ap-pct').value)||40;
   AP_SLOT=parseInt(document.getElementById('ct-ap-slot').value)||30;
@@ -1532,6 +1550,7 @@ function applyCT(){
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
   document.getElementById('tg-display').innerHTML=`TG: <b style="color:#fff">${TG_MIN_SIZE}p/+${TG_ABS_DELTA}pp/${TG_SAN_RATIO}×/${TG_SAN_MIN}c/${TG_PA_MIN}pa</b>`;
+  const _cgd=document.getElementById('cg-display'); if(_cgd) _cgd.innerHTML=`Praise: <b style="color:#fff">Att ×${CG_AT}/${CG_PA_PCT}%</b> · <b style="color:#fff">Sanc ×${CG_SC}/${CG_MN}</b> · <b style="color:#fff">Exc ${CG_EX_PCT}%</b>`;
   saveThresholds();
 }
 function showCTModal(){}
@@ -2829,8 +2848,9 @@ function rP(){
   }
   const bcLine=bcBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${bcBadges}</div>`:'';
   const otherConcernsAlert=pupilOtherConcernsAlert(x);
+  const congratsAlert=pupilCongratsAlert(x);
 
-  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}<div id="pcn-panel" data-px="${x}">${otherConcernsAlert}</div>${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
+  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}<div id="pcn-panel" data-px="${x}">${otherConcernsAlert}</div><div id="pcg-panel" data-px="${x}">${congratsAlert}</div>${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
   renderTimetable(x);
@@ -8110,6 +8130,61 @@ function rPeer(){
     return`<div class="dw" style="margin-top:.7rem;border-left:3px solid ${borderCol}"><div class="dwt" style="color:${borderCol}">Concern Flags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${titleNote}</span></div>${rows}</div>`;
   }
 
+  // Positive mirror of pupilOtherConcernsAlert — surfaces the directional improvements and
+  // 100% attendance on the pupil page. No dismissal (positives aren't "considered away").
+  function pupilCongratsAlert(px){
+    const yg=curYG(REG[String(px)]?.intake);
+    if(!yg) return'';
+    const fn=firstName(px);
+    const items=[];
+    const _ay=`${CAY}-09-01`;
+    const _t=new Date();const _tISO=`${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,'0')}-${String(_t.getDate()).padStart(2,'0')}`;
+    const a20=attRAMod(px,20),a60=attRAMod(px,60);
+    let attImp=false;
+    if(a60.rate>=CG_PA_PCT && a20.rate*CG_AT<a60.rate){
+      attImp=true;const strong=a20.rate*2<a60.rate;
+      const fac=a20.rate>0?` (${(a60.rate/a20.rate).toFixed(1)}× better than their rolling average)`:'';
+      items.push({label:'Attendance Improving',severity:strong?'green-strong':'green',
+        detail:`${fn} is recovering from a high absence rate — ${a20.rate.toFixed(1)}% of periods missed over the last 20 school days vs ${a60.rate.toFixed(1)}% across 60 days${fac}.`});
+    }
+    const s20=sanRAMod(px,yg,20),s60=sanRAMod(px,yg,60),c20=sanCountInMod(px,yg,20),c60=sanCountInMod(px,yg,60);
+    let sancRed=false;
+    if((c60-c20)>=CG_MN && s60>0 && s20*CG_SC<s60){
+      sancRed=true;const strong=s20*2<s60;
+      items.push({label:'Sanctions Reducing',severity:strong?'green-strong':'green',
+        detail:`${fn} is easing off — only ${c20} sanction${c20===1?'':'s'} in the last 20 school days after ${c60-c20} in the prior 40 (weighted ${s20.toFixed(1)} vs ${s60.toFixed(1)}).`});
+    }
+    if(attImp&&sancRed){
+      items.push({label:'Re-engaging',severity:'green-strong',
+        detail:`Recovering attendance and easing sanctions at once — a genuine turnaround for ${fn}.`});
+    }
+    if((DD.timetables[String(CAY)]||{})[String(px)]){
+      const _abs=countAbsPeriods(px,_ay,_tISO).total;
+      let _T=0; for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=_ay&&w<=_tISO)_T+=tl}
+      const _pct=_T>0?((_T-_abs)/_T*100):0;
+      if(_abs===0){
+        items.push({label:'Perfect Attendance',severity:'green-strong',
+          detail:`${fn} has 100% attendance this year — not a single period missed since September.`});
+      } else if(_pct>=CG_EX_PCT){
+        items.push({label:'Excellent Attendance',severity:'green-strong',
+          detail:`${fn} has ${_pct.toFixed(1)}% attendance this year — only ${_abs} period${_abs===1?'':'s'} missed since September.`});
+      }
+    }
+    if(!items.length) return'';
+    const GREEN=PAL.green, GREEN2='#6bbf9a';
+    const rows=items.map(it=>{
+      const col=it.severity==='green-strong'?GREEN:GREEN2;
+      const bg=it.severity==='green-strong'?'rgba(46,148,105,.16)':'rgba(107,191,154,.16)';
+      return`<div style="background:${bg};border-radius:5px;padding:.35rem .5rem;margin-bottom:.3rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <span style="font-size:.72rem;font-weight:700;color:var(--tx);min-width:9rem">${it.label}</span>
+        <span style="font-size:.68rem;color:var(--tx);flex:1">${it.detail}</span>
+        <span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${col};padding:.05rem .35rem;border:1px solid ${col}99;border-radius:3px;background:var(--sf)">${it.severity==='green-strong'?'standout':'improving'}</span>
+      </div>`;
+    }).join('');
+    const titleNote=`${items.length} positive${items.length===1?'':'s'} for ${fn}`;
+    return`<div class="dw" style="margin-top:.7rem;border-left:3px solid ${GREEN}"><div class="dwt" style="color:${GREEN}">🎉 Going Well <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${titleNote}</span></div>${rows}</div>`;
+  }
+
   // Pupil-level sanctions concentration alert (for use in rP)
   function pupilSanctionsAlert(px){
     const flags=getSanctionsConcentration(px);
@@ -9066,6 +9141,16 @@ function rPeer(){
           inputRow('Minimum total codes','tg-san-min',TG_SAN_MIN,{min:1,max:100,step:1,hint:'TG must have at least this many codes before sanctions flag fires. Default 5.'})+
           inputRow('Minimum persistently-absent pupils','tg-pa-min',TG_PA_MIN,{min:1,max:20,step:1,hint:'Minimum number of pupils meeting Persistent Absence threshold to fire PA cluster flag. Default 3.'})
         )}
+        ${groupPanel(
+          '🎉 Congrats / Praise Thresholds',
+          'Controls the positive mirror shown in the Congrats view and the pupil "Going Well" panel — fully independent of the concern thresholds above. Defaults match their concern counterparts; LOWER a value to make praise easier to earn. (Perfect Attendance is hard-wired at 100% all year; Excellent Attendance uses the threshold below. Re-engaging fires automatically when both Attendance Improving and Sanctions Reducing fire.)',
+          'Concerns & Congrats tab → Congrats view; Pupil tab → Going Well panel',
+          inputRow('Attendance improvement multiplier','cg-at',CG_AT,{min:1.0,max:3.0,step:0.05,hint:'Recent (20sd) absence rate must be at least this many times BETTER than the 60-day baseline to praise. Default 1.3. Lower this to celebrate smaller improvements.'})+
+          inputRow('Recovery floor (%)','cg-pa-pct',CG_PA_PCT,{min:1,max:50,step:0.5,hint:'A pupil only counts as "improving" if their 60-day baseline absence was at least this high — i.e. they were genuinely struggling. Default 10%. Lower this to praise pupils who were less absent to begin with.'})+
+          inputRow('Sanctions reduction multiplier','cg-sc',CG_SC,{min:0.5,max:5,step:0.1,hint:'Recent (20sd) weighted sanction score must be at least this many times LOWER than the 60-day baseline to praise. Default 1.5×. Lower this to celebrate smaller reductions.'})+
+          inputRow('Minimum prior sanctions','cg-mn',CG_MN,{min:0,max:50,step:1,hint:'A pupil must have had at least this many sanctions earlier in the 60-day window (before the recent 20 days) to count as reducing. Default 3. Lower this to praise pupils with fewer prior sanctions.'})+
+          inputRow('Excellent attendance threshold (%)','cg-ex-pct',CG_EX_PCT,{min:90,max:100,step:0.1,hint:'Pupils with at least this whole-year attendance percentage — but below 100% — earn an Excellent Attendance flag. Pupils at exactly 100% earn Perfect Attendance instead (hard-wired). Default 99%.'})
+        )}
       </div>
       <div style="margin-top:1.2rem;padding-top:.9rem;border-top:1px solid var(--bd);display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><button onclick="applyCT();applySW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save thresholds</button><button onclick="resetThresholds()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer" title="Restore all thresholds to factory defaults and clear saved values">↺ Reset to defaults</button><span style="font-size:.65rem;color:var(--mu);margin-left:.25rem">Saves all threshold &amp; weighting values above. Syncs to all signed-in devices.</span></div>
     </div>`;
@@ -9242,6 +9327,13 @@ function rPeer(){
   const _cnCollapsed = {pupil:false, class:false, tg:false, teacher:false};
   // Pupil concern type filter — empty Set means "show all".
   const _cnTypeFilter = new Set();
+  // 'concerns' (negatives) or 'congrats' (the positive mirror). Toggled in the view.
+  let _cnMode = 'concerns';
+  function cnSetMode(m){ _cnMode = m; rCN(); }
+  function _cnToggleBar(){
+    const mk=(m,lbl)=>{const on=_cnMode===m;return `<button onclick="cnSetMode('${m}')" style="background:${on?'var(--ac)':'var(--sf2)'};color:${on?'#fff':'var(--mu)'};border:1px solid ${on?'var(--ac)':'var(--bd)'};padding:.35rem .9rem;border-radius:7px;font-family:inherit;font-size:.72rem;font-weight:${on?600:400};cursor:pointer">${lbl}</button>`;};
+    return `<div style="display:flex;gap:.4rem;margin-bottom:1rem">${mk('concerns','🚨 Concerns')}${mk('congrats','🎉 Congrats')}</div>`;
+  }
 
   // Concern type definitions (for filter chips and human labels)
   const CN_TYPES = [
@@ -9413,6 +9505,96 @@ function rPeer(){
         n++;
       }
       return n;
+    }
+
+    // ── CONGRATS MODE: positive mirror of the directional concerns. Renders its own view
+    // and returns, leaving the concerns path below untouched. Reuses attRA/sanRA/sanCountIn.
+    if(_cnMode==='congrats'){
+      const roleLabelC=role==='slt'?'SLT Overview':role==='yl'?`Year Leader — Y${document.getElementById('cn-yg').value}`:`Tutor — ${targetTG}`;
+      const GREEN=PAL.green, GREEN2='#6bbf9a';
+      const won=[];
+      allPupils.forEach(p=>{
+        const px=p.px,yg=p.yg,wins=[];
+        // Attendance Improving — was at persistent-absence levels over the 60sd baseline and is
+        // now markedly better (a genuine recovery, not an already-good pupil drifting fractionally).
+        const a20=attRA(px,20),a60=attRA(px,60);
+        let attImp=false;
+        if(a60.rate>=CG_PA_PCT && a20.rate*CG_AT<a60.rate){
+          attImp=true;const strong=a20.rate*2<a60.rate;
+          const fac=a20.rate>0?`${(a60.rate/a20.rate).toFixed(1)}× better than`:'far below';
+          wins.push({type:'att-improving',severity:strong?'green-strong':'green',label:'Attendance Improving',
+            detail:`Recovering from a high absence rate — 20sd ${a20.rate.toFixed(1)}% absent vs 60sd ${a60.rate.toFixed(1)}% (${fac} the rolling average).`});
+        }
+        // Sanctions Reducing — had ≥CT_MN sanctions earlier in the 60sd window, now eased off.
+        const s20=sanRA(px,yg,20),s60=sanRA(px,yg,60),c20=sanCountIn(px,yg,20),c60=sanCountIn(px,yg,60);
+        let sancRed=false;
+        if((c60-c20)>=CG_MN && s60>0 && s20*CG_SC<s60){
+          sancRed=true;const strong=s20*2<s60;
+          wins.push({type:'sanc-reducing',severity:strong?'green-strong':'green',label:'Sanctions Reducing',
+            detail:`Easing off — only ${c20} sanction${c20===1?'':'s'} in the last 20sd after ${c60-c20} in the prior 40sd (weighted ${s20.toFixed(1)} vs ${s60.toFixed(1)}).`});
+        }
+        // Re-engaging — both at once (mirror of Possible Disengagement).
+        if(attImp&&sancRed){
+          wins.push({type:'re-engage',severity:'green-strong',label:'Re-engaging',
+            detail:`Recovering attendance and easing sanctions at once — a genuine turnaround.`});
+        }
+        // Perfect (100%) and Excellent (>=CG_EX_PCT%) attendance — whole year, timetabled pupils only.
+        if((DD.timetables[String(CAY)]||{})[String(px)]){
+          const _abs=countAbsPeriods(px,ayStart,todayISO).total;
+          let _T=0; for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=ayStart&&w<=todayISO)_T+=tl}
+          const _pct=_T>0?((_T-_abs)/_T*100):0;
+          if(_abs===0){
+            wins.push({type:'att-perfect',severity:'green-strong',label:'Perfect Attendance',
+              detail:`100% attendance this year — not a single period missed since September.`});
+          } else if(_pct>=CG_EX_PCT){
+            wins.push({type:'att-excellent',severity:'green-strong',label:'Excellent Attendance',
+              detail:`${_pct.toFixed(1)}% attendance this year — only ${_abs} period${_abs===1?'':'s'} missed since September.`});
+          }
+        }
+        if(wins.length) won.push({px,pid:p.pid,yg,tg:p.tg,wins,
+          maxSeverity:wins.some(w=>w.severity==='green-strong')?'green-strong':'green',total:wins.length});
+      });
+      won.sort((a,b)=>{if(a.maxSeverity!==b.maxSeverity)return a.maxSeverity==='green-strong'?-1:1;return b.total-a.total;});
+      const strongN=won.filter(w=>w.maxSeverity==='green-strong').length, someN=won.length-strongN;
+      let h=_cnToggleBar();
+      h+=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">${roleLabelC} — Congrats Summary</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;padding:.5rem 0">
+          <div style="padding:.6rem;border-radius:8px;background:rgba(46,148,105,.10);border:1px solid rgba(46,148,105,.28);text-align:center">
+            <div style="font-size:1.4rem;font-weight:700;color:${GREEN}">${strongN}</div>
+            <div style="font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Standout Pupils</div></div>
+          <div style="padding:.6rem;border-radius:8px;background:rgba(107,191,154,.12);border:1px solid rgba(107,191,154,.3);text-align:center">
+            <div style="font-size:1.4rem;font-weight:700;color:${GREEN2}">${someN}</div>
+            <div style="font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Improving Pupils</div></div>
+        </div></div>`;
+      if(!won.length){
+        h+=`<div class="dw"><div style="color:var(--mu);padding:1rem">No improvements to celebrate in this group yet — try a different year or tutor group, or switch back to Concerns.</div></div>`;
+        out.innerHTML=h;return;
+      }
+      let rh='';
+      won.forEach(p=>{
+        const n=p.wins.length;
+        p.wins.forEach((w,ci)=>{
+          const col=w.severity==='green-strong'?GREEN:GREEN2;
+          const dot=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col}"></span>`;
+          const tag=`<span style="display:inline-block;padding:.1rem .3rem;border-radius:3px;font-size:.6rem;background:${col}12;border:1px solid ${col}44;color:${col}">${w.label}</span>`;
+          const pc=ci===0?`<td style="font-family:'IBM Plex Mono',monospace;font-weight:500;vertical-align:top;padding:.4rem" rowspan="${n}">${pLink(p.px,p.pid)}${senPillShort(p.px)}</td>
+            <td style="text-align:center;font-size:.72rem;color:var(--mu);vertical-align:top;padding:.4rem" rowspan="${n}">Y${p.yg}</td>
+            <td style="font-size:.72rem;color:var(--mu);vertical-align:top;padding:.4rem" rowspan="${n}">${p.tg}</td>`:'';
+          const bb=ci<n-1?'border-bottom:1px dashed rgba(40,34,20,.15)':'';
+          rh+=`<tr>${pc}<td style="padding:.4rem;${bb}">${dot} ${tag}</td><td style="font-size:.68rem;color:var(--mu);padding:.4rem;${bb}">${w.detail}</td></tr>`;
+        });
+      });
+      h+=`<div class="dw"><div class="dwt">Pupils to Celebrate</div>
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
+        <thead><tr style="border-bottom:2px solid var(--bd)">
+          <th style="text-align:left;padding:.4rem;font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Pupil</th>
+          <th style="text-align:center;padding:.4rem;font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Year</th>
+          <th style="text-align:left;padding:.4rem;font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">TG</th>
+          <th style="text-align:left;padding:.4rem;font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Positive</th>
+          <th style="text-align:left;padding:.4rem;font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Detail</th>
+        </tr></thead><tbody>${rh}</tbody></table></div></div>`;
+      out.innerHTML=h;
+      return;
     }
 
     allPupils.forEach(p=>{
@@ -9671,7 +9853,7 @@ function rPeer(){
     const redCount=pupilConcerns.filter(c=>c.maxSeverity==='red').length;
     const amberCount=pupilConcerns.filter(c=>c.maxSeverity==='amber').length;
 
-    let html=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">${roleLabel} — Concerns Summary</div>
+    let html=_cnToggleBar()+`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">${roleLabel} — Concerns Summary</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;padding:.5rem 0">
         <div style="padding:.6rem;border-radius:8px;background:rgba(181,72,59,.08);border:1px solid rgba(181,72,59,.2);text-align:center">
           <div style="font-size:1.4rem;font-weight:700;color:var(--red)">${redCount}</div>
@@ -9909,6 +10091,7 @@ function rPeer(){
   window.resetThresholds=resetThresholds;
   window.cnToggleCard=cnToggleCard;
   window.cnFilterToggle=cnFilterToggle;
+  window.cnSetMode=cnSetMode;
   window.cnFilterClear=cnFilterClear;
   window.showCTModal=showCTModal;
   window.hideCTModal=hideCTModal;
