@@ -481,7 +481,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // Boot: pull shared baseline, merge with local, persist merged copy.
   async function dsmBootstrap(){
-    console.log('[dsm] build dsm-28 (On-Call-categorised codes reclassified to On-Call type at ingest; Admin editing restricted to users in the Supabase admins table; non-admins never see the Admin tab; dismissals stay open to all)');
+    console.log('[dsm] build dsm-29 (On-Call now has its own bar in pupil Sanctions-by-Type; On-Call-categorised codes reclassified to On-Call type at ingest; Admin editing restricted to users in the Supabase admins table; non-admins never see the Admin tab; dismissals stay open to all)');
     let baseline={};
     try{
       const r=await fetch('./dismissals.json',{cache:'no-store'});
@@ -5349,13 +5349,10 @@ function renderDistCharts(){
   document.getElementById('dist-subj').innerHTML=subjGrid;
 
   // Sanctions by Type chart
-  const typeCats=INC_CATS.map(c=>c.id);
-  const typeCatColors=INC_CATS.map(c=>c.color);
-  const typeCounts=typeCats.map(cat=>filtered.filter(r=>r.t===0&&r.cat===cat).length);
-  const detCount=filtered.filter(r=>r.t===2).length;
-  const typeLabels=[...typeCats,'Detentions'];
-  const typeVals=[...typeCounts,detCount];
-  const typeColors=[...typeCatColors,PAL.violet];
+  const _codeCats=INC_CATS.filter(c=>c.id!=='On-Call');
+  const typeLabels=[..._codeCats.map(c=>c.id),'On-Calls','Detentions'];
+  const typeColors=[..._codeCats.map(c=>c.color),PAL.magenta,PAL.violet];
+  const typeVals=[..._codeCats.map(c=>filtered.filter(r=>r.t===0&&r.cat===c.id).length),filtered.filter(r=>r.t===1).length,filtered.filter(r=>r.t===2).length];
   const maxType=Math.max(...typeVals,1);
   let typeGrid='<div style="display:flex;flex-direction:column;gap:.2rem">';
   typeLabels.forEach((lbl,i)=>{
