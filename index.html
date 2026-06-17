@@ -2535,6 +2535,194 @@ function renderHPTimetable(x, ay){
 }
 
 // ── PUPIL VIEW ──
+/* ───────────────────────────────────────────────────────────────────────
+   Folded "typical week" views — Presence (#p-tt) and Conduct (#p-tt-hp).
+   Replace the legacy Weekly Timetable / Absence Patterns / HP Timetable trio.
+   Each cell folds the whole selected academic year onto one Mon–Fri × P1–P5
+   grid. A slot that changed subject mid-year splits into two stacked sub-slots
+   (prior era over current era), each with its own subject·teacher + metrics.
+   Conduct splits exactly (dated HP/sanction records). Presence splits absences
+   exactly and prorates the per-era denominator by per-era school-week count.
+   ─────────────────────────────────────────────────────────────────────── */
+const PTW_DAYS=['Mon','Tue','Wed','Thu','Fri'];
+function _ptwAYs(x){const b=DD.timetablesByAY||{};return Object.keys(b).filter(a=>b[a]&&b[a][String(x)]).sort();}
+function _ptwGrid(x,ay){return ((DD.timetablesByAY||{})[String(ay)]||{})[String(x)]||(DD.timetables||{})[String(x)]||[];}
+function _ptwTeach(x,ay){return ((DD.slotTeachersByAY||{})[String(ay)]||{})[String(x)]||(DD.slotTeachers||{})[String(x)]||[];}
+function _ptwDenom(ay){return (DD.slotDenominatorsByAY||{})[String(ay)]||DD.slotDenominators||[];}
+function _ptwT(tid){return tid==null?'':(String(tid)[0]==='T'?String(tid):'T'+tid);}
+function _ptwDom(list){if(!list||!list.length)return null;let b=list[0];for(const e of list)if(e[1]>b[1])b=e;return b[0];}
+function _ptwShort(s){if(!s)return'';return s.length<=11?s:s.slice(0,10)+'…';}
+function _ptwTeacherElsewhere(grid,teach,subj,sd,sp){
+  // Prefer NORMAL (unchanged) slots teaching this subject — their teacher is unambiguous.
+  for(let d=0;d<5;d++)for(let p=0;p<5;p++){if(d===sd&&p===sp)continue;const c=grid[d]&&grid[d][p];if(!c||c.length===4)continue;
+    if(c[0]===subj){const t=_ptwDom(teach[d]&&teach[d][p]);if(t!=null)return t;}}
+  // Fall back to the current-era subject of other split slots only if no normal slot matched.
+  for(let d=0;d<5;d++)for(let p=0;p<5;p++){if(d===sd&&p===sp)continue;const c=grid[d]&&grid[d][p];if(!c||c.length!==4)continue;
+    if(c[2]===subj){const t=_ptwDom(teach[d]&&teach[d][p]);if(t!=null)return t;}}
+  return null;}
+function _ptwEraTeachers(grid,teach,d,p,priorSubj,curSubj){
+  const list=(teach[d]&&teach[d][p])||[];const ids=list.map(e=>e[0]);
+  let cur=_ptwTeacherElsewhere(grid,teach,curSubj,d,p),prior=null;
+  if(cur!=null)prior=ids.find(t=>t!==cur);
+  if(cur==null){prior=_ptwTeacherElsewhere(grid,teach,priorSubj,d,p);cur=ids.find(t=>t!==prior);}
+  if(cur==null)cur=_ptwDom(list);
+  if(prior==null)prior=ids.find(t=>t!==cur);
+  if(prior==null)prior=cur;
+  return{prior:prior,cur:cur};}
+function _ptwAYMondays(ay){const wl=DD.weekLessons||{};const out=[];
+  for(const m of Object.keys(wl)){const y=+m.slice(0,4),mo=+m.slice(5,7);if(String(mo>=9?y:y-1)===String(ay))out.push(m);}
+  out.sort();return out;}
+function _ptwSlotDate(monday,dow){const dt=new Date(monday+'T12:00:00');dt.setDate(dt.getDate()+dow);
+  return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}
+function _ptwAbs(x,ay){
+  let recs=(DD.attAbsSubj||{})[String(x)]||[];
+  const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
+  if(ay&&ay!=='all')recs=recs.filter(r=>_ayOf(r[0])===String(ay));
+  const supp=(typeof getSuppressed==='function')?getSuppressed(x):new Set();
+  const slotAbs=Array.from({length:5},()=>Array(5).fill(0));
+  const slotUn=Array.from({length:5},()=>Array(5).fill(0));
+  const seen=new Set();const subRecs=[];
+  for(const r of recs){
+    const date=r[0],per=(r[2]||1),code=r[3];
+    if(supp.has(date+'|'+per))continue;
+    const dow=new Date(date+'T12:00:00').getDay()-1,p=per-1;
+    if(dow<0||dow>4||p<0||p>4)continue;
+    const k=date+'|'+dow+'|'+p;if(seen.has(k))continue;seen.add(k);
+    slotAbs[dow][p]++;if(code&&isUnauth(code))slotUn[dow][p]++;
+    subRecs.push([date,dow,p,code]);
+  }
+  return{slotAbs,slotUn,subRecs};}
+function _ptwConduct(x,ay){
+  const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
+  const hp=Array.from({length:5},()=>Array(5).fill(0)),sn=Array.from({length:5},()=>Array(5).fill(0));
+  const hpRecs=[],snRecs=[];const xs=String(x);
+  for(const r of (DD.housePoints||[])){if(String(r[0])!==xs)continue;if(r[4]==null)continue;if(ay&&_ayOf(r[2])!==String(ay))continue;
+    const dow=new Date(r[2]+'T12:00:00').getDay()-1,p=r[4]-1;if(dow<0||dow>4||p<0||p>4)continue;hp[dow][p]++;hpRecs.push([r[2],dow,p]);}
+  for(const r of (DD.sanctions||[])){if(String(r[0])!==xs)continue;if(r[4]==null)continue;if(ay&&_ayOf(r[2])!==String(ay))continue;
+    const dow=new Date(r[2]+'T12:00:00').getDay()-1,p=r[4]-1;if(dow<0||dow>4||p<0||p>4)continue;sn[dow][p]++;snRecs.push([r[2],dow,p]);}
+  return{hp,sn,hpRecs,snRecs};}
+function _ptwBand(att){
+  if(att==null)return['var(--sf2)','var(--mu)'];
+  if(att<40)return['rgba(181,72,59,.18)','#b5483b'];
+  if(att<60)return['rgba(214,158,46,.22)','#8a6d1b'];
+  if(att<80)return['rgba(128,128,128,.14)','var(--mu)'];
+  return['rgba(46,148,105,.18)','#2e7d57'];}
+function _ptwStrip(s,t,small){
+  return `<div style="padding:${small?'1px 5px':'3px 6px'};text-align:center;background:var(--sf2);border-bottom:1px solid var(--bd);white-space:nowrap;overflow:hidden">`
+    +`<span style="font-size:${small?'.62rem':'.68rem'};font-weight:600;color:var(--tx)">${_ptwShort(s)}</span>`
+    +`<span style="font-size:.6rem;color:var(--mu);font-family:'IBM Plex Mono',monospace"> · ${t}</span></div>`;}
+function _ptwAttBody(att,unDom,small){
+  const bt=_ptwBand(att);
+  const dot=unDom?`<span style="width:${small?5:6}px;height:${small?5:6}px;border-radius:50%;background:var(--red);display:inline-block;margin-right:4px"></span>`:'';
+  return `<div style="flex:1;background:${bt[0]};display:flex;align-items:center;justify-content:center">${dot}<span style="font-size:${small?'.72rem':'.95rem'};font-weight:600;color:${bt[1]}">${att==null?'—':att+'%'}</span></div>`;}
+function _ptwCondBody(hp,sn,maxHP,maxSN){
+  const ah=hp>0?(0.12+0.72*hp/maxHP):0,as=sn>0?(0.12+0.72*sn/maxSN):0;
+  const hpc=hp>0?`<span style="position:absolute;top:2px;right:4px;font-size:.62rem;font-weight:600;color:#2e7d57">${hp}</span>`:'';
+  const snc=sn>0?`<span style="position:absolute;bottom:2px;right:4px;font-size:.62rem;font-weight:600;color:#b5483b">${sn}</span>`:'';
+  return `<div style="flex:1;position:relative">`
+    +`<div style="position:absolute;top:0;left:0;right:0;height:50%;background:rgba(46,148,105,${ah})"></div>`
+    +`<div style="position:absolute;bottom:0;left:0;right:0;height:50%;background:rgba(181,72,59,${as})"></div>${hpc}${snc}</div>`;}
+function _ptwLegend(kind){
+  if(kind==='att')return `<div style="display:flex;flex-wrap:wrap;gap:.8rem;padding:0 .75rem .8rem;font-size:.62rem;color:var(--mu)">`
+    +`<span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:rgba(181,72,59,.18);vertical-align:-1px"></span> &lt;40%</span>`
+    +`<span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:rgba(214,158,46,.22);vertical-align:-1px"></span> 40–60%</span>`
+    +`<span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:rgba(128,128,128,.14);vertical-align:-1px"></span> 60–80%</span>`
+    +`<span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:rgba(46,148,105,.18);vertical-align:-1px"></span> 80%+</span>`
+    +`<span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red)"></span> mostly unauthorised</span>`
+    +`<span>divided cell = changed subject &amp; teacher mid-year</span></div>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:.8rem;padding:0 .75rem .8rem;font-size:.62rem;color:var(--mu)">`
+    +`<span><span style="display:inline-block;width:18px;height:9px;border-radius:2px;background:linear-gradient(90deg,rgba(46,148,105,.12),rgba(46,148,105,.8))"></span> more house points</span>`
+    +`<span><span style="display:inline-block;width:18px;height:9px;border-radius:2px;background:linear-gradient(90deg,rgba(181,72,59,.12),rgba(181,72,59,.8))"></span> more sanctions</span>`
+    +`<span>divided cell = changed subject &amp; teacher mid-year</span></div>`;}
+function _ptwResolveAY(x,ay){
+  const AYs=_ptwAYs(x),curAY=String((DD.config&&DD.config.current_acad_year)||'');
+  const r=(ay&&ay!=='undefined'&&ay!=='all')?String(ay):(AYs.indexOf(curAY)>=0?curAY:(AYs[AYs.length-1]||curAY));
+  return{AYs,ay:r};}
+function _ptwSel(fn,x,ay,AYs){
+  if(AYs.length<=1)return'';
+  return `<select onchange="${fn}(${x},this.value)" onclick="event.stopPropagation()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.62rem;padding:.1rem .25rem;border-radius:4px;margin-left:.4rem">`
+    +AYs.map(a=>`<option value="${a}"${a===ay?' selected':''}>${(typeof ayLabel==='function'?ayLabel(a):a)}</option>`).join('')+`</select>`;}
+function _ptwHead(title,meta,sel){
+  return `<div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.4rem;margin-bottom:0" onclick="const b=this.nextElementSibling;b.classList.toggle('tt-hide');this.querySelector('.tt-arrow').classList.toggle('tt-open')"><span>${title}</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.66rem;color:var(--mu)">${meta}</span>${sel}<span class="tt-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;}
+function _ptwCellEmpty(){return `<div style="height:84px;border:1px solid var(--bd);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--mu);font-size:.6rem">—</div>`;}
+
+function renderPresenceGrid(x, ay){
+  const wrap=document.getElementById('p-tt');if(!wrap)return;
+  const R=_ptwResolveAY(x,ay);ay=R.ay;
+  const sel=_ptwSel('renderPresenceGrid',x,ay,R.AYs);
+  const grid=_ptwGrid(x,ay),teach=_ptwTeach(x,ay),denom=_ptwDenom(ay);
+  if(!grid||!grid.length){wrap.innerHTML=`<div class="dw" style="padding:0;overflow:hidden">${_ptwHead('Presence — typical week','',sel)}<div class="tt-body" style="padding:1rem;color:var(--mu);font-size:.8rem">No timetable for this year.</div></div>`;return;}
+  const A=_ptwAbs(x,ay),mondays=_ptwAYMondays(ay);
+  let body=`<div style="display:grid;grid-template-columns:30px repeat(5,1fr);gap:5px;padding:.5rem .75rem .5rem">`;
+  body+=`<div></div>`+PTW_DAYS.map(d=>`<div style="text-align:center;font-size:.66rem;font-weight:600;color:var(--tx);padding-bottom:2px">${d}</div>`).join('');
+  for(let p=0;p<5;p++){
+    body+=`<div style="display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:600;color:var(--mu)">P${p+1}</div>`;
+    for(let d=0;d<5;d++){
+      const c=grid[d]&&grid[d][p];const dn=(denom[d]&&denom[d][p])||0;
+      if(!c){body+=_ptwCellEmpty();continue;}
+      if(c.length===4){
+        const chg=c[3],et=_ptwEraTeachers(grid,teach,d,p,c[0],c[2]);
+        let pa=0,pu=0,ca=0,cu=0;
+        for(const r of A.subRecs){if(r[1]!==d||r[2]!==p)continue;if(r[0]<chg){pa++;if(r[3]&&isUnauth(r[3]))pu++;}else{ca++;if(r[3]&&isUnauth(r[3]))cu++;}}
+        let pdn=0,cdn=0;for(const m of mondays){if(_ptwSlotDate(m,d)<chg)pdn++;else cdn++;}
+        const patt=pdn>0?Math.round((pdn-pa)/pdn*100):null,catt=cdn>0?Math.round((cdn-ca)/cdn*100):null;
+        const t1=`${c[0]} · ${_ptwT(et.prior)} · until ${chg} · ${patt==null?'—':patt+'%'} attendance · ${pa-pu} authorised, ${pu} unauthorised`;
+        const t2=`${c[2]} · ${_ptwT(et.cur)} · from ${chg} · ${catt==null?'—':catt+'%'} attendance · ${ca-cu} authorised, ${cu} unauthorised`;
+        body+=`<div style="height:84px;border:1px solid var(--bd);border-radius:6px;overflow:hidden;display:flex;flex-direction:column">`
+          +`<div title="${t1}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[0],_ptwT(et.prior),true)}${_ptwAttBody(patt,pu>pa-pu,true)}</div>`
+          +`<div style="height:2px;background:var(--mu);opacity:.5"></div>`
+          +`<div title="${t2}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[2],_ptwT(et.cur),true)}${_ptwAttBody(catt,cu>ca-cu,true)}</div></div>`;
+      }else{
+        const subj=c[0],t=_ptwT(_ptwDom(teach[d]&&teach[d][p]));
+        const abs=A.slotAbs[d][p],un=A.slotUn[d][p];const att=dn>0?Math.round((dn-abs)/dn*100):null;
+        const tip=`${subj} · ${t} · ${att==null?'—':att+'% attendance'} · ${abs-un} authorised, ${un} unauthorised`;
+        body+=`<div title="${tip}" style="height:84px;border:1px solid var(--bd);border-radius:6px;overflow:hidden;display:flex;flex-direction:column">${_ptwStrip(subj,t,false)}${_ptwAttBody(att,un>abs-un,false)}</div>`;
+      }
+    }
+  }
+  body+=`</div>`;
+  wrap.innerHTML=`<div class="dw" style="padding:0;overflow:hidden">${_ptwHead('Presence — typical week','shaded by attendance · divided cell = changed subject',sel)}<div class="tt-body">${body}${_ptwLegend('att')}</div></div>`;
+}
+
+function renderConductGrid(x, ay){
+  const wrap=document.getElementById('p-tt-hp');if(!wrap)return;
+  const R=_ptwResolveAY(x,ay);ay=R.ay;
+  const sel=_ptwSel('renderConductGrid',x,ay,R.AYs);
+  const grid=_ptwGrid(x,ay),teach=_ptwTeach(x,ay);
+  if(!grid||!grid.length){wrap.innerHTML=`<div class="dw" style="padding:0;overflow:hidden">${_ptwHead('Conduct — typical week','',sel)}<div class="tt-body" style="padding:1rem;color:var(--mu);font-size:.8rem">No timetable for this year.</div></div>`;return;}
+  const Cd=_ptwConduct(x,ay);
+  let maxHP=1,maxSN=1,totHP=0,totSN=0;
+  for(let d=0;d<5;d++)for(let p=0;p<5;p++){if(Cd.hp[d][p]>maxHP)maxHP=Cd.hp[d][p];if(Cd.sn[d][p]>maxSN)maxSN=Cd.sn[d][p];totHP+=Cd.hp[d][p];totSN+=Cd.sn[d][p];}
+  let body=`<div style="display:grid;grid-template-columns:30px repeat(5,1fr);gap:5px;padding:.5rem .75rem .5rem">`;
+  body+=`<div></div>`+PTW_DAYS.map(d=>`<div style="text-align:center;font-size:.66rem;font-weight:600;color:var(--tx);padding-bottom:2px">${d}</div>`).join('');
+  for(let p=0;p<5;p++){
+    body+=`<div style="display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:600;color:var(--mu)">P${p+1}</div>`;
+    for(let d=0;d<5;d++){
+      const c=grid[d]&&grid[d][p];
+      if(!c){body+=_ptwCellEmpty();continue;}
+      if(c.length===4){
+        const chg=c[3],et=_ptwEraTeachers(grid,teach,d,p,c[0],c[2]);
+        let ph=0,ps=0,ch=0,cs=0;
+        for(const r of Cd.hpRecs){if(r[1]===d&&r[2]===p){if(r[0]<chg)ph++;else ch++;}}
+        for(const r of Cd.snRecs){if(r[1]===d&&r[2]===p){if(r[0]<chg)ps++;else cs++;}}
+        const t1=`${c[0]} · ${_ptwT(et.prior)} · until ${chg} · ${ph} house points, ${ps} sanctions`;
+        const t2=`${c[2]} · ${_ptwT(et.cur)} · from ${chg} · ${ch} house points, ${cs} sanctions`;
+        body+=`<div style="height:84px;border:1px solid var(--bd);border-radius:6px;overflow:hidden;display:flex;flex-direction:column">`
+          +`<div title="${t1}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[0],_ptwT(et.prior),true)}${_ptwCondBody(ph,ps,maxHP,maxSN)}</div>`
+          +`<div style="height:2px;background:var(--mu);opacity:.5"></div>`
+          +`<div title="${t2}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[2],_ptwT(et.cur),true)}${_ptwCondBody(ch,cs,maxHP,maxSN)}</div></div>`;
+      }else{
+        const subj=c[0],t=_ptwT(_ptwDom(teach[d]&&teach[d][p]));
+        const hp=Cd.hp[d][p],sn=Cd.sn[d][p];
+        const tip=`${subj} · ${t} · ${hp} house points, ${sn} sanctions`;
+        body+=`<div title="${tip}" style="height:84px;border:1px solid var(--bd);border-radius:6px;overflow:hidden;display:flex;flex-direction:column">${_ptwStrip(subj,t,false)}${_ptwCondBody(hp,sn,maxHP,maxSN)}</div>`;
+      }
+    }
+  }
+  body+=`</div>`;
+  wrap.innerHTML=`<div class="dw" style="padding:0;overflow:hidden">${_ptwHead('Conduct — typical week',totHP+' HP · '+totSN+' sanctions · house points over sanctions',sel)}<div class="tt-body">${body}${_ptwLegend('cond')}</div></div>`;
+}
+
 function rP(){
   const x=parseInt(document.getElementById('p-sel').value);if(!x)return;
   const pu=REG[x],ink=pu.intake,en=getEn(ink,x),data=getProg(ink,x),ctg=curTG(en);
@@ -2556,9 +2744,9 @@ function rP(){
     // Clear grade sections
     ['p-crds','p-ch','p-tbl'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
     // Still render timetable, sanctions, network, attendance table
-    renderTimetable(x);
-    renderAbsencePattern(x,'p-abs-pattern');
-    renderHPTimetable(x);
+    renderPresenceGrid(x);
+    document.getElementById('p-abs-pattern').innerHTML='';
+    renderConductGrid(x);
     return;
   }
   // lp = "current" period for grade display. Default to last period; but if the last
@@ -2853,9 +3041,9 @@ function rP(){
   document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}<div id="pcn-panel" data-px="${x}">${otherConcernsAlert}</div><div id="pcg-panel" data-px="${x}">${congratsAlert}</div>${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
-  renderTimetable(x);
-  renderAbsencePattern(x,'p-abs-pattern');
-  renderHPTimetable(x);
+  renderPresenceGrid(x);
+  document.getElementById('p-abs-pattern').innerHTML='';
+  renderConductGrid(x);
 
   // Section titles
   document.getElementById('p-acad-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Academic Performance</div>`;
