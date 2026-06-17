@@ -2569,6 +2569,7 @@ function _ptwEraTeachers(grid,teach,d,p,priorSubj,curSubj){
   if(prior==null)prior=ids.find(t=>t!==cur);
   if(prior==null)prior=cur;
   return{prior:prior,cur:cur};}
+function _ptwMeta(x,ay,d,p){const m=((DD.splitSlotMeta||{})[String(ay)]||{})[String(x)];return m?(m[d+','+p]||null):null;}
 function _ptwAYMondays(ay){const wl=DD.weekLessons||{};const out=[];
   for(const m of Object.keys(wl)){const y=+m.slice(0,4),mo=+m.slice(5,7);if(String(mo>=9?y:y-1)===String(ay))out.push(m);}
   out.sort();return out;}
@@ -2661,17 +2662,19 @@ function renderPresenceGrid(x, ay){
       const c=grid[d]&&grid[d][p];const dn=(denom[d]&&denom[d][p])||0;
       if(!c){body+=_ptwCellEmpty();continue;}
       if(c.length===4){
-        const chg=c[3],et=_ptwEraTeachers(grid,teach,d,p,c[0],c[2]);
+        const chg=c[3],meta=_ptwMeta(x,ay,d,p);
+        let etPrior,etCur,pdn,cdn;
+        if(meta){etPrior=meta[0];etCur=meta[1];pdn=meta[2];cdn=meta[3];}
+        else{const et=_ptwEraTeachers(grid,teach,d,p,c[0],c[2]);etPrior=et.prior;etCur=et.cur;pdn=0;cdn=0;for(const m of mondays){if(_ptwSlotDate(m,d)<chg)pdn++;else cdn++;}}
         let pa=0,pu=0,ca=0,cu=0;
         for(const r of A.subRecs){if(r[1]!==d||r[2]!==p)continue;if(r[0]<chg){pa++;if(r[3]&&isUnauth(r[3]))pu++;}else{ca++;if(r[3]&&isUnauth(r[3]))cu++;}}
-        let pdn=0,cdn=0;for(const m of mondays){if(_ptwSlotDate(m,d)<chg)pdn++;else cdn++;}
         const patt=pdn>0?Math.round((pdn-pa)/pdn*100):null,catt=cdn>0?Math.round((cdn-ca)/cdn*100):null;
-        const t1=`${c[0]} · ${_ptwT(et.prior)} · until ${chg} · ${patt==null?'—':patt+'%'} attendance · ${pa-pu} authorised, ${pu} unauthorised`;
-        const t2=`${c[2]} · ${_ptwT(et.cur)} · from ${chg} · ${catt==null?'—':catt+'%'} attendance · ${ca-cu} authorised, ${cu} unauthorised`;
+        const t1=`${c[0]} · ${_ptwT(etPrior)} · until ${chg} · ${patt==null?'—':patt+'%'} attendance · ${pa-pu} authorised, ${pu} unauthorised`;
+        const t2=`${c[2]} · ${_ptwT(etCur)} · from ${chg} · ${catt==null?'—':catt+'%'} attendance · ${ca-cu} authorised, ${cu} unauthorised`;
         body+=`<div style="height:84px;border:1px solid var(--bd);border-radius:6px;overflow:hidden;display:flex;flex-direction:column">`
-          +`<div title="${t1}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[0],_ptwT(et.prior),true)}${_ptwAttBody(patt,pu>pa-pu,true)}</div>`
+          +`<div title="${t1}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[0],_ptwT(etPrior),true)}${_ptwAttBody(patt,pu>pa-pu,true)}</div>`
           +`<div style="height:2px;background:var(--mu);opacity:.5"></div>`
-          +`<div title="${t2}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[2],_ptwT(et.cur),true)}${_ptwAttBody(catt,cu>ca-cu,true)}</div></div>`;
+          +`<div title="${t2}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[2],_ptwT(etCur),true)}${_ptwAttBody(catt,cu>ca-cu,true)}</div></div>`;
       }else{
         const subj=c[0],t=_ptwT(_ptwDom(teach[d]&&teach[d][p]));
         const abs=A.slotAbs[d][p],un=A.slotUn[d][p];const att=dn>0?Math.round((dn-abs)/dn*100):null;
@@ -2701,16 +2704,18 @@ function renderConductGrid(x, ay){
       const c=grid[d]&&grid[d][p];
       if(!c){body+=_ptwCellEmpty();continue;}
       if(c.length===4){
-        const chg=c[3],et=_ptwEraTeachers(grid,teach,d,p,c[0],c[2]);
+        const chg=c[3],meta=_ptwMeta(x,ay,d,p);
+        let etPrior,etCur;
+        if(meta){etPrior=meta[0];etCur=meta[1];}else{const et=_ptwEraTeachers(grid,teach,d,p,c[0],c[2]);etPrior=et.prior;etCur=et.cur;}
         let ph=0,ps=0,ch=0,cs=0;
         for(const r of Cd.hpRecs){if(r[1]===d&&r[2]===p){if(r[0]<chg)ph++;else ch++;}}
         for(const r of Cd.snRecs){if(r[1]===d&&r[2]===p){if(r[0]<chg)ps++;else cs++;}}
-        const t1=`${c[0]} · ${_ptwT(et.prior)} · until ${chg} · ${ph} house points, ${ps} sanctions`;
-        const t2=`${c[2]} · ${_ptwT(et.cur)} · from ${chg} · ${ch} house points, ${cs} sanctions`;
+        const t1=`${c[0]} · ${_ptwT(etPrior)} · until ${chg} · ${ph} house points, ${ps} sanctions`;
+        const t2=`${c[2]} · ${_ptwT(etCur)} · from ${chg} · ${ch} house points, ${cs} sanctions`;
         body+=`<div style="height:84px;border:1px solid var(--bd);border-radius:6px;overflow:hidden;display:flex;flex-direction:column">`
-          +`<div title="${t1}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[0],_ptwT(et.prior),true)}${_ptwCondBody(ph,ps,maxHP,maxSN)}</div>`
+          +`<div title="${t1}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[0],_ptwT(etPrior),true)}${_ptwCondBody(ph,ps,maxHP,maxSN)}</div>`
           +`<div style="height:2px;background:var(--mu);opacity:.5"></div>`
-          +`<div title="${t2}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[2],_ptwT(et.cur),true)}${_ptwCondBody(ch,cs,maxHP,maxSN)}</div></div>`;
+          +`<div title="${t2}" style="flex:1;display:flex;flex-direction:column;overflow:hidden">${_ptwStrip(c[2],_ptwT(etCur),true)}${_ptwCondBody(ch,cs,maxHP,maxSN)}</div></div>`;
       }else{
         const subj=c[0],t=_ptwT(_ptwDom(teach[d]&&teach[d][p]));
         const hp=Cd.hp[d][p],sn=Cd.sn[d][p];
@@ -5668,8 +5673,6 @@ function renderAttTable(){
   const selAY=document.getElementById('att-ay').value;
   const WLK=DD.weekLessons||{};
   const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
-  const grid=TT_DATA[String(px)];
-  if(!grid){container.innerHTML='<div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No timetable data</div>';return}
 
   // Determine date range
   let ayStart,ayEnd;
@@ -5685,20 +5688,40 @@ function renderAttTable(){
     ayEnd=ayEndFull<_atTodayISO?ayEndFull:_atTodayISO;
   }
 
-  // Count school weeks in range
-  const weeksInRange=Object.keys(WLK).filter(w=>w>=ayStart&&w<=ayEnd);
-  const totalSchoolWeeks=weeksInRange.length;
-
-  // Get lessons per week per subject from timetable
+  // Year-aware expected lessons per subject. Previously this read the CAY grid (TT_DATA) for
+  // every selected year, so a past-year view listed CAY subjects and fabricated ~100% for any
+  // subject not taken that year (no absences in range). Now the subject list and the per-subject
+  // expected-lesson denominator come from the SELECTED year('s) own timetable + that year's
+  // scheduled-lesson counts (slotDenominators), with changed cells split per-era via splitSlotMeta.
+  // Expected lessons are baked straight into subjLPW, so totalSchoolWeeks stays at 1.
+  const _attAYs = selAY==='all'
+    ? Object.keys(DD.timetablesByAY||{}).filter(a=>((DD.timetablesByAY||{})[a]||{})[String(px)]).sort()
+    : [String(parseInt(selAY))];
+  if(!_attAYs.some(a=>((DD.timetablesByAY||{})[a]||{})[String(px)])){
+    container.innerHTML='<div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No timetable data for the selected year</div>';return;
+  }
   const subjLPW={};
   let totalLPW=0;
-  for(let d=0;d<5;d++) for(let p=0;p<5;p++){
-    const c=grid[d][p];
-    if(c){
-      subjLPW[c[0]]=(subjLPW[c[0]]||0)+1;totalLPW++;
-      if(c.length===4&&c[2]){subjLPW[c[2]]=(subjLPW[c[2]]||0)}// register split subject
+  for(const _ay of _attAYs){
+    const g=((DD.timetablesByAY||{})[_ay]||{})[String(px)];
+    if(!g) continue;
+    const _den=(DD.slotDenominatorsByAY||{})[_ay]||[];
+    const _meta=((DD.splitSlotMeta||{})[_ay]||{})[String(px)]||{};
+    for(let d=0;d<5;d++) for(let p=0;p<5;p++){
+      const c=g[d][p];
+      if(!c) continue;
+      const _sd=(_den[d]&&_den[d][p])||0;
+      if(c.length===4){
+        const _m=_meta[d+','+p];
+        const _pd=_m?_m[2]:_sd, _cd=_m?_m[3]:0;
+        subjLPW[c[0]]=(subjLPW[c[0]]||0)+_pd; totalLPW+=_pd;
+        if(c[2]){subjLPW[c[2]]=(subjLPW[c[2]]||0)+_cd; totalLPW+=_cd;}
+      }else{
+        subjLPW[c[0]]=(subjLPW[c[0]]||0)+_sd; totalLPW+=_sd;
+      }
     }
   }
+  const totalSchoolWeeks=1;
   const pupilSubjects=Object.keys(subjLPW).sort();
 
   // Count absences per subject in range — deduplicate by date+period, skip suppressed slots
@@ -10270,6 +10293,8 @@ function rPeer(){
   window.renderHPTimetable=renderHPTimetable;
   window.renderTimetable=renderTimetable;
   window.renderAbsencePattern=renderAbsencePattern;
+  window.renderPresenceGrid=renderPresenceGrid;
+  window.renderConductGrid=renderConductGrid;
   window.peerAddRow=peerAddRow;
   window.peerDelRow=peerDelRow;
   window.rPeer=rPeer;
