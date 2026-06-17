@@ -2604,8 +2604,9 @@ function _ptwConduct(x,ay){
   return{hp,sn,hpRecs,snRecs};}
 function _ptwAbsBg(rate){
   if(rate==null)return 'var(--sf2)';
-  const a=0.06+0.62*Math.max(0,Math.min(1,rate));
-  return `rgba(181,72,59,${a.toFixed(3)})`;}
+  const depth=Math.min(1,1.25*Math.max(0,rate)); // 0% -> plain white; doubled ramp -> full red by ~80% absence
+  const r=Math.round(255-74*depth),g=Math.round(255-183*depth),b=Math.round(255-196*depth);
+  return `rgb(${r},${g},${b})`;}
 function _ptwAbsBox(subj,teacher,missed,denom,unDom,small,tip,split){
   const rate=denom>0?missed/denom:null;
   const pct=denom>0?Math.round(missed/denom*100):null;
@@ -2615,23 +2616,27 @@ function _ptwAbsBox(subj,teacher,missed,denom,unDom,small,tip,split){
   return `<div title="${tip}" style="${split?'flex:1;':'height:84px;border:1px solid var(--bd);border-radius:6px;'}background:${bg};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:2px 4px;overflow:hidden">`
     +`<div style="font-size:${small?'.58rem':'.63rem'};font-weight:600;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${_ptwShort(subj)}<span style="opacity:.6;font-family:'IBM Plex Mono',monospace"> · ${teacher}</span></div>`
     +`<div style="font-size:${small?'.74rem':'.92rem'};font-weight:700;color:var(--tx);white-space:nowrap;line-height:1.1">${dot}${pct==null?'—':pct+'%'}${counts}</div></div>`;}
-function _ptwCondBox(subj,teacher,hp,sn,maxHP,maxSN,small,tip,split){
-  const ah=hp>0?(0.12+0.72*hp/maxHP):0,as=sn>0?(0.12+0.72*sn/maxSN):0;
-  const hpc=hp>0?`<span style="position:absolute;top:1px;right:4px;font-size:.6rem;font-weight:700;color:#2e7d57">${hp}</span>`:'';
-  const snc=sn>0?`<span style="position:absolute;bottom:1px;right:4px;font-size:.6rem;font-weight:700;color:#b5483b">${sn}</span>`:'';
-  const label=`<div style="position:relative;z-index:1;font-size:${small?'.58rem':'.63rem'};font-weight:600;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center;padding:0 3px">${_ptwShort(subj)}<span style="opacity:.6;font-family:'IBM Plex Mono',monospace"> · ${teacher}</span></div>`;
-  return `<div title="${tip}" style="${split?'flex:1;':'height:84px;border:1px solid var(--bd);border-radius:6px;'}position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden">`
-    +`<div style="position:absolute;top:0;left:0;right:0;height:50%;background:rgba(46,148,105,${ah})"></div>`
-    +`<div style="position:absolute;bottom:0;left:0;right:0;height:50%;background:rgba(181,72,59,${as})"></div>`
-    +`${label}${hpc}${snc}</div>`;}
+function _ptwCondBox(subj,teacher,hp,sn,small,tip,split){
+  const hd=Math.min(1,hp/20),sd=Math.min(1,sn/20);
+  const hpBg=`rgb(${Math.round(255-209*hd)},${Math.round(255-107*hd)},${Math.round(255-150*hd)})`;
+  const snBg=`rgb(${Math.round(255-74*sd)},${Math.round(255-183*sd)},${Math.round(255-196*sd)})`;
+  const badge=(n,col)=>`<span style="display:inline-flex;align-items:center;justify-content:center;min-width:${small?15:18}px;height:${small?15:18}px;padding:0 3px;border-radius:999px;background:#fff;color:${col};font-size:${small?'.56rem':'.62rem'};font-weight:700;box-shadow:0 0 0 .5px rgba(0,0,0,.12)">${n}</span>`;
+  const hpB=hp>0?`<span style="position:absolute;left:25%;top:${small?'60%':'57%'};transform:translate(-50%,-50%)">${badge(hp,'#2e7d57')}</span>`:'';
+  const snB=sn>0?`<span style="position:absolute;left:75%;top:${small?'60%':'57%'};transform:translate(-50%,-50%)">${badge(sn,'#b5483b')}</span>`:'';
+  const label=`<div style="position:absolute;top:${small?'1px':'3px'};left:0;right:0;text-align:center;z-index:2;font-size:${small?'.56rem':'.62rem'};font-weight:600;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 3px;text-shadow:0 0 2px rgba(255,255,255,.7)">${_ptwShort(subj)}<span style="opacity:.6;font-family:'IBM Plex Mono',monospace"> · ${teacher}</span></div>`;
+  return `<div title="${tip}" style="${split?'flex:1;':'height:84px;border:1px solid var(--bd);border-radius:6px;'}position:relative;overflow:hidden">`
+    +`<div style="position:absolute;top:0;left:0;bottom:0;width:50%;background:${hpBg}"></div>`
+    +`<div style="position:absolute;top:0;right:0;bottom:0;width:50%;background:${snBg}"></div>`
+    +`<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--bd);opacity:.5"></div>`
+    +`${label}${hpB}${snB}</div>`;}
 function _ptwLegend(kind){
   if(kind==='att')return `<div style="display:flex;flex-wrap:wrap;gap:.8rem;padding:0 .75rem .8rem;font-size:.62rem;color:var(--mu)">`
-    +`<span><span style="display:inline-block;width:46px;height:11px;border-radius:2px;border:0.5px solid var(--bd);background:linear-gradient(90deg,rgba(181,72,59,.06),rgba(181,72,59,.68));vertical-align:-1px"></span> low → high absence rate</span>`
+    +`<span><span style="display:inline-block;width:46px;height:11px;border-radius:2px;border:0.5px solid var(--bd);background:linear-gradient(90deg,#fff,#b5483b);vertical-align:-1px"></span> 0% → high absence rate</span>`
     +`<span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2a1410"></span> mostly unauthorised</span>`
     +`<span>divided cell = changed subject &amp; teacher mid-year</span></div>`;
   return `<div style="display:flex;flex-wrap:wrap;gap:.8rem;padding:0 .75rem .8rem;font-size:.62rem;color:var(--mu)">`
-    +`<span><span style="display:inline-block;width:18px;height:9px;border-radius:2px;background:linear-gradient(90deg,rgba(46,148,105,.12),rgba(46,148,105,.8))"></span> more house points</span>`
-    +`<span><span style="display:inline-block;width:18px;height:9px;border-radius:2px;background:linear-gradient(90deg,rgba(181,72,59,.12),rgba(181,72,59,.8))"></span> more sanctions</span>`
+    +`<span><span style="display:inline-block;width:46px;height:11px;border-radius:2px;border:0.5px solid var(--bd);background:linear-gradient(90deg,#fff,#2e9469);vertical-align:-1px"></span> house points · left half (0 → 20+)</span>`
+    +`<span><span style="display:inline-block;width:46px;height:11px;border-radius:2px;border:0.5px solid var(--bd);background:linear-gradient(90deg,#fff,#b5483b);vertical-align:-1px"></span> sanctions · right half (0 → 20+)</span>`
     +`<span>divided cell = changed subject &amp; teacher mid-year</span></div>`;}
 function _ptwResolveAY(x,ay){
   const AYs=_ptwAYs(x),curAY=String((DD.config&&DD.config.current_acad_year)||'');
@@ -2712,20 +2717,20 @@ function renderConductGrid(x, ay){
         const t1=`${c[0]} · ${_ptwT(etPrior)} · until ${chg} · ${ph} house points, ${ps} sanctions`;
         const t2=`${c[2]} · ${_ptwT(etCur)} · from ${chg} · ${ch} house points, ${cs} sanctions`;
         body+=`<div style="height:84px;border:1px solid var(--bd);border-radius:6px;overflow:hidden;display:flex;flex-direction:column">`
-          +_ptwCondBox(c[0],_ptwT(etPrior),ph,ps,maxHP,maxSN,true,t1,true)
+          +_ptwCondBox(c[0],_ptwT(etPrior),ph,ps,true,t1,true)
           +`<div style="height:2px;background:var(--mu);opacity:.5"></div>`
-          +_ptwCondBox(c[2],_ptwT(etCur),ch,cs,maxHP,maxSN,true,t2,true)
+          +_ptwCondBox(c[2],_ptwT(etCur),ch,cs,true,t2,true)
           +`</div>`;
       }else{
         const subj=c[0],t=_ptwT(_ptwDom(teach[d]&&teach[d][p]));
         const hp=Cd.hp[d][p],sn=Cd.sn[d][p];
         const tip=`${subj} · ${t} · ${hp} house points, ${sn} sanctions`;
-        body+=_ptwCondBox(subj,t,hp,sn,maxHP,maxSN,false,tip,false);
+        body+=_ptwCondBox(subj,t,hp,sn,false,tip,false);
       }
     }
   }
   body+=`</div>`;
-  wrap.innerHTML=`<div class="dw" style="padding:0;overflow:hidden">${_ptwHead('Conduct — typical week',totHP+' HP · '+totSN+' sanctions · house points over sanctions',sel)}<div class="tt-body">${body}${_ptwLegend('cond')}</div></div>`;
+  wrap.innerHTML=`<div class="dw" style="padding:0;overflow:hidden">${_ptwHead('Conduct — typical week',totHP+' HP · '+totSN+' sanctions · green = HP, red = sanctions',sel)}<div class="tt-body">${body}${_ptwLegend('cond')}</div></div>`;
 }
 
 function rP(){
