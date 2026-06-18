@@ -1,0 +1,102 @@
+name: Rebuild dashboard data
+
+# Triggered per school after an admin uploads raw files (via the Supabase Edge Function
+# in supabase/functions/rebuild, which derives school_id from the caller's verified token).
+# Also runnable by hand for testing.
+#
+# The engine runs UNCHANGED. It reads staged inputs from the absolute path
+# /home/claude/import_input, takes its key via SCHOOL_KEY_PATH, and writes
+# /home/claude/data_real.json (+ flags via FLAGS_PATH). This job's whole job is to
+# materialise that exact layout around it, never to modify it.
+
+on:
+  repository_dispatch:
+    types: [rebuild-dashboard]
+  workflow_dispatch:
+    inputs:
+      school_id:
+        description: School slug (matches the storage prefix, e.g. "springfield")
+        required: true
+      academic_year:
+        description: Current academic year start, e.g. 2025 for 2025-26 (blank = derive from today)
+        required: false
+
+# One rebuild per school at a time; the newest store always wins (the engine rebuilds
+# from the whole accumulated store, so cancelling an older run loses nothing).
+concurrency:
+  group: rebuild-${{ github.event.client_payload.school_id || inputs.school_id }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest          # ~16 GB RAM — the sandbox OOM is environmental and does not occur here
+    timeout-minutes: 20             # job is ~1 minute; headroom only
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      DATA_BUCKET: dashboard-data
+      SCHOOL_ID: ${{ github.event.client_payload.school_id || inputs.school_id }}
+      ACADEMIC_YEAR_IN: ${{ github.event.client_payload.academic_year || inputs.academic_year }}
+
+    steps:
+      - name: Validate inputs (fail closed)
+        run: |
+          set -euo pipefail
+          if [[ ! "${SCHOOL_ID:-}" =~ ^[a-z0-9][a-z0-9-]{1,62}$ ]]; then
+            echo "::error::Invalid or missing school_id '${SCHOOL_ID:-}'"; exit 1
+          fi
+          if [[ -n "${ACADEMIC_YEAR_IN:-}" && ! "${ACADEMIC_YEAR_IN}" =~ ^[0-9]{4}$ ]]; then
+            echo "::error::academic_year must be a 4-digit year, got '${ACADEMIC_YEAR_IN}'"; exit 1
+          fi
+
+      - name: Resolve current academic year (UK Sept–Aug, override allowed)
+        run: |
+          set -euo pipefail
+          if [[ -n "${ACADEMIC_YEAR_IN:-}" ]]; then
+            CAY="${ACADEMIC_YEAR_IN}"
+          else
+            Y=$(date -u +%Y); M=$((10#$(date -u +%m)))
+            if [[ "$M" -ge 9 ]]; then CAY="$Y"; else CAY=$((Y-1)); fi
+          fi
+          echo "CAY=$CAY" >> "$GITHUB_ENV"
+          echo "Using academic year start: $CAY"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install engine dependencies
+        run: pip install pandas openpyxl --break-system-packages
+
+      - name: Materialise the engine's expected paths
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /home/claude/import_input
+          sudo chown -R "$USER" /home/claude
+
+      - name: Pull this school's raw store + key from Supabase
+        run: |
+          set -euo pipefail
+          python3 ci/pull_store.py \
+            --school "$SCHOOL_ID" \
+            --raw-dest ./raw \
+            --key-dest ./school_key.json
+
+      - name: Stage raw exports -> engine inputs (also emits Roster.csv)
+        run: python3 stage_inputs.py ./raw /home/claude/import_input "$CAY"
+
+      - name: Run the import engine (unchanged)
+        env:
+          SCHOOL_KEY_PATH: ./school_key.json
+          FLAGS_PATH: /home/claude/flags.json
+        run: python3 import_engine.py
+
+      - name: Push data.json + flags.json back to the school's prefix
+        run: |
+          set -euo pipefail
+          python3 ci/push_outputs.py \
+            --school "$SCHOOL_ID" \
+            --data /home/claude/data_real.json \
+            --flags /home/claude/flags.json
