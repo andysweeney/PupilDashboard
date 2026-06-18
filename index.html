@@ -126,6 +126,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div class="logo">Pupil Progress <span>Dashboard</span></div>
 <div class="tabs">
 <button id="tab-admin" class="tb" style="display:none" onclick="sw('admin',this)">🔧 Admin</button>
+<button id="tab-upload" class="tb" style="display:none" onclick="sw('upload',this)">⬆️ Upload</button>
 <button class="tb on" onclick="sw('pupil',this)">👤 Pupil</button>
 <button class="tb" onclick="sw('subject',this)">📚 Subject</button>
 <button class="tb" onclick="sw('class',this)">🏫 Class</button>
@@ -348,6 +349,10 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div id="admin-out"></div>
 </div>
 
+<div id="vw-upload" class="vw">
+<div id="upload-out"></div>
+</div>
+
 <div id="vw-peer" class="vw">
 <div id="peer-rows"></div>
 <div style="margin:.6rem 0"><button id="peer-add-btn" onclick="peerAddRow()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.72rem;padding:.35rem .8rem;border-radius:6px;cursor:pointer">+ Add Comparison Group</button></div>
@@ -417,7 +422,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   try{
     let resp;
     if(SB_ON){
-      resp=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/data.json',
+      var _SID=schoolId();
+      resp=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+(_SID?_SID+'/':'')+'data.json',
                        {headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()},cache:'no-store'});
     }else{
       resp=await fetch('./data.json');
@@ -921,14 +927,14 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
   // ── Boot the app ──
   const CFG=DD.config,REG=DD.registry,PRG=DD.progress,ENR=DD.enrolments;
-const SUBS=CFG.subjects,PER=CFG.periods,PL=CFG.period_labels,CAY=CFG.current_acad_year;
+let SUBS=CFG.subjects;const PER=CFG.periods,PL=CFG.period_labels,CAY=CFG.current_acad_year;
 const ABP=DD.attByPeriod||{}; // {pupilIdx: {period: overall attendance%}}
 const ABPS=DD.attByPeriodSubj||{}; // {pupilIdx: {period: {subject: attendance%}}}
 // AM (ability_map), AG and AN are derived from the resolved ability scale (see below),
 // so the export no longer needs to carry ability_map.
 // ── Grading-scale foundation (1 = BEST convention). Single source of truth for
 //    rank/label/short/colour/tick-names; each level lists the raw CSV token(s) that
-//    map to it, rank = position (1 = best). ABILITY derives from ability_map (best
+//    map to it, rank = position (${ABILITY.levels[0].label} = best). ABILITY derives from ability_map (best
 //    first); EFFORT from a default 1..n. NOTE: this block is intentionally inert wrt
 //    the current display — the 1=best *flip* is applied as a separate, verified pass. ──
 function _mkScale(levels){
@@ -970,6 +976,14 @@ function authSave(s){try{localStorage.setItem(AUTH_LS,JSON.stringify(s));}catch(
 function authClear(){try{localStorage.removeItem(AUTH_LS);}catch(e){}}
 function authToken(){return (_SESSION&&_SESSION.access_token)||null;}
 function authUser(){return (_SESSION&&_SESSION.user)||null;}
+// Which school the signed-in user belongs to — taken ONLY from the account's token
+// (stamped server-side, not user-editable). Null on a single-school site, so data
+// loads from the bucket root and nothing changes. Subdomain-based resolution is added
+// later (Path B), scoped to the real product domain, when per-school URLs are switched on.
+function schoolId(){
+  try{ var u=authUser(); var t=u&&u.app_metadata&&u.app_metadata.school_id; if(t) return t; }catch(e){}
+  return null;
+}
 function authExpired(){if(!_SESSION)return true;const exp=_SESSION.expires_at?_SESSION.expires_at*1000:0;return !exp||Date.now()>(exp-60000);}
 async function authSignIn(email,password){
   const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email:email,password:password})});
@@ -1105,6 +1119,7 @@ async function checkAdmin(){
     }catch(e){ IS_ADMIN=false; }          // fail closed: treat as non-admin on any error
   }
   try{const b=document.getElementById('tab-admin'); if(b) b.style.display=IS_ADMIN?'':'none';}catch(e){}
+  try{const u=document.getElementById('tab-upload'); if(u) u.style.display=IS_ADMIN?'':'none';}catch(e){}
 }
 await checkAdmin();
 // Two-way dismissal sync: pull the team's shared dismissals in and push any local-only
@@ -1113,6 +1128,10 @@ dsmServerPush().then(()=>{try{dsmRefresh()}catch(e){}});
 const SCALE_CFG=await _resolveScales();
 const ABILITY=_mkScale(SCALE_CFG.ability.map(r=>({csv:r.csv.slice(),label:r.label,colour:r.colour,note:r.note})));
 const EFFORT=_mkScale(SCALE_CFG.effort.map(r=>({csv:r.csv.slice(),label:r.label,colour:r.colour,note:r.note})));
+// Attainment axis tick label, derived from the CONFIGURED ability scale (GCSE, KS3 letters, ...)
+// instead of being hard-coded. Falls back to nothing outside the scale's range.
+function abTick(v){if(!Number.isInteger(v)||v<1||v>ABILITY.n)return '';const lv=ABILITY.levels[v-1];return lv?(lv.short||lv.label):'';}
+function abTipLabel(ctx){const v=ctx.parsed.y;if(v==null)return ' '+ctx.dataset.label;return ctx.dataset.yAxisID==='y1'?(' '+ctx.dataset.label+': '+v+'%'):(' '+ctx.dataset.label+': '+abTick(v));}
 EFFORT.vals=EFFORT.levels.map(l=>+l.csv[0]);
 EFFORT.byVal={};EFFORT.levels.forEach(l=>{EFFORT.byVal[+l.csv[0]]=l;});
 function efColor(v){const l=EFFORT.byVal[v];return l?l.colour:PAL.slate;}
@@ -1131,7 +1150,8 @@ const DATAKEYS_LS_KEY='pupilDashboard.dataKeys.v1';
 const _DATAKEY_DEFAULTS={
   att_codes:{present:["/","B","D","K","L","P","V","W"],authorised_absent:["C","C1","C2","E","I","J","J1","M","Q","R","S","T","X"],unauthorised_absent:["-","?","G","N","O","U"],not_counted:["Y","Y1","Y2","Y3","Y4","Y5","Y6","Y7"]},
   sen_codes:{"K":"SEN Support","E":"EHCP","Add":"Additional Help","add":"Additional Help","Strat":"Strategies Applied","strat":"Strategies Applied","N":"SEN Monitoring"},
-  incident_codes:{}
+  incident_codes:{},
+  subject_map:{aliases:{},canonical:{}}
 };
 async function _resolveDataKeys(){
   // incident baseline = legacy export mapping + regex defaults over every reason in the data
@@ -1144,19 +1164,83 @@ async function _resolveDataKeys(){
   const out={
     att_codes:Object.assign({},_DATAKEY_DEFAULTS.att_codes,(DD.config&&DD.config.att_codes)||{}),
     sen_codes:Object.assign({},_DATAKEY_DEFAULTS.sen_codes,(DD.config&&DD.config.sen_codes)||{}),
-    incident_codes:incBase
+    incident_codes:incBase,
+    // subjects = the school's interpretation of raw subject strings. Choices live here (sidecar + Admin),
+    // NEVER in data.json. data.json only supplies the raw subject list (DD.subjectKeys).
+    subject_map:{aliases:Object.assign({},_DATAKEY_DEFAULTS.subject_map.aliases),canonical:Object.assign({},_DATAKEY_DEFAULTS.subject_map.canonical)}
   };
-  const apply=src=>{if(src&&typeof src==='object')['att_codes','sen_codes','incident_codes'].forEach(k=>{if(src[k]&&typeof src[k]==='object')out[k]=src[k];});};
+  const apply=src=>{if(src&&typeof src==='object'){['att_codes','sen_codes','incident_codes'].forEach(k=>{if(src[k]&&typeof src[k]==='object')out[k]=src[k];});if(src.subject_map&&typeof src.subject_map==='object'){if(src.subject_map.aliases&&typeof src.subject_map.aliases==='object')out.subject_map.aliases=src.subject_map.aliases;if(src.subject_map.canonical&&typeof src.subject_map.canonical==='object')out.subject_map.canonical=src.subject_map.canonical;}}};
   try{const r=await fetch('./data_key_config.json',{cache:'no-store'});if(r&&r.ok)apply(await r.json());}catch(e){}
   try{const ls=loadCfg('dataKeys',DATAKEYS_LS_KEY);if(ls)apply(ls);}catch(e){}
   return out;
 }
-function _persistDataKeys(){saveCfg('dataKeys',DATAKEYS_LS_KEY,{att_codes:DD.config.att_codes,sen_codes:DD.config.sen_codes,incident_codes:DD.config.incident_codes});}
+function _persistDataKeys(){saveCfg('dataKeys',DATAKEYS_LS_KEY,{att_codes:DD.config.att_codes,sen_codes:DD.config.sen_codes,incident_codes:DD.config.incident_codes,subject_map:DD.config.subject_map});}
 const _DKcfg=await _resolveDataKeys();
 DD.config.att_codes=_DKcfg.att_codes;
 DD.config.sen_codes=_DKcfg.sen_codes;
 DD.config.incident_codes=_DKcfg.incident_codes;
+DD.config.subject_map=_DKcfg.subject_map;
+// Subject resolution engine — raw->canonical (unify), canonical->display (rename), continuesFrom (forks).
+// Mirror of subject_engine.js. Reads ONLY config (sidecar + Admin edits); data stays raw.
+function _buildSUBJ(cfg){
+  const aliases=(cfg&&cfg.aliases)||{},canon=(cfg&&cfg.canonical)||{};
+  const _n=s=>s==null?null:String(s).trim();
+  const canonicalOf=raw=>{const s=_n(raw);if(s==null)return null;return aliases[s]!=null?aliases[s]:s;};
+  const displayOf=id=>{const m=canon[id];return (m&&m.display)||id;};
+  const parentOf=id=>(canon[id]&&canon[id].continuesFrom)||null;
+  const childrenOf=id=>Object.keys(canon).filter(c=>canon[c].continuesFrom===id);
+  const isFork=id=>childrenOf(id).length>1;
+  const family=id=>{let root=id;const g=new Set();while(parentOf(root)&&!g.has(root)){g.add(root);root=parentOf(root);}const out=[root],st=[root];while(st.length){const n=st.pop();for(const c of childrenOf(n))(out.push(c),st.push(c));}return out;};
+  const children=Object.keys(canon).filter(id=>canon[id]&&canon[id].continuesFrom!=null);
+  return {canonicalOf,displayOf,parentOf,childrenOf,isFork,family,children,hasLineage:children.length>0,_cfg:cfg};
+}
+let SUBJ=_buildSUBJ(DD.config.subject_map);
 {/* dsm:oncall-reclass:start */const _ICm=DD.config.incident_codes;let _ocReclass=0;(DD.sanctionDetails||[]).forEach((d,i)=>{if(d&&_ICm[d[0]]){d[1]=_ICm[d[0]];if(d[1]==='On-Call'&&DD.sanctions&&DD.sanctions[i]&&DD.sanctions[i][1]===0){DD.sanctions[i][1]=1;_ocReclass++;}}});DD._ocReclass=_ocReclass;try{if(_ocReclass)console.info('[dsm] reclassified '+_ocReclass+' On-Call-categorised code(s) to On-Call type');}catch(e){}/* dsm:oncall-reclass:end */}
+{/* dsm:subj-canon:start — fold raw subject spellings into their mapped canonical across every subject-keyed structure (identity when no aliases set) */
+  const _sm=DD.config&&DD.config.subject_map;
+  if(SUBJ&&_sm&&_sm.aliases&&Object.keys(_sm.aliases).length){
+    const cof=s=>SUBJ.canonicalOf(s), emptyV=v=>v==null||v==='';
+    // 1) SUBS + CFG.subjects (colour source) -> canonical, deduped, order-preserving
+    const seen=new Set(),cl=[];
+    (CFG.subjects||[]).forEach(s=>{const c=cof(s);if(c!=null&&!seen.has(c)){seen.add(c);cl.push(c);}});
+    SUBS=cl; CFG.subjects=cl; if(DD.config)DD.config.subjects=cl;
+    // 2) progress score dicts: merge cells field-by-field (attainment from one spelling, effort from another)
+    for(const ik in PRG)for(const pk in PRG[ik])PRG[ik][pk].forEach(r=>{
+      const raw=r[3];if(!raw||typeof raw!=='object')return;
+      const merged={};
+      for(const sub in raw){
+        const c=cof(sub),cell=raw[sub];
+        if(!Array.isArray(cell)){if(!(c in merged))merged[c]=cell;continue;}
+        if(!Array.isArray(merged[c])){merged[c]=cell.slice();}
+        else{const m=merged[c],n=Math.max(m.length,cell.length);for(let k=0;k<n;k++){if(emptyV(m[k])&&!emptyV(cell[k]))m[k]=cell[k];}}
+      }
+      r[3]=merged;
+    });
+    // 3) attByPeriodSubj {pi:{period:{subject:%}}}: re-key, average % on the rare collision
+    if(DD.attByPeriodSubj)for(const pi in DD.attByPeriodSubj)for(const pk in DD.attByPeriodSubj[pi]){
+      const src=DD.attByPeriodSubj[pi][pk],out={},cnt={};
+      for(const sub in src){const c=cof(sub),v=src[sub];
+        if(typeof v==='number'){if(cnt[c]==null){out[c]=v;cnt[c]=1;}else{out[c]+=v;cnt[c]++;}}
+        else if(!(c in out))out[c]=v;}
+      for(const c in cnt)if(cnt[c]>1&&typeof out[c]==='number')out[c]=out[c]/cnt[c];
+      DD.attByPeriodSubj[pi][pk]=out;
+    }
+    // 4) attAbsSubj rows [date,subject,period,mark]
+    if(DD.attAbsSubj)for(const pi in DD.attAbsSubj)(DD.attAbsSubj[pi]||[]).forEach(a=>{if(a&&a[1]!=null)a[1]=cof(a[1]);});
+    // 5) sanctions + house points: subject at index 3
+    if(DD.sanctions)DD.sanctions.forEach(r=>{if(r&&r[3]!=null)r[3]=cof(r[3]);});
+    if(DD.housePoints)DD.housePoints.forEach(r=>{if(r&&r[3]!=null)r[3]=cof(r[3]);});
+    // 6) timetable grids (flat + per-AY): normal cell [subj,..] and split cell [subj1,_,subj2,_]; each grid processed once
+    const _seenG=new WeakSet();
+    const _ttGrid=grid=>{if(!Array.isArray(grid)||_seenG.has(grid))return;_seenG.add(grid);
+      grid.forEach(day=>{if(!Array.isArray(day))return;day.forEach(cell=>{if(Array.isArray(cell)){if(cell[0]!=null)cell[0]=cof(cell[0]);if(cell.length>=3&&cell[2]!=null)cell[2]=cof(cell[2]);}});});};
+    const _ttPupils=pp=>{if(pp)for(const px in pp)_ttGrid(pp[px]);};
+    if(DD.timetables)_ttPupils(DD.timetables);
+    if(DD.timetablesByAY)for(const ay in DD.timetablesByAY)_ttPupils(DD.timetablesByAY[ay]);
+    // 7) enrolments: subject field .s
+    if(DD.enrolments)for(const ik in DD.enrolments)(DD.enrolments[ik]||[]).forEach(r=>{if(r&&r.s!=null)r.s=cof(r.s);});
+  }
+/* dsm:subj-canon:end */}
 const _c={};function dc(i){if(_c[i])try{_c[i].destroy()}catch(e){}_c[i]=null}function sc2(i,c){_c[i]=c}
 
 function ygAt(ink,ay){return ay-ink+7}
@@ -1295,7 +1379,11 @@ function pDate(p){
 }
 function clAt(en,s,p){const d=pDate(p);return en.filter(r=>r.t==='cls'&&r.s===s).reverse().find(r=>r.f<=d&&(r.u===null||r.u>d))||null}
 function sDrop(en,s){const r=en.find(e=>e.t==='subj'&&e.s===s);return r?r.u:null}
-function getProg(ink,x){const a=PRG[inkKey(ink)]||{};const o={};for(const[p,rs]of Object.entries(a)){const r=rs.find(r=>r[0]===x);if(r)o[p]={x:r[0],pid:r[1],tg:r[2],sc:r[3],send:r[4],ehcp:r[5],fsm:r[6]}}return o}
+function getProg(ink,x){const a=PRG[inkKey(ink)]||{};const o={};for(const[p,rs]of Object.entries(a)){const r=rs.find(r=>r[0]===x);if(r)o[p]={x:r[0],pid:r[1],tg:r[2],sc:r[3],send:r[4],ehcp:r[5],fsm:r[6]}}
+  if(SUBJ&&SUBJ.hasLineage){for(const p in o){const src=o[p].sc;if(!src)continue;let cl=null;
+    for(const ch of SUBJ.children){if(src[ch]==null){let an=SUBJ.parentOf(ch);while(an!=null&&src[an]==null)an=SUBJ.parentOf(an);if(an!=null&&src[an]!=null){if(!cl)cl=Object.assign({},src);cl[ch]=src[an];}}}
+    if(cl)o[p].sc=cl;}}
+  return o}
 function allR(ink,p){return(PRG[inkKey(ink)]||{})[p]||[]}
 // Get all rows for a specific year group in a specific period, across ALL intakes
 function allRowsForYG(yearGroup,period){
@@ -1593,9 +1681,11 @@ function eC(v){return v==null?'var(--mu)':v<=1.5?PAL.green:v>=3?PAL.red:'var(--m
 function chB(v,l){if(v===null)return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span style="font-family:'IBM Plex Mono',monospace;color:var(--mu)">No Data</span></div>`;const c=v>0?'pos':v<0?'neg':'flat';return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span class="chg ${c}">${v>0?'+':''}${v.toFixed(2)}</span></div>`}
 function abAvg(row,subs){if(!row)return null;const s=subs.map(s2=>row.sc[s2]?AS[AM[row.sc[s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
 function abDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(ABILITY.n,Math.max(1,Math.round(v)));const lv=ABILITY.levels[r-1];return lv?lv.label:'';}
-function abAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return abDesc(n)+' ('+fN(n)+')';}
+function abGrade(v){if(v==null||isNaN(v))return '—';var n=ABILITY.n;var r=Math.min(n,Math.max(1,v));var lo=Math.floor(r),hi=Math.ceil(r);var a=ABILITY.levels[lo-1],b=ABILITY.levels[hi-1];var na=a?parseFloat(a.label):NaN,nb=b?parseFloat(b.label):NaN;if(!isNaN(na)&&!isNaN(nb)){var g=na+(r-lo)*(nb-na);return String(Math.round(g*10)/10);}return abDesc(v);}
+function scaleKeyHTML(){var sep='<span style="color:var(--bd);margin:0 .2rem">·</span>';var ab=ABILITY.levels.map(function(lv){return '<span style="display:inline-flex;align-items:center;gap:.25rem"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+(lv.colour||PAL.slate)+'"></span>'+lv.label+'</span>';}).join(sep);var ef=EFFORT.levels.map(function(lv){return '<span>'+lv.label+(lv.note?' '+lv.note:'')+'</span>';}).join(sep);return '<div class="crd" style="grid-column:1/-1"><div class="ct2">Scale key <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">'+ABILITY.levels[0].label+' = best ability · '+EFFORT.levels[0].label+' = highest effort</span></div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Ability</b>'+ab+'</div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Effort</b>'+ef+'</div></div>';}
+function abAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return abGrade(n);}
 function efDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(EFFORT.n,Math.max(1,Math.round(v)));const lv=EFFORT.levels[r-1];return lv?(lv.note||lv.label):'';}
-function efAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return efDesc(n)+' ('+fN(n)+')';}
+function efAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return fN(n)+' '+efDesc(n);}
 function efAvg(row,subs){if(!row)return null;const v=subs.map(s2=>row.sc[s2]?row.sc[s2][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 function ord(n){const s=['th','st','nd','rd'];const v=n%100;return n+(s[(v-20)%10]||s[v]||s[0])}
 function toggleAll(chartKey,show){const ch=_c[chartKey];if(!ch)return;ch.data.datasets.forEach((_,i)=>{ch.setDatasetVisibility(i,show)});ch.update()}
@@ -2846,7 +2936,7 @@ function rP(){
     efRkStr=getRankStr(efRanks,x);
 
     // Previous periods with TG rank in brackets
-    abPrv=prevP.map(p=>{const v=abAvg(data[p],act);const rks=tgRanks(p,'ab');const rk=getRankStr(rks,x);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
+    abPrv=prevP.map(p=>{const v=abAvg(data[p],act);const rks=tgRanks(p,'ab');const rk=getRankStr(rks,x);return`<span>${PL[PER.indexOf(p)]}: <b>${abGrade(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
     efPrv=prevP.map(p=>{const v=efAvg(data[p],act);const rks=tgRanks(p,'ef');const rk=getRankStr(rks,x);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
   }else{
     // Single subject: rank within the class the pupil was in at each period
@@ -2866,7 +2956,7 @@ function rP(){
         return ri?`${ord(ri)}/${ranked.length}`:'—';
       }
     }
-    abPrv=prevP.map(p=>{const v=abAvg(data[p],act);const rk=clsRankAt(p,'ab');return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
+    abPrv=prevP.map(p=>{const v=abAvg(data[p],act);const rk=clsRankAt(p,'ab');return`<span>${PL[PER.indexOf(p)]}: <b>${abGrade(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
     efPrv=prevP.map(p=>{const v=efAvg(data[p],act);const rk=clsRankAt(p,'ef');return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
   }
 
@@ -3076,12 +3166,12 @@ function rP(){
 
   if(hasGrades&&isA){
     document.getElementById('p-crds').innerHTML=`
-    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${fN(a6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(a6)}</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
+    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${abGrade(a6)}</span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
     </div>
-    <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div>
+    <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -3106,7 +3196,7 @@ function rP(){
     }
     document.getElementById('p-crds').innerHTML=`
     <div class="crd"><div class="ct2">${sf} Ability (${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${fN(a6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(a6)}</span></span>${abClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abClsRkStr}</b> in class</span>`:''}</div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${abGrade(a6)}</span>${abClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abClsRkStr}</b> in class</span>`:''}</div>
       ${clsInfo?`<div style="margin-top:.15rem">${clsInfo}</div>`:''}
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
@@ -3122,11 +3212,13 @@ function rP(){
     document.getElementById('p-crds').innerHTML='<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported for this pupil.</div></div>';
   }
 
+  if(hasGrades) document.getElementById('p-crds').insertAdjacentHTML('beforeend', scaleKeyHTML());
+
   // Charts — only render if grades available
   dc('pab');dc('pef');
   if(hasGrades){
   const labs=pp.map(p=>PL[PER.indexOf(p)]);
-  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
+  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
   const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay: subject-specific when single subject, overall when all
@@ -3141,7 +3233,7 @@ function rP(){
     const attLabel=isA?'Attendance % (overall)':`Attendance % (${sf})`;
     abDS.push({label:attLabel,data:attData,borderColor:PAL.green,backgroundColor:'#34d39918',borderWidth:1.5,pointRadius:3,pointBackgroundColor:PAL.green,tension:.3,fill:true,yAxisID:'y1',borderDash:[4,2],spanGaps:true,order:10});
   }
-  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}}},scales:{y:{min:1,max:7,reverse:true,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const names=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}},tooltip:{callbacks:{label:abTipLabel}}},scales:{y:{min:1,max:ABILITY.n,reverse:true,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   const efDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][1]||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay on effort chart
@@ -4093,7 +4185,7 @@ function rCmp(){
   if(!cohorts.length){out.innerHTML='<div style="color:var(--mu);padding:2rem">No data for Year '+targetYG+'</div>';return}
 
   const tblRows=cohorts.map((c,ci)=>{
-    const abTip=`All: ${fV(c.avg,2)}${c.send?`&#10;SEND (${c.send}): ${fV(c.sendAb,2)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${fV(c.ehcpAb,2)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${fV(c.fsmAb,2)}`:''}`;
+    const abTip=`All: ${abGrade(c.avg)}${c.send?`&#10;SEND (${c.send}): ${abGrade(c.sendAb)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${abGrade(c.ehcpAb)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${abGrade(c.fsmAb)}`:''}`;
     const efTip=`All: ${fV(c.avgE,2)}${c.send?`&#10;SEND (${c.send}): ${fV(c.sendEf,2)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${fV(c.ehcpEf,2)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${fV(c.fsmEf,2)}`:''}`;
     return`<tr>
       <td style="font-weight:500">${c.label}${c.left?' <span class="left-tag">LEFT</span>':c.status==='current'?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
@@ -4102,7 +4194,6 @@ function rCmp(){
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:var(--green);font-weight:600':c.ytdAtt>=90?'':'color:var(--red);font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
       <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${abAvgD(c.avg)}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${efAvgD(c.avgE)}</td>
-      <td>${c.gb.map(x=>{const tip=`${x.g}: ${x.n}${x.sendN?`&#10;SEND: ${x.sendN}`:''}${x.ehcpN?`&#10;EHCP: ${x.ehcpN}`:''}${x.fsmN?`&#10;FSM: ${x.fsmN}`:''}`;return`<span style="display:inline-block;margin:.1rem;padding:.08rem .3rem;border-radius:3px;font-size:.65rem;background:${GC[x.g]}22;color:${GC[x.g]};cursor:help" title="${tip}">${x.g.slice(0,3)} ${x.n}</span>`}).join('')}</td>
       <td style="text-align:center;${c.send?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
       <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.K||'\u2014'}</td>
       <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.E||'\u2014'}</td>
@@ -4116,7 +4207,7 @@ function rCmp(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Year ${targetYG} ${subLabel} \u2014 Cohort Comparison Over Time</div>
-    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></th><th>Grade Distribution \u2014 Final Term</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpef"></canvas></div></div></div>`;
 
@@ -4170,14 +4261,16 @@ function rCmp(){
   });
 
   // Custom tooltip showing SEND/EHCP/FSM breakdowns
-  const flagTip=(datasets)=>({callbacks:{
+  const flagTip=(datasets,isAb)=>({callbacks:{
     label:ctx=>{
       const ds=ctx.dataset;const m=ds._meta?.[ctx.dataIndex];
-      const lines=[` ${ds.label}: ${ctx.parsed.y}`];
+      const fmt=v=>v==null?'—':(isAb?abTick(Math.round(v)):v.toFixed(2));
+      const main=ctx.parsed.y==null?'—':(isAb?abTick(Math.round(ctx.parsed.y)):ctx.parsed.y);
+      const lines=[` ${ds.label}: ${main}`];
       if(m){
-        if(m.sendN) lines.push(`   SEND (${m.sendN}): ${m.send!=null?m.send.toFixed(2):'—'}`);
-        if(m.ehcpN) lines.push(`   EHCP (${m.ehcpN}): ${m.ehcp!=null?m.ehcp.toFixed(2):'—'}`);
-        if(m.fsmN) lines.push(`   FSM (${m.fsmN}): ${m.fsm!=null?m.fsm.toFixed(2):'—'}`);
+        if(m.sendN) lines.push(`   SEND (${m.sendN}): ${fmt(m.send)}`);
+        if(m.ehcpN) lines.push(`   EHCP (${m.ehcpN}): ${fmt(m.ehcp)}`);
+        if(m.fsmN) lines.push(`   FSM (${m.fsmN}): ${fmt(m.fsm)}`);
       }
       return lines;
     }
@@ -4187,13 +4280,13 @@ function rCmp(){
   const allAb=abDatasets.flatMap(ds=>ds.data).filter(v=>v!=null);
   const abMinV=Math.min(...allAb),abMaxV=Math.max(...allAb);
   const abMin=Math.max(0.5,Math.floor((abMinV-0.1)*10)/10);
-  const abMax=Math.min(7.5,Math.ceil((abMaxV+0.1)*10)/10);
+  const abMax=Math.min(ABILITY.n+0.5,Math.ceil((abMaxV+0.1)*10)/10);
   const allEf=efDatasets.flatMap(ds=>ds.data).filter(v=>v!=null);
   const efMinV=Math.min(...allEf),efMaxV=Math.max(...allEf);
   const efMin=Math.max(0.5,Math.floor((efMinV-0.1)*10)/10);
   const efMax=Math.min(4.5,Math.ceil((efMaxV+0.1)*10)/10);
 
-  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets)},scales:{y:{min:abMin,max:abMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const names=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?names[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
+  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets,true)},scales:{y:{min:abMin,max:abMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
 
   sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
 }
@@ -4312,7 +4405,7 @@ function rPrg(){
   if(!years.length){out.innerHTML='<div style="color:var(--mu);padding:2rem">No data for Intake '+ink+'</div>';return}
 
   const tblRows=years.map(c=>{
-    const abTip=`All: ${fV(c.avg,2)}${c.send?`&#10;SEND (${c.send}): ${fV(c.sendAb,2)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${fV(c.ehcpAb,2)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${fV(c.fsmAb,2)}`:''}`;
+    const abTip=`All: ${abGrade(c.avg)}${c.send?`&#10;SEND (${c.send}): ${abGrade(c.sendAb)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${abGrade(c.ehcpAb)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${abGrade(c.fsmAb)}`:''}`;
     const efTip=`All: ${fV(c.avgE,2)}${c.send?`&#10;SEND (${c.send}): ${fV(c.sendEf,2)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${fV(c.ehcpEf,2)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${fV(c.fsmEf,2)}`:''}`;
     return`<tr>
       <td style="font-weight:500">Y${c.yg} — ${c.ayLabel}${c.isCurrent?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
@@ -4320,7 +4413,6 @@ function rPrg(){
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:var(--green);font-weight:600':c.ytdAtt>=90?'':'color:var(--red);font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
       <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${abAvgD(c.avg)}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${efAvgD(c.avgE)}</td>
-      <td>${c.gb.map(x=>{const tip=`${x.g}: ${x.n}${x.sendN?`&#10;SEND: ${x.sendN}`:''}${x.ehcpN?`&#10;EHCP: ${x.ehcpN}`:''}${x.fsmN?`&#10;FSM: ${x.fsmN}`:''}`;return`<span style="display:inline-block;margin:.1rem;padding:.08rem .3rem;border-radius:3px;font-size:.65rem;background:${GC[x.g]}22;color:${GC[x.g]};cursor:help" title="${tip}">${x.g.slice(0,3)} ${x.n}</span>`}).join('')}</td>
       <td style="text-align:center;${c.send?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
       <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.K||'\u2014'}</td>
       <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.E||'\u2014'}</td>
@@ -4334,11 +4426,11 @@ function rPrg(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Intake ${ink} — ${subLabel} Progression</div>
-    <table class="d ctr"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th style="text-align:center">Att.</th><th>Avg Ability</th><th>Avg Effort</th><th>Grade Distribution — Final Term</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Year Group — Academic Year</th><th>Pupils</th><th style="text-align:center">Att.</th><th>Avg Ability</th><th>Avg Effort</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgef"></canvas></div></div></div>
     <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">${subLabel} Grade Distribution Over Time — Intake ${ink}</div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prggrade"></canvas></div></div>
-    <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">Effort Distribution Over Time — Intake ${ink} <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prgefgrade"></canvas></div></div>`;
+    <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">Effort Distribution Over Time — Intake ${ink} <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prgefgrade"></canvas></div></div>`;
 
   dc('prgab');dc('prgef');
 
@@ -4418,7 +4510,7 @@ function rPrg(){
   // Recalculate y-axis range including sub-group lines
   const allAbVals=[...abPoints,...sendAbPts,...ehcpAbPts,...fsmAbPts].filter(v=>v!=null);
   const abMin2=allAbVals.length?Math.max(0.5,Math.floor((Math.min(...allAbVals)-0.3)*10)/10):0.5;
-  const abMax2=allAbVals.length?Math.min(7.5,Math.ceil((Math.max(...allAbVals)+0.3)*10)/10):7.5;
+  const abMax2=allAbVals.length?Math.min(ABILITY.n+0.5,Math.ceil((Math.max(...allAbVals)+0.3)*10)/10):ABILITY.n+0.5;
   const allEfVals=[...efPoints,...sendEfPts,...ehcpEfPts,...fsmEfPts].filter(v=>v!=null);
   const efMin2=allEfVals.length?Math.max(0.5,Math.floor((Math.min(...allEfVals)-0.3)*10)/10):0.5;
   const efMax2=allEfVals.length?Math.min(4.5,Math.ceil((Math.max(...allEfVals)+0.3)*10)/10):4.5;
@@ -4449,7 +4541,7 @@ function rPrg(){
     },
     scales:{
       y:{min:yMin,max:yMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1,
-        callback:isAb?v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}:undefined},
+        callback:isAb?abTick:undefined},
         grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},
       x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}
     }
@@ -4615,7 +4707,7 @@ function rTV(){
       const aAS=aA!=null&&dA!=null?aA>dA?'color:var(--green)':aA<dA-1?'color:var(--red);font-weight:600':aA<dA?'color:var(--red)':'':'';
       const aES=aE!=null&&dE!=null?aE<dE?'color:var(--green)':aE>dE+1?'color:var(--red);font-weight:600':aE>dE?'color:var(--red)':'':'';
 
-      return`<tr><td>Y${r.yg}</td><td>${r.ay}</td><td>${r.c}</td><td>${r.s}</td><td>${r.pups.size}</td><td>${fV(pA,2)}</td><td style="font-weight:600">${fV(dA,2)}</td><td style="${aAS}">${fV(aA,2)}</td><td>${fV(pE,2)}</td><td style="font-weight:600">${fV(dE,2)}</td><td style="${aES}">${fV(aE,2)}</td></tr>`}).join('');
+      return`<tr><td>Y${r.yg}</td><td>${r.ay}</td><td>${r.c}</td><td>${r.s}</td><td>${r.pups.size}</td><td>${abGrade(pA)}</td><td style="font-weight:600">${abGrade(dA)}</td><td style="${aAS}">${abGrade(aA)}</td><td>${fV(pE,2)}</td><td style="font-weight:600">${fV(dE,2)}</td><td style="${aES}">${fV(aE,2)}</td></tr>`}).join('');
 
     // Summary: subject taught, number of classes, current YGs
     const subjsTaught=[...new Set(recs.map(r=>r.s))].join(', ');
@@ -6202,12 +6294,360 @@ function renderNet(){
 
 function sw(v,btn){
   if(v==='admin' && !IS_ADMIN) return;   // non-admins cannot open Admin
+  if(v==='upload' && !IS_ADMIN) return;  // non-admins cannot open Upload
   document.querySelectorAll('.vw').forEach(v2=>v2.classList.remove('on'));
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else rP();
 }
+
+
+// ===== ADMIN UPLOAD PAGE (inserted) =====
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN UPLOAD PAGE  (Section 5 of the portal brief)
+// Lives inside the boot IIFE so it can use SB_URL, SB_KEY, DATA_BUCKET, authToken,
+// sbGet, sbSet, IS_ADMIN and DD directly. Renders into #upload-out. Admin-gated in
+// sw(); the real enforcement is the Storage RLS write-policy on {school_id}/uploads/.
+//
+// Three independent wrong-file defences:
+//   (a) header/role recognition  — wrong KIND of file        (mirrors stage_inputs.detect)
+//   (b) roster validation        — wrong COHORT / wrong pupils
+//   (c) derived checklist slot    — wrong SLOT
+// Roster-first: every other slot is locked until a valid roster (SEN-with-Gender) exists.
+// Unrecognised headings -> column tagging (mapped once per layout, then remembered).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// canonical columns each role needs (from stage_inputs.py); [name, required]
+const _UP_ROLE_FIELDS = {
+  sen:           [['Name',1],['Year',1],['Gender',0],['SEN Status',0]],
+  attendance:    [['Name',1],['Date',1],['Mark',1],['Subject',0],['Teacher',0],['Period Description',0]],
+  behave_current:[['Name',1],['Date',1],['Incident',1],['Subject',0],['Lesson - Period',0],['Teacher',0]],
+  detention:     [['Name',1],['Detention Date',1],['Detention Type',1]],
+  housepoints:   [['Name',1],['Event Date',0]],
+  fsm:           [['Name',1],['FSM',0]],
+  grade_attain:  [['Name',1],['Basic details',1],['Result',1]],
+};
+
+const _UP = {
+  // which school: taken from the signed-in account's token (the source of truth),
+  // with the subdomain as a later fallback for branding. Live getter so it's always current.
+  get schoolId(){ try{ return schoolId(); }catch(e){ return null; } },
+  cay: (function () { const d = new Date(); return d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1; })(),
+  roster: null,        // { pupils:Set, count, byIntake, byGender }
+  staged: {},          // slotId -> { file:Blob, name }
+  serverFiles: null,   // [{name, updated_at}] from a server refresh (null = not loaded)
+  serverLoaded: false,
+  colmaps: null,       // remembered { role: { signature: fieldMap } } from app_settings
+  tag: null,           // active column-tagging task
+};
+
+function _upEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function _upPid(name){ const m=String(name||'').match(/^\s*(\d+)/); return m?String(parseInt(m[1],10)):null; }
+function _upCsvCell(v){ v=String(v==null?'':v); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+
+function _upDetectRole(fname){
+  const f=String(fname||'').toLowerCase(); let yg=null;
+  if(/year[_ ]?11|y11/.test(f)) yg=11; else if(/year[_ ]?10|y10/.test(f)) yg=10;
+  if(/in_year/.test(f))        return {role:'attendance', label:'Attendance', yg};
+  if(/on_track_for/.test(f))   return {role:'grade_attain', label:'Grades (on-track)', yg};
+  if(/effort/.test(f))         return {role:'grade_effort', label:'Grades (effort)', yg};
+  if(/behaviour_data/.test(f)) return {role:'behave_current', label:'Behaviour', yg};
+  if(/behave.*in.*y/.test(f))  return {role:'behave_historic', label:'Behaviour (historic)', yg};
+  if(/detention/.test(f))      return {role:'detention', label:'Detentions', yg};
+  if(/fsm/.test(f))            return {role:'fsm', label:'Free school meals', yg};
+  if(/housepoint/.test(f))     return {role:'housepoints', label:'House points', yg};
+  if(/sen/.test(f))            return {role:'sen', label:'SEN / roster', yg};
+  return {role:null, label:null, yg};
+}
+
+function _upParseCSV(text){
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; } else cell+=c; }
+    else { if(c==='"') q=true; else if(c===','){row.push(cell);cell='';}
+      else if(c==='\n'){row.push(cell);rows.push(row);row=[];cell='';}
+      else if(c==='\r'){} else cell+=c; } }
+  if(cell.length||row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.length && !(r.length===1 && r[0]===''));
+}
+function _upReadFile(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result||'')); r.onerror=()=>rej(new Error('read failed')); r.readAsText(file); }); }
+function _upSig(headers){ return headers.map(h=>String(h).trim().toLowerCase()).sort().join('|'); }
+
+function _upCohorts(){
+  const cay=_UP.cay, set={};
+  try{ const intakes=(DD&&DD.config&&Array.isArray(DD.config.intakes))?DD.config.intakes
+        :Object.values((DD&&DD.registry)||{}).map(p=>p&&p.intake).filter(Boolean);
+    intakes.forEach(ik=>{ if(ik) set[ik]=true; }); }catch(e){}
+  return Object.keys(set).map(Number).sort((a,b)=>a-b).map(ik=>({
+    intake:ik, yg:7+(cay-ik), label:'Year '+(7+(cay-ik))+' (intake '+ik+')' }));
+}
+function _upSlotRole(slot){
+  if(slot.kind==='roster')   return {role:'sen', yg:null};
+  if(slot.kind==='combined') return {role:'fsm', yg:null};
+  const base=slot.id.split('_')[0], yg=slot.cohort?slot.cohort.yg:null;
+  return {role:{attend:'attendance',behave:'behave_current',detention:'detention',hp:'housepoints',grades:'grade_attain'}[base], yg};
+}
+function _upRoleFilename(role,yg){
+  const tag={attendance:'in_year_attendance',behave_current:'behaviour_data',detention:'detention',
+    housepoints:'housepoints',fsm:'fsm',sen:'sen',grade_attain:'on_track_for'}[role]||'data';
+  return tag+(yg?('_Y'+yg):'')+'_tagged_'+Date.now()+'.csv';
+}
+
+function _upChecklist(){
+  const slots=[{ id:'sen', kind:'roster', title:'Pupil roster — SEN & gender export',
+                 hint:'Upload this first. Defines every pupil, year group and gender.', lifecycle:'replace-latest' }];
+  _upCohorts().forEach(c=>{
+    slots.push({ id:'attend_'+c.intake, kind:'cohort', cohort:c, title:'Attendance — '+c.label, lifecycle:'per-term' });
+    slots.push({ id:'behave_'+c.intake, kind:'cohort', cohort:c, title:'Behaviour — '+c.label, lifecycle:'per-term' });
+    slots.push({ id:'detention_'+c.intake, kind:'cohort', cohort:c, title:'Detentions — '+c.label, lifecycle:'per-term' });
+    slots.push({ id:'hp_'+c.intake, kind:'cohort', cohort:c, title:'House points — '+c.label, lifecycle:'per-term' });
+    slots.push({ id:'grades_'+c.intake, kind:'cohort', cohort:c, title:'Grades (on-track + effort) — '+c.label, lifecycle:'accumulate' });
+  });
+  slots.push({ id:'fsm', kind:'combined', title:'Free school meals (all cohorts)', lifecycle:'replace-latest' });
+  return slots;
+}
+function _upStagedMatchesSlot(fname, slot){
+  const d=_upDetectRole(fname);
+  if(slot.kind==='roster')   return d.role==='sen';
+  if(slot.kind==='combined') return d.role==='fsm';
+  if(slot.cohort){ const map={attend:'attendance',behave:'behave',detention:'detention',hp:'housepoints',grades:'grade'};
+    const want=map[slot.id.split('_')[0]];
+    return d.role && (d.role===want || d.role.indexOf(want)===0) && (d.yg==null || d.yg===slot.cohort.yg); }
+  return false;
+}
+
+// ── age + staleness (calendar-driven, no fixed threshold) ──
+function _upAge(iso){
+  if(!iso) return '';
+  const d=new Date(iso), now=new Date(), days=Math.floor((now-d)/86400000);
+  if(days<=0) return 'today'; if(days===1) return 'yesterday';
+  if(days<14) return days+' days ago'; if(days<60) return Math.round(days/7)+' weeks ago';
+  return Math.round(days/30)+' months ago';
+}
+function _upTermStart(date){
+  const y=date.getFullYear(), m=date.getMonth();
+  if(m>=8) return new Date(y,8,1);          // autumn: 1 Sep
+  if(m<=2) return new Date(y,0,1);          // spring: Jan
+  return new Date(y,3,15);                   // summer: mid-Apr
+}
+function _upServerFor(slot){
+  if(!_UP.serverFiles) return null;
+  return _UP.serverFiles.find(o=>_upStagedMatchesSlot(o.name, slot)) || null;
+}
+function _upSlotStatus(slot){
+  if(_UP.staged[slot.id]) return {tag:'staged', label:'ready to upload', col:'var(--amber,#b8860b)'};
+  const sv=_upServerFor(slot);
+  if(sv){
+    const age=_upAge(sv.updated_at);
+    let stale=false;
+    if(slot.lifecycle==='per-term' && sv.updated_at) stale = new Date(sv.updated_at) < _upTermStart(new Date());
+    return {tag:'loaded', label:(stale?'update due this term · ':'')+'updated '+age, col:stale?'var(--amber,#b8860b)':'var(--green,#3b6d11)', stale};
+  }
+  return {tag:'missing', label:'not provided', col:'var(--red,#a32d2d)'};
+}
+
+// ── server refresh: list {school_id}/uploads/raw/ ──
+async function _upRefreshServer(){
+  _UP.serverLoaded=true;
+  if(!_UP.schoolId){ _UP.serverFiles=[]; return; }
+  try{
+    const body={prefix:_UP.schoolId+'/uploads/raw/', limit:1000, offset:0, sortBy:{column:'name',order:'asc'}};
+    const r=await fetch(SB_URL+'/storage/v1/object/list/'+DATA_BUCKET,
+      { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' }, body:JSON.stringify(body) });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const rows=await r.json();
+    _UP.serverFiles=(rows||[]).filter(o=>o&&o.id&&o.name).map(o=>({name:o.name, updated_at:(o.updated_at||(o.metadata&&o.metadata.lastModified)||null)}));
+  }catch(e){ _UP.serverFiles=[]; }
+}
+
+// ── load remembered column maps ──
+async function _upLoadColmaps(){
+  if(_UP.colmaps) return;
+  _UP.colmaps={};
+  try{ if(typeof sbGet==='function' && _UP.schoolId){ const v=await sbGet('upload_colmaps'); if(v&&typeof v==='object') _UP.colmaps=v; } }catch(e){}
+}
+
+function rUpload(){
+  const out=document.getElementById('upload-out'); if(!out) return;
+  if(!IS_ADMIN){ out.innerHTML='<div style="padding:2rem;color:var(--mu)">Admins only.</div>'; return; }
+  if(!_UP.serverLoaded){ _upLoadColmaps(); _upRefreshServer().then(()=>rUpload()); }
+
+  if(_UP.tag){ return _upRenderTag(out); }
+
+  const noSchool=!_UP.schoolId;
+  const banner=noSchool
+    ? '<div style="padding:.7rem .9rem;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--mu);font-size:.82rem;margin-bottom:1rem">'
+      +'Multi-school mode isn\'t switched on for this address yet, so uploading is preview-only here. The page and its checks all work.</div>'
+    : '';
+  const rosterReady=!!_UP.roster;
+  const rosterSummary=rosterReady
+    ? '<div style="margin-top:.5rem;font-size:.8rem;color:var(--tx)"><b>'+_UP.roster.count+'</b> pupils · '
+      +Object.entries(_UP.roster.byIntake).map(([ik,n])=>'intake '+ik+': '+n).join(' · ')+' · '
+      +Object.entries(_UP.roster.byGender).map(([g,n])=>(g||'?')+': '+n).join(' · ')+'</div>' : '';
+
+  const slots=_upChecklist();
+  const attention=slots.filter(s=>{ const st=_upSlotStatus(s); return st.tag==='missing'||st.stale; }).length;
+  let newest=null; (_UP.serverFiles||[]).forEach(o=>{ if(o.updated_at && (!newest||o.updated_at>newest)) newest=o.updated_at; });
+
+  const rows=slots.map(s=>{
+    const st=_upSlotStatus(s), locked=(s.kind!=='roster')&&!rosterReady, staged=_UP.staged[s.id];
+    return '<div style="display:flex;align-items:center;gap:.8rem;padding:.6rem .2rem;border-bottom:1px solid var(--bd);'+(locked?'opacity:.45':'')+'">'
+      +'<span style="width:10px;height:10px;border-radius:50%;background:'+st.col+';flex:0 0 auto"></span>'
+      +'<div style="flex:1"><div style="font-size:.85rem;font-weight:600;color:var(--tx)">'+_upEsc(s.title)+'</div>'
+        +'<div style="font-size:.68rem;color:var(--mu)">'+(s.hint?_upEsc(s.hint)+' · ':'')+st.label+' · '+s.lifecycle+'</div>'
+        +(staged?'<div style="font-size:.7rem;color:var(--tx);margin-top:.15rem">📄 '+_upEsc(staged.name)+'</div>':'')
+      +'</div>'
+      +(locked?'<span style="font-size:.7rem;color:var(--mu)">🔒 roster first</span>'
+        :'<label style="font-size:.72rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:.3rem .6rem;cursor:pointer;background:var(--sf2)">Choose file'
+          +'<input type="file" accept=".csv,.xlsx" style="display:none" onchange="window._upChoose(\''+s.id+'\',this)"></label>')
+      +'</div>';
+  }).join('');
+
+  const canRebuild=!noSchool && Object.keys(_UP.staged).length===0 && rosterReady;
+  out.innerHTML='<div style="max-width:860px"><h2 style="margin:.2rem 0 .3rem">Upload data</h2>'
+    +'<div style="font-size:.82rem;color:var(--mu);margin-bottom:1rem">'+attention+' item'+(attention!==1?'s':'')+' need attention.'
+      +(newest?' Last updated on the server: '+_upAge(newest)+'.':'')+' Upload the roster first; the rest unlock once it\'s confirmed.</div>'
+    +banner+(rosterReady?'':'<div style="font-size:.78rem;color:var(--tx);margin-bottom:.4rem">Step 1 — choose your SEN-with-gender export to define this year\'s pupils.</div>')
+    +rosterSummary+'<div id="up-msg" style="font-size:.78rem;margin:.5rem 0;min-height:1rem"></div>'
+    +'<div style="border:1px solid var(--bd);border-radius:10px;padding:.4rem .9rem;margin-top:.4rem">'+rows+'</div>'
+    +'<div style="display:flex;gap:.7rem;align-items:center;margin-top:1rem">'
+      +'<button onclick="window._upUploadAll()" '+(noSchool||!Object.keys(_UP.staged).length?'disabled':'')
+        +' style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff);'+((noSchool||!Object.keys(_UP.staged).length)?'opacity:.5;cursor:not-allowed':'')+'">Upload chosen files</button>'
+      +'<button onclick="window._upRebuild()" '+(canRebuild?'':'disabled')
+        +' style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx);'+(canRebuild?'':'opacity:.5;cursor:not-allowed')+'">Rebuild dashboard</button>'
+      +'<span style="font-size:.7rem;color:var(--mu)">Rebuild runs after your files are uploaded (~1 min, in the background).</span>'
+    +'</div></div>';
+}
+function _upMsg(html,ok){ const m=document.getElementById('up-msg'); if(m) m.innerHTML='<span style="color:'+(ok?'var(--green,#3b6d11)':'var(--red,#a32d2d)')+'">'+html+'</span>'; }
+
+// ── column tagging panel (role known from the slot; admin maps columns) ──
+function _upRenderTag(out){
+  const t=_UP.tag, fields=_UP_ROLE_FIELDS[t.role]||[['Name',1]];
+  const colOpt=(sel)=>'<option value="">— column —</option>'+t.headers.map((h,i)=>'<option value="'+i+'"'+(sel===i?' selected':'')+'>'+_upEsc(h)+'</option>').join('');
+  const guess=(canon)=>{ const lc=canon.toLowerCase().split(' ')[0];
+    for(let i=0;i<t.headers.length;i++){ const h=String(t.headers[i]).toLowerCase(); if(h===canon.toLowerCase()||h.indexOf(lc)>=0) return i; } return ''; };
+  const fieldRows=fields.map(([canon,req])=>{ const g=t.map[canon]!=null?t.map[canon]:guess(canon);
+    return '<tr><td style="padding:.3rem .5rem;font-size:.78rem;color:var(--tx)">'+_upEsc(canon)+(req?' <span style="color:var(--red,#a32d2d)">*</span>':'')+'</td>'
+      +'<td style="padding:.3rem .5rem"><select data-canon="'+_upEsc(canon)+'" style="font-family:inherit;font-size:.75rem;background:var(--sf2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;padding:.2rem">'+colOpt(g)+'</select></td></tr>'; }).join('');
+  const sample=t.rows.slice(1,4).map(r=>'<tr>'+t.headers.map((h,i)=>'<td style="padding:.2rem .4rem;font-size:.68rem;color:var(--mu);border-bottom:1px solid var(--bd);white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">'+_upEsc(r[i])+'</td>').join('')+'</tr>').join('');
+  out.innerHTML='<div style="max-width:860px"><h2 style="margin:.2rem 0 .3rem">Match the columns</h2>'
+    +'<div style="font-size:.82rem;color:var(--mu);margin-bottom:.8rem">This file\'s headings aren\'t in a layout I recognise for <b>'+_upEsc(t.slotTitle)+'</b>. Tell me which column is which — I\'ll remember it for files like this.</div>'
+    +'<div id="up-msg" style="font-size:.78rem;margin:.4rem 0;min-height:1rem"></div>'
+    +'<table style="border-collapse:collapse;margin-bottom:1rem"><tbody>'+fieldRows+'</tbody></table>'
+    +'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.3rem">First rows of your file:</div>'
+    +'<div style="overflow-x:auto;border:1px solid var(--bd);border-radius:8px;margin-bottom:1rem"><table style="border-collapse:collapse"><thead><tr>'
+      +t.headers.map(h=>'<th style="padding:.3rem .4rem;font-size:.68rem;text-align:left;color:var(--tx);border-bottom:1px solid var(--bd);background:var(--sf2)">'+_upEsc(h)+'</th>').join('')+'</tr></thead><tbody>'+sample+'</tbody></table></div>'
+    +'<div style="display:flex;gap:.7rem"><button onclick="window._upSaveTag()" style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff)">Save & use this file</button>'
+      +'<button onclick="window._upCancelTag()" style="font-family:inherit;font-size:.8rem;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx)">Cancel</button></div></div>';
+}
+window._upCancelTag=function(){ _UP.tag=null; rUpload(); };
+window._upSaveTag=async function(){
+  const t=_UP.tag; const sels=document.querySelectorAll('#upload-out select[data-canon]');
+  const map={}; sels.forEach(s=>{ if(s.value!=='') map[s.getAttribute('data-canon')]=parseInt(s.value,10); });
+  const missing=(_UP_ROLE_FIELDS[t.role]||[]).filter(([c,req])=>req&&map[c]==null).map(([c])=>c);
+  if(missing.length){ _upMsg('Please match the required column'+(missing.length>1?'s':'')+': '+missing.join(', ')); return; }
+  // remember this layout for this role
+  await _upLoadColmaps();
+  _UP.colmaps[t.role]=_UP.colmaps[t.role]||{}; _UP.colmaps[t.role][t.sig]=map;
+  try{ if(typeof sbSet==='function' && _UP.schoolId) await sbSet('upload_colmaps', _UP.colmaps); }catch(e){}
+  _upApplyMappedFile(t.slotId, t.role, t.yg, t.rows, map, t.origName);
+  _UP.tag=null; rUpload();
+};
+// build a normalised CSV (canonical headers) and stage it; derive roster if applicable
+function _upApplyMappedFile(slotId, role, yg, rows, map, origName){
+  const fields=(_UP_ROLE_FIELDS[role]||[]).map(f=>f[0]).filter(c=>map[c]!=null);
+  const lines=[fields.map(_upCsvCell).join(',')];
+  for(let r=1;r<rows.length;r++) lines.push(fields.map(c=>_upCsvCell(rows[r][map[c]])).join(','));
+  const csv=lines.join('\n')+'\n';
+  const name=_upRoleFilename(role,yg);
+  const blob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name };
+  if(role==='sen'){ _upDeriveRoster(rows, map); }
+  _UP.staged[slotId]={ file:blob, name };
+  _upMsg('Columns matched — '+_upEsc(origName)+' is ready to upload as '+role.replace('_',' ')+'.', true);
+}
+function _upDeriveRoster(rows, map){
+  const iName=map['Name'], iYear=map['Year'], iGen=(map['Gender']!=null?map['Gender']:-1);
+  const pupils=new Set(), byIntake={}, byGender={};
+  for(let r=1;r<rows.length;r++){ const pid=_upPid(rows[r][iName]); const ym=String(rows[r][iYear]||'').match(/(\d{1,2})/);
+    if(!pid||!ym) continue; const yg=parseInt(ym[1],10), ik=_UP.cay-(yg-7);
+    pupils.add(pid); byIntake[ik]=(byIntake[ik]||0)+1;
+    const g=(iGen>=0?String(rows[r][iGen]||'').trim():'')||'?'; byGender[g]=(byGender[g]||0)+1; }
+  _UP.roster={ pupils, count:pupils.size, byIntake, byGender };
+}
+
+window._upChoose=async function(slotId, input){
+  const file=input.files&&input.files[0]; if(!file) return;
+  const slot=_upChecklist().find(s=>s.id===slotId); if(!slot) return;
+  const det=_upDetectRole(file.name);
+  const want=_upSlotRole(slot);
+
+  // recognised filename that belongs to a DIFFERENT slot -> defence (a)
+  if(det.role && !_upStagedMatchesSlot(file.name, slot)){
+    _upMsg('That file looks like a <b>'+_upEsc(det.label||det.role)+'</b> file, which doesn\'t match this slot ('+_upEsc(slot.title)+').'); input.value=''; return; }
+
+  // recognised + matches slot -> stage pristine (roster also derives in-browser)
+  if(det.role && _upStagedMatchesSlot(file.name, slot)){
+    if(slot.kind==='roster'){ return _upRosterPristine(slotId, file, input); }
+    if(_UP.roster && /\.csv$/i.test(file.name)) await _upRosterCheck(file);
+    _UP.staged[slotId]={ file, name:file.name }; _upMsg('Ready to upload: '+_upEsc(file.name), true); rUpload(); return;
+  }
+
+  // unrecognised filename -> column tagging (try remembered layout first)
+  if(!/\.csv$/i.test(file.name)){ _upMsg('Spreadsheet (.xlsx) files with unfamiliar names can\'t be auto-read in the browser yet — please export as CSV, or rename to the usual export name.'); input.value=''; return; }
+  let rows; try{ rows=_upParseCSV(await _upReadFile(file)); }catch(e){ _upMsg('Could not read that file.'); input.value=''; return; }
+  if(!rows.length){ _upMsg('That file has no rows.'); input.value=''; return; }
+  const headers=rows[0].map(h=>String(h).trim()), sig=_upSig(headers);
+  await _upLoadColmaps();
+  const known=_UP.colmaps[want.role]&&_UP.colmaps[want.role][sig];
+  if(known){ if(_UP.roster && want.role!=='sen') await _upRosterCheckRows(rows, known); 
+    _upApplyMappedFile(slotId, want.role, want.yg, rows, known, file.name); rUpload(); return; }
+  _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:file.name, map:{} };
+  rUpload();
+};
+function _upRosterPristine(slotId, file, input){
+  return _upReadFile(file).then(txt=>{
+    const rows=_upParseCSV(txt); const hdr=rows[0].map(h=>String(h).trim());
+    const iName=hdr.findIndex(h=>/^name$/i.test(h)), iYear=hdr.findIndex(h=>/^year$/i.test(h)), iGen=hdr.findIndex(h=>/gender/i.test(h));
+    if(iName<0||iYear<0){ // recognised name but unfamiliar columns -> tag
+      _UP.tag={ slotId, slotTitle:'Pupil roster', role:'sen', yg:null, headers:hdr, rows, sig:_upSig(hdr), origName:file.name, map:{} }; rUpload(); return; }
+    _upDeriveRoster(rows, {Name:iName, Year:iYear, Gender:iGen});
+    _UP.staged[slotId]={ file, name:file.name };
+    _upMsg('Roster recognised: '+_UP.roster.count+' pupils. The other slots are now unlocked.', true); rUpload();
+  }).catch(()=>{ _upMsg('Could not read the roster.'); input.value=''; });
+}
+async function _upRosterCheck(file){ try{ await _upRosterCheckRows(_upParseCSV(await _upReadFile(file))); }catch(e){} }
+async function _upRosterCheckRows(rows, map){
+  const hdr=rows[0].map(h=>String(h).trim());
+  const iName=(map&&map['Name']!=null)?map['Name']:hdr.findIndex(h=>/name|forename|pupil/i.test(h));
+  if(iName<0) return; let known=0,total=0;
+  for(let r=1;r<Math.min(rows.length,600);r++){ const pid=_upPid(rows[r][iName]); if(!pid) continue; total++; if(_UP.roster.pupils.has(pid)) known++; }
+  if(total>20 && known/total<0.5) _upMsg('Heads-up: most pupils in this file aren\'t in the current roster ('+known+'/'+total+' matched) — possibly the wrong cohort or an old export.');
+}
+
+window._upUploadAll=async function(){
+  if(!_UP.schoolId){ _upMsg('Uploading is switched on with the Part-2 go-live.'); return; }
+  const ids=Object.keys(_UP.staged); if(!ids.length){ _upMsg('No files chosen.'); return; }
+  _upMsg('Uploading '+ids.length+' file'+(ids.length!==1?'s':'')+'…', true); let done=0;
+  for(const id of ids){ const it=_UP.staged[id]; const path=_UP.schoolId+'/uploads/raw/'+it.name;
+    try{ const r=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
+        { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body:it.file });
+      if(!r.ok) throw new Error('HTTP '+r.status); done++;
+    }catch(e){ _upMsg('Upload failed for '+_upEsc(it.name)+': '+_upEsc(e.message)); return; } }
+  _UP.staged={}; _UP.serverLoaded=false;
+  _upMsg('Uploaded '+done+' file'+(done!==1?'s':'')+'. You can now rebuild the dashboard.', true); rUpload();
+};
+window._upRebuild=async function(){
+  if(!_UP.schoolId){ _upMsg('Rebuild is switched on with the Part-2 go-live.'); return; }
+  _upMsg('Starting rebuild…', true);
+  try{ const r=await fetch(SB_URL+'/functions/v1/rebuild',
+      { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' }, body:JSON.stringify({}) });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    _upMsg('Rebuild started — it runs in the background (~1 min) and refreshes the dashboard when done.', true);
+  }catch(e){ _upMsg('Could not start the rebuild: '+_upEsc(e.message)); }
+};
+
+// ===== end ADMIN UPLOAD PAGE =====
 
 // Helper: get all progress rows for a year group in the current academic year
 function ygRows(yearGroup,period){
@@ -6282,7 +6722,7 @@ function rSV(){
 
   // Previous 3 periods for prev2
   const prevP=pp.slice(Math.max(0,nP-3),nP-1).reverse();
-  const abPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgAb(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
+  const abPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgAb(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${abGrade(v)}</b></span>`}).join('');
   const efPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgEf(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
 
   // Sub-group averages at each point in time (current period) — only pupils taking this subject
@@ -6298,9 +6738,9 @@ function rSV(){
   function sgLine(label,color,abV,efV,n,isAbCard){
     if(!n)return'';
     const v=isAbCard?abV:efV;
-    const max=isAbCard?7:4;
+    const max=isAbCard?ABILITY.n:EFFORT.n;const disp=isAbCard?abGrade(v):(fN(v)+'<span style="color:var(--mu);font-size:.65rem">/'+max+'</span>');
     const col=isAbCard?aC(v):eC(v);
-    return`<div style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;margin-top:.1rem"><span style="font-weight:600;color:${color};min-width:2.8rem">${label}</span><span style="font-family:'IBM Plex Mono',monospace;color:${col};font-weight:500">${fN(v)}<span style="color:var(--mu);font-size:.65rem">/${max}</span></span><span style="color:var(--mu);font-size:.65rem">(n=${n})</span></div>`;
+    return`<div style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;margin-top:.1rem"><span style="font-weight:600;color:${color};min-width:2.8rem">${label}</span><span style="font-family:'IBM Plex Mono',monospace;color:${col};font-weight:500">${disp}</span><span style="color:var(--mu);font-size:.65rem">(n=${n})</span></div>`;
   }
   const sgBlockAb=`<div style="border-top:1px solid var(--bd);margin-top:.5rem;padding-top:.4rem">${sgLine('SEND',PAL.orange,sendAb,sendEf,sendN,true)}${sgLine('EHCP',PAL.lilac,ehcpAb,ehcpEf,ehcpN,true)}${sgLine('FSM',PAL.blue,fsmAb,fsmEf,fsmN,true)}</div>`;
   const sgBlockEf=`<div style="border-top:1px solid var(--bd);margin-top:.5rem;padding-top:.4rem">${sgLine('SEND',PAL.orange,sendAb,sendEf,sendN,false)}${sgLine('EHCP',PAL.lilac,ehcpAb,ehcpEf,ehcpN,false)}${sgLine('FSM',PAL.blue,fsmAb,fsmEf,fsmN,false)}</div>`;
@@ -6363,7 +6803,7 @@ function rSV(){
     return{idx:parseInt(idx),pid,n,flags:r||null,cats,catStr};
   }).sort((a,b)=>b.n-a.n);
 
-  function abLabel(v){const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return v>=1&&v<=7?n[v-1]:v}
+  function abLabel(v){return abTick(v)||v}
   function efLabel(v){return v>=1&&v<=4?['Exc','Good','Dev','Low'][v-1]:v}
 
   // Helper: get class/teacher for a pupil in this subject
@@ -6448,13 +6888,13 @@ function rSV(){
   }else{
 
   document.getElementById('sv-cards').innerHTML=`
-    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${fN(avg)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(avg)}</span></span></div>
+    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${abGrade(avg)}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
     </div>
-    <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div>
+    <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -6464,12 +6904,12 @@ function rSV(){
     <div class="crd"><div class="ct2">Effort Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${efRows}</div></div>`;
 
   dc('svab');dc('svef');dc('svst');dc('svefst');
-  document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
+  document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
 
   // Distribution section title
   document.getElementById('sv-dist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Distribution Over Time</div>`;
 
-  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
+  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
 
   // Build per-period data points for all pupils and each sub-group
   function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
@@ -6500,14 +6940,14 @@ function rSV(){
   // Dynamic y-axis range to include sub-group lines
   const allAbV=[...abAll,...abSend,...abEhcp,...abFsm].filter(v=>v!=null);
   const abYMin=allAbV.length?Math.max(0.5,Math.floor((Math.min(...allAbV)-0.3)*10)/10):0.5;
-  const abYMax=allAbV.length?Math.min(7.5,Math.ceil((Math.max(...allAbV)+0.3)*10)/10):7.5;
+  const abYMax=allAbV.length?Math.min(ABILITY.n+0.5,Math.ceil((Math.max(...allAbV)+0.3)*10)/10):ABILITY.n+0.5;
   const allEfV=[...efAll,...efSend,...efEhcp,...efFsm].filter(v=>v!=null);
   const efYMin=allEfV.length?Math.max(0.5,Math.floor((Math.min(...allEfV)-0.3)*10)/10):0.5;
   const efYMax=allEfV.length?Math.min(4.5,Math.ceil((Math.max(...allEfV)+0.3)*10)/10):4.5;
 
   const showLegend={labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:8,padding:8}};
 
-  sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend,tooltip:{callbacks:{label:abTipLabel}}},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('svef',new Chart(document.getElementById('c-svef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('svst',new Chart(document.getElementById('c-svst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
 
@@ -6576,7 +7016,7 @@ function rCL(){
   const eT=avgE!=null&&avgE5!=null?avgE-avgE5:null;
 
   const prevP=pp.slice(Math.max(0,nP-3),nP-1).reverse();
-  const abPrv=prevP.map(p=>{const rs=clRows(p);const v=avgAb(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
+  const abPrv=prevP.map(p=>{const rs=clRows(p);const v=avgAb(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${abGrade(v)}</b></span>`}).join('');
   const efPrv=prevP.map(p=>{const rs=clRows(p);const v=avgEf(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
 
   function sgAvgAb(flag){return avgAb(lr.filter(r=>r[flag]))}
@@ -6588,8 +7028,8 @@ function rCL(){
 
   function sgLine(label,color,abV,efV,n,isAbCard){
     if(!n)return'';
-    const v=isAbCard?abV:efV;const max=isAbCard?7:4;const col=isAbCard?aC(v):eC(v);
-    return`<div style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;margin-top:.1rem"><span style="font-weight:600;color:${color};min-width:2.8rem">${label}</span><span style="font-family:'IBM Plex Mono',monospace;color:${col};font-weight:500">${fN(v)}<span style="color:var(--mu);font-size:.65rem">/${max}</span></span><span style="color:var(--mu);font-size:.65rem">(n=${n})</span></div>`;
+    const v=isAbCard?abV:efV;const max=isAbCard?ABILITY.n:EFFORT.n;const disp=isAbCard?abGrade(v):(fN(v)+'<span style="color:var(--mu);font-size:.65rem">/'+max+'</span>');const col=isAbCard?aC(v):eC(v);
+    return`<div style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;margin-top:.1rem"><span style="font-weight:600;color:${color};min-width:2.8rem">${label}</span><span style="font-family:'IBM Plex Mono',monospace;color:${col};font-weight:500">${disp}</span><span style="color:var(--mu);font-size:.65rem">(n=${n})</span></div>`;
   }
   const sgBlockAb=`<div style="border-top:1px solid var(--bd);margin-top:.5rem;padding-top:.4rem">${sgLine('SEND',PAL.orange,sendAb,sendEf,sendN,true)}${sgLine('EHCP',PAL.lilac,ehcpAb,ehcpEf,ehcpN,true)}${sgLine('FSM',PAL.blue,fsmAb,fsmEf,fsmN,true)}</div>`;
   const sgBlockEf=`<div style="border-top:1px solid var(--bd);margin-top:.5rem;padding-top:.4rem">${sgLine('SEND',PAL.orange,sendAb,sendEf,sendN,false)}${sgLine('EHCP',PAL.lilac,ehcpAb,ehcpEf,ehcpN,false)}${sgLine('FSM',PAL.blue,fsmAb,fsmEf,fsmN,false)}</div>`;
@@ -6639,7 +7079,7 @@ function rCL(){
     const catStr=incCatShortStr(cats);
     return{idx:parseInt(idx),pid,n,flags:r||null,cats,catStr};
   }).sort((a,b)=>b.n-a.n);
-  function abLabel(v){const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return v>=1&&v<=7?n[v-1]:v}
+  function abLabel(v){return abTick(v)||v}
   function efLabel(v){return v>=1&&v<=4?['Exc','Good','Dev','Low'][v-1]:v}
   function concernRow(item,metric){
     const curL=metric==='ab'?abLabel(item.cur):efLabel(item.cur);
@@ -6859,7 +7299,7 @@ function rCL(){
   if(hasGradesCL){
   document.getElementById('cl-cards').innerHTML=`
     <div class="crd"><div class="ct2">${sub} Class ${cl} Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${fN(avg)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(avg)}</span></span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${abGrade(avg)}</span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
@@ -6879,7 +7319,7 @@ function rCL(){
 
   dc('clab');dc('clef');dc('clst');dc('clefst');
   if(hasGradesCL){
-  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
+  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
 
   function ptAb(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
   function ptEf(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}
@@ -6894,12 +7334,12 @@ function rCL(){
   const efDatasets=[{label:'Class Avg',data:efAll,borderColor:PAL.green,backgroundColor:'#34d39922',borderWidth:2.5,pointRadius:4,tension:.4,fill:true,spanGaps:true},...(hasSend?[mkSub('SEND',efSend,PAL.orange)]:[]),...(hasEhcp?[mkSub('EHCP',efEhcp,PAL.lilac)]:[]),...(hasFsm?[mkSub('FSM',efFsm,PAL.sky)]:[])];
   const allAbV=[...abAll,...abSend,...abEhcp,...abFsm].filter(v=>v!=null);
   const abYMin=allAbV.length?Math.max(0.5,Math.floor((Math.min(...allAbV)-0.3)*10)/10):0.5;
-  const abYMax=allAbV.length?Math.min(7.5,Math.ceil((Math.max(...allAbV)+0.3)*10)/10):7.5;
+  const abYMax=allAbV.length?Math.min(ABILITY.n+0.5,Math.ceil((Math.max(...allAbV)+0.3)*10)/10):ABILITY.n+0.5;
   const allEfV=[...efAll,...efSend,...efEhcp,...efFsm].filter(v=>v!=null);
   const efYMin=allEfV.length?Math.max(0.5,Math.floor((Math.min(...allEfV)-0.3)*10)/10):0.5;
   const efYMax=allEfV.length?Math.min(4.5,Math.ceil((Math.max(...allEfV)+0.3)*10)/10):4.5;
   const showLegend={labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:8,padding:8}};
-  sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+  sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend,tooltip:{callbacks:{label:abTipLabel}}},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('clef',new Chart(document.getElementById('c-clef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('clst',new Chart(document.getElementById('c-clst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
   sc2('clefst',new Chart(document.getElementById('c-clefst'),{type:'bar',data:{labels:labs,datasets:EFFORT.vals.map(e=>({label:efLeg(e),data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]&&efValid(r[3][sub][1])).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:efColor(e)+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
@@ -7298,8 +7738,8 @@ function rPeer(){
     return;
   }
 
-  const abNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = best)</span>';
-  const efNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(1 = Highest Effort)</span>';
+  const abNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span>';
+  const efNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span>';
 
   const sancNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(weekly · per pupil · codes + detentions)</span>';
 
@@ -7387,7 +7827,7 @@ function rPeer(){
   const AS2=CFG.ability_map||{};
   const AM2={};Object.entries(AS2).forEach(([k,v],i)=>{AM2[k]=i+1});
   function avgAb(rs){
-    const vals=rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?AM2[r[3][s][0]]||0:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null);
+    const vals=rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?AS[AM[r[3][s][0]]]||0:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null);
     return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
   }
   function avgEf(rs){
@@ -7457,8 +7897,8 @@ function rPeer(){
       <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?PAL.green:parseFloat(tgYtdAtt)>=90?'var(--tx)':PAL.red}">${tgYtdAtt}%</div>
       <div style="font-size:.72rem;color:var(--mu)">Codes: <span style="color:var(--orange);font-weight:600">${tgCodes}</span> · Detentions: <span style="color:var(--violet);font-weight:600">${tgDets}</span></div>
     </div>
-    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${fN(avg)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${abDesc(avg)}</span></div></div>
-    <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></div></div>`:''}
+    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.levels[0].label} = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${abGrade(avg)}</div></div>
+    <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${EFFORT.levels[0].label} = highest effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></div></div>`:''}
   </div>`;
 
   // ── PUPIL TABLE ──
@@ -7624,15 +8064,15 @@ function rPeer(){
     const allAbVals=abDatasets.flatMap(d=>d.data.filter(v=>v!=null));
     const allEfVals=efDatasets.flatMap(d=>d.data.filter(v=>v!=null));
     const abYMin=allAbVals.length?Math.max(1,Math.floor(Math.min(...allAbVals)-.5)):1;
-    const abYMax=allAbVals.length?Math.min(7,Math.ceil(Math.max(...allAbVals)+.5)):7;
+    const abYMax=allAbVals.length?Math.min(ABILITY.n,Math.ceil(Math.max(...allAbVals)+.5)):ABILITY.n;
     const efYMin=allEfVals.length?Math.max(1,Math.floor(Math.min(...allEfVals)-.5)):1;
     const efYMax=allEfVals.length?Math.min(4,Math.ceil(Math.max(...allEfVals)+.5)):4;
 
-    document.getElementById('tg-charts').innerHTML=`<div class="chc"><div class="cht">${tgName} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = best)</span></div><div class="chw"><canvas id="c-tgab"></canvas></div></div><div class="chc"><div class="cht">${tgName} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(1 = Highest Effort)</span></div><div class="chw"><canvas id="c-tgef"></canvas></div></div>`;
+    document.getElementById('tg-charts').innerHTML=`<div class="chc"><div class="cht">${tgName} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.levels[0].label} = best)</span></div><div class="chw"><canvas id="c-tgab"></canvas></div></div><div class="chc"><div class="cht">${tgName} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw"><canvas id="c-tgef"></canvas></div></div>`;
 
     dc('tgab');dc('tgef');
     const showLegend={labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:8,padding:6}};
-    sc2('tgab',new Chart(document.getElementById('c-tgab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:v=>{const n=['Exc','Skl','Con','Met','Wrk','Dev','Bel'];return Number.isInteger(v)&&v>=1&&v<=7?n[v-1]:''}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
+    sc2('tgab',new Chart(document.getElementById('c-tgab'),{type:'line',data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend,tooltip:{callbacks:{label:abTipLabel}}},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
     sc2('tgef',new Chart(document.getElementById('c-tgef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   }else{
     document.getElementById('tg-perf-title').innerHTML='';
@@ -9219,6 +9659,44 @@ function rPeer(){
     });
     incHtml+=`</tbody></table></div></div>`;
 
+    // ── SUBJECTS ── mirror of the incident pattern: report unmapped raw names → Admin interprets → saves.
+    // Choices (aliases / display / forks) live in config only; data.json stays raw.
+    const _sesc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const subjAliases=(DD.config.subject_map&&DD.config.subject_map.aliases)||{};
+    const subjCanon=(DD.config.subject_map&&DD.config.subject_map.canonical)||{};
+    const foundSubjects=[...new Set(Object.keys(DD.subjectKeys||{}))];
+    const canonUniverse=[...new Set([].concat(Object.keys(subjCanon),Object.values(subjAliases),foundSubjects.filter(s=>subjAliases[s]==null)))].filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b)));
+    const unmappedSubj=foundSubjects.filter(s=>subjAliases[s]==null&&subjCanon[s]==null).sort((a,b)=>String(a).localeCompare(String(b)));
+    const subjCounts={};
+    try{Object.values(PRG||{}).forEach(bp=>Object.values(bp||{}).forEach(rows=>(rows||[]).forEach(r=>{const sc=(r&&r[3])||{};Object.keys(sc).forEach(k=>{subjCounts[k]=(subjCounts[k]||0)+1;});})));}catch(e){}
+    const _sSel='background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px';
+    let subjHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Subjects</div>`;
+    subjHtml+=`<div style="font-size:.72rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Subject names come from your data exactly as recorded. Here you tell the dashboard how to read them — which raw names are the same subject, what each is called, and where one subject continues as separate strands (e.g. KS3 English becoming English Language &amp; English Literature at KS4). These are your choices; they save here and are never written back into the data.</div>`;
+    if(unmappedSubj.length){
+      subjHtml+=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:var(--red);font-weight:600">⚠ ${unmappedSubj.length} unmapped subject${unmappedSubj.length!==1?'s':''}: </span>${unmappedSubj.map(c=>`<b>${_sesc(c)}</b>`).join(', ')}</div>`;
+    }
+    subjHtml+=`<div style="font-size:.74rem;font-weight:600;color:var(--tx);margin:.3rem 0 .4rem">Raw names &rarr; subject</div><div style="overflow-x:auto"><table class="d"><thead><tr><th>Raw name (from data)</th><th>Treat as</th><th style="text-align:center">Pupils</th></tr></thead><tbody>`;
+    const _canonOpt=sel=>['<option value="">&mdash; keep as-is &mdash;</option>'].concat(canonUniverse.map(c=>`<option value="${_sesc(c)}"${c===sel?' selected':''}>${_sesc(c)}</option>`)).join('');
+    const _subjRow=(raw,isUn)=>{
+      const cnt=subjCounts[raw]||subjCounts[(DD.subjectKeys||{})[raw]]||0;
+      const sel=subjAliases[raw]!=null?subjAliases[raw]:'';
+      return `<tr${isUn?' style="background:rgba(181,72,59,.08)"':''}><td style="font-weight:500;font-size:.72rem">${_sesc(raw)}${isUn?' <span style="color:var(--red);font-weight:600;font-size:.62rem">UNMAPPED</span>':''}</td><td><select data-raw="${_sesc(raw)}" onchange="window._adminSetSubject('alias',this.getAttribute('data-raw'),this.value)" style="${_sSel}">${_canonOpt(sel)}</select></td><td style="text-align:center">${cnt||'—'}</td></tr>`;
+    };
+    unmappedSubj.forEach(s=>{subjHtml+=_subjRow(s,true);});
+    foundSubjects.filter(s=>!unmappedSubj.includes(s)).sort((a,b)=>String(a).localeCompare(String(b))).forEach(s=>{subjHtml+=_subjRow(s,false);});
+    subjHtml+=`</tbody></table></div>`;
+    subjHtml+=`<div style="font-size:.74rem;font-weight:600;color:var(--tx);margin:.9rem 0 .4rem">Display name &amp; continuation</div><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th>Shown as</th><th>Continues from</th></tr></thead><tbody>`;
+    canonUniverse.forEach(id=>{
+      const disp=(subjCanon[id]&&subjCanon[id].display)||'';
+      const par=(subjCanon[id]&&subjCanon[id].continuesFrom)||'';
+      const childCount=canonUniverse.filter(c=>(subjCanon[c]&&subjCanon[c].continuesFrom)===id).length;
+      const forkBadge=childCount>1?` <span style="color:var(--violet);font-weight:600;font-size:.62rem">FORK</span>`:'';
+      const parOpts=['<option value="">&mdash; none &mdash;</option>'].concat(canonUniverse.filter(c=>c!==id).map(c=>`<option value="${_sesc(c)}"${c===par?' selected':''}>${_sesc(c)}</option>`)).join('');
+      subjHtml+=`<tr><td style="font-weight:500;font-size:.72rem">${_sesc(id)}${forkBadge}</td><td><input value="${_sesc(disp)}" placeholder="${_sesc(id)}" data-id="${_sesc(id)}" onchange="window._adminSetSubject('display',this.getAttribute('data-id'),this.value)" style="${_sSel};width:140px"></td><td><select data-id="${_sesc(id)}" onchange="window._adminSetSubject('parent',this.getAttribute('data-id'),this.value)" style="${_sSel}">${parOpts}</select></td></tr>`;
+    });
+    subjHtml+=`</tbody></table></div>`;
+    subjHtml+=`<div style="display:flex;align-items:center;gap:.8rem;margin-top:.6rem"><span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--green);font-weight:600">✓ Saved automatically</span><span style="font-size:.65rem;color:var(--mu)">Subject choices save instantly and never change your data — only how it is read.</span></div></div>`;
+
     // Summary
     const summaryHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Data Key Summary</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.8rem;padding:.5rem 0">
@@ -9411,7 +9889,7 @@ function rPeer(){
       +_scaleEditor('Ability','ability',ABILITY)
       +_scaleEditor('Effort','effort',EFFORT)
       +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save scales</button><button onclick="window._resetScales()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer">↺ Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads the page to apply the new scale.</span></div>`;
-    out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml+scalesHtml;
+    out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml+subjHtml+scalesHtml;
   }
 
   // Admin change handlers
@@ -9485,11 +9963,34 @@ function rPeer(){
     rAdmin();
   };
 
+  window._adminSetSubject=function(kind,key,value){
+    DD.config.subject_map=DD.config.subject_map||{aliases:{},canonical:{}};
+    const A=DD.config.subject_map.aliases=DD.config.subject_map.aliases||{};
+    const C=DD.config.subject_map.canonical=DD.config.subject_map.canonical||{};
+    const _prune=id=>{if(C[id]&&!C[id].display&&!C[id].continuesFrom&&!Object.values(A).includes(id))delete C[id];};
+    if(kind==='alias'){
+      if(!value||value===key){const had=A[key];delete A[key];if(had)_prune(had);}
+      else{A[key]=value;C[value]=C[value]||{};}
+    }else if(kind==='display'){
+      C[key]=C[key]||{};
+      if(value)C[key].display=value;else delete C[key].display;
+      _prune(key);
+    }else if(kind==='parent'){
+      C[key]=C[key]||{};
+      if(value)C[key].continuesFrom=value;else delete C[key].continuesFrom;
+      _prune(key);
+    }
+    SUBJ=_buildSUBJ(DD.config.subject_map);
+    _persistDataKeys();
+    rAdmin();
+  };
+
   window._adminExport=function(){
     const cfg={
       att_codes:DD.config.att_codes,
       sen_codes:DD.config.sen_codes,
-      incident_codes:DD.config.incident_codes
+      incident_codes:DD.config.incident_codes,
+      subject_map:DD.config.subject_map
     };
     const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
     const a=document.createElement('a');
