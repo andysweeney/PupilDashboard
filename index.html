@@ -431,6 +431,18 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     if(!resp.ok)throw new Error('Failed to load data: '+resp.status);
     DD=await resp.json();
     // admin "data-key" settings are resolved later from the admin-owned store, not here.
+    // ── Pupil display names ───────────────────────────────────────────────
+    // The enrolment number is the join key on every file and stays the pupil's
+    // internal id (the registry key / .index). For DISPLAY we show the name the
+    // roster carries: strip the leading enrolment number and trailing cohort tag
+    // off the label. When no name is present (e.g. pseudonymised data) the label
+    // is left exactly as it was, so nothing regresses. Idempotent on re-runs.
+    (function(){ const reg=(DD&&DD.registry)||{};
+      for(const k in reg){ const r=reg[k]; if(!r) continue;
+        const raw=String(r.id==null?'':r.id); const m=raw.match(/^\s*0*(\d+)/); if(m) r.enr=m[1];
+        const nm=raw.replace(/^\s*\d+\s*/,'').replace(/\s*\([^)]*\)\s*$/,'').trim();
+        if(nm) r.id=nm; }
+    })();
   }catch(e){
     document.body.innerHTML='<div style="color:var(--red);padding:2rem;font-family:sans-serif"><b>Error loading data</b><br>'+e.message+'<br><br>If you are signed in and still see this, check that data.json exists in the Supabase bucket "'+DATA_BUCKET+'" and that its read policy allows authenticated users.</div>';
     return;
@@ -6361,11 +6373,19 @@ function _upDetectRole(fname){
   return {role:null, label:null, yg};
 }
 
-function _upParseCSV(text){
+function _upDetectDelim(text){
+  const nl=text.indexOf('\n'); const head=(nl>=0?text.slice(0,nl):text);
+  const t=(head.match(/\t/g)||[]).length, c=(head.match(/,/g)||[]).length, s=(head.match(/;/g)||[]).length;
+  if(t>=c && t>=s && t>0) return '\t';
+  if(s>c && s>0) return ';';
+  return ',';
+}
+function _upParseCSV(text, delim){
+  delim=delim||_upDetectDelim(text);
   const rows=[]; let row=[], cell='', q=false;
   for(let i=0;i<text.length;i++){ const c=text[i];
     if(q){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; } else cell+=c; }
-    else { if(c==='"') q=true; else if(c===','){row.push(cell);cell='';}
+    else { if(c==='"') q=true; else if(c===delim){row.push(cell);cell='';}
       else if(c==='\n'){row.push(cell);rows.push(row);row=[];cell='';}
       else if(c==='\r'){} else cell+=c; } }
   if(cell.length||row.length){ row.push(cell); rows.push(row); }
@@ -6395,6 +6415,10 @@ function _upCohorts(){
   try{ const intakes=(DD&&DD.config&&Array.isArray(DD.config.intakes))?DD.config.intakes
         :Object.values((DD&&DD.registry)||{}).map(p=>p&&p.intake).filter(Boolean);
     intakes.forEach(ik=>{ if(ik) set[ik]=true; }); }catch(e){}
+  // also include any cohorts from a roster uploaded this session, so a NEW year's file
+  // slots appear straight away (before the rebuild that folds it into the saved data).
+  try{ if(_UP.roster && _UP.roster.byIntake)
+        Object.keys(_UP.roster.byIntake).forEach(ik=>{ if(ik && ik!=='?' && !isNaN(+ik)) set[+ik]=true; }); }catch(e){}
   return Object.keys(set).map(Number).sort((a,b)=>a-b).map(ik=>({
     intake:ik, yg:7+(cay-ik), label:'Year '+(7+(cay-ik))+' (intake '+ik+')' }));
 }
@@ -6404,10 +6428,54 @@ function _upSlotRole(slot){
   const base=slot.id.split('_')[0], yg=slot.cohort?slot.cohort.yg:null;
   return {role:{attend:'attendance',behave:'behave_current',detention:'detention',hp:'housepoints',grades:'grade_attain'}[base], yg};
 }
+// Risk 1: stored filename is fixed PER SLOT, so re-uploading a slot always REPLACES
+// (no Date.now, no admin filename) — a slot can never accumulate duplicate files.
 function _upRoleFilename(role,yg){
   const tag={attendance:'in_year_attendance',behave_current:'behaviour_data',detention:'detention',
     housepoints:'housepoints',fsm:'fsm',sen:'sen',grade_attain:'on_track_for'}[role]||'data';
-  return tag+(yg?('_Y'+yg):'')+'_tagged_'+Date.now()+'.csv';
+  return tag+(yg?('_Y'+yg):'')+'.csv';
+}
+function _upSlotStoreName(slot){ const r=_upSlotRole(slot); return _upRoleFilename(r.role, r.yg); }
+
+// Risk 2: classify a column by what its VALUES look like, not its header.
+function _upColType(vals){
+  const s=vals.map(v=>String(v==null?'':v).trim()).filter(v=>v!==''); if(!s.length) return 'empty';
+  const f=fn=>s.filter(fn).length/s.length;
+  if(f(v=>/\d{1,4}[\/.\-]\d{1,2}[\/.\-]\d{1,4}/.test(v)||(/[^\d]/.test(v)&&v.length>5&&!isNaN(Date.parse(v))))>0.7) return 'date'; // dates need a separator/letter — pure digits are IDs, not dates
+  if(f(v=>/^\d{2,}(\s|$)/.test(v))>0.6) return 'name';                                    // admission numbers
+  const uniq=new Set(s.map(v=>v.toLowerCase())).size;
+  if(f(v=>v.length<=4 && /^[A-Za-z\/\\#*\-+.]+$/.test(v))>0.8 && uniq<30) return 'code';   // marks / short codes
+  if(f(v=>/^-?\d+(\.\d+)?%?$/.test(v))>0.7) return 'num';
+  return 'text';
+}
+const _UP_FIELD_TYPE={ Name:'name', Date:'date', 'Detention Date':'date', 'Event Date':'date',
+  Mark:'code', Year:'code', Gender:'code', 'SEN Status':'code', Result:'num',
+  'Detention Type':'text', Incident:'text', Subject:'text', 'Lesson - Period':'text', Teacher:'text', 'Basic details':'text', FSM:'code' };
+
+// Match a role's fields to columns by CONTENT first, header second. Returns the column map
+// plus 'problems' — sanity failures that mean the data isn't what this slot expects.
+function _upMatchColumns(headers, rows, role){
+  const fields=_UP_ROLE_FIELDS[role]||[['Name',1]];
+  const types=headers.map((h,i)=>_upColType(rows.slice(1,40).map(r=>r[i])));
+  const norm=s=>String(s).trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  const map={}, used=new Set();
+  fields.forEach(([canon])=>{ const want=_UP_FIELD_TYPE[canon]||'text';
+    let idx=-1;
+    if(want!=='text') idx=headers.findIndex((h,i)=>!used.has(i)&&types[i]===want);     // trust the DATA first
+    if(idx<0) idx=headers.findIndex((h,i)=>!used.has(i)&&norm(h)===norm(canon));        // then exact header
+    if(idx<0){ const kw=norm(canon.split(' ')[0]); if(kw.length>2) idx=headers.findIndex((h,i)=>!used.has(i)&&norm(h).indexOf(kw)>=0); }
+    if(idx>=0){ map[canon]=idx; used.add(idx); } });
+  const hasName=types.some(t=>t==='name');
+  const problems=[];
+  if(!hasName) problems.push('no column of pupil admission numbers (e.g. "017961 Smith")');
+  fields.forEach(([canon,req])=>{ if(req && (_UP_FIELD_TYPE[canon]==='date') && (map[canon]==null||types[map[canon]]!=='date')) problems.push('no column of dates for "'+canon+'"'); });
+  return { map, types, hasName, problems };
+}
+// do the file's headers already carry the engine's required column names? (keep such files pristine)
+function _upHeadersRecognised(headers, role){
+  const norm=s=>String(s).trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  const hs=headers.map(norm);
+  return (_UP_ROLE_FIELDS[role]||[]).filter(f=>f[1]).every(([canon])=>hs.indexOf(norm(canon))>=0);
 }
 
 function _upChecklist(){
@@ -6492,6 +6560,7 @@ function rUpload(){
   if(!_UP.serverLoaded){ _upLoadColmaps(); _upRefreshServer().then(()=>rUpload()); }
 
   if(_UP.tag){ return _upRenderTag(out); }
+  if(_UP.confirm){ return _upRenderConfirm(out); }
 
   // an established school already has a roster (in the loaded data) — recognise it so the
   // other slots are unlocked without forcing a SEN re-upload.
@@ -6574,79 +6643,175 @@ window._upSaveTag=async function(){
   await _upLoadColmaps();
   _UP.colmaps[t.role]=_UP.colmaps[t.role]||{}; _UP.colmaps[t.role][t.sig]=map;
   try{ if(typeof sbSet==='function' && _UP.schoolId) await sbSet('upload_colmaps', _UP.colmaps); }catch(e){}
-  _upApplyMappedFile(t.slotId, t.role, t.yg, t.rows, map, t.origName);
-  _UP.tag=null; rUpload();
+  const slot=_upChecklist().find(s=>s.id===t.slotId);
+  const tag=t, mp=map;
+  _UP.tag=null;
+  if(tag.role==='sen'){ _upStageRoster(slot, tag.slotId, tag.rows, mp); return; }
+  _upIdGateThenStage(slot, tag.slotId, tag.role, tag.rows, mp, ()=>_upApplyMappedFile(slot, tag.slotId, tag.role, tag.yg, tag.rows, mp, tag.origName));
+  rUpload();
 };
 // build a normalised CSV (canonical headers) and stage it; derive roster if applicable
-function _upApplyMappedFile(slotId, role, yg, rows, map, origName){
+function _upApplyMappedFile(slot, slotId, role, yg, rows, map, origName){
+  const name=_upSlotStoreName(slot);
   const fields=(_UP_ROLE_FIELDS[role]||[]).map(f=>f[0]).filter(c=>map[c]!=null);
   const lines=[fields.map(_upCsvCell).join(',')];
   for(let r=1;r<rows.length;r++) lines.push(fields.map(c=>_upCsvCell(rows[r][map[c]])).join(','));
   const csv=lines.join('\n')+'\n';
-  const name=_upRoleFilename(role,yg);
   const blob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name };
   if(role==='sen'){ _upDeriveRoster(rows, map); }
   _UP.staged[slotId]={ file:blob, name };
-  _upMsg('Columns matched — '+_upEsc(origName)+' is ready to upload as '+role.replace('_',' ')+'.', true);
+  _upMsg('Checked and ready: '+(rows.length-1)+' rows for '+_upEsc(slot.title)+'.', true);
+}
+// keep a recognised SIMS file's content intact (engine relies on some of its columns);
+// only the stored NAME is standardised.
+function _upStagePristine(slot, slotId, role, rows, map, file){
+  if(role==='sen'){ _upDeriveRoster(rows, map); }
+  _UP.staged[slotId]={ file, name:_upSlotStoreName(slot) };
+  _upMsg('Checked and ready: '+(rows.length-1)+' rows for '+_upEsc(slot.title)+'.', true);
 }
 function _upDeriveRoster(rows, map){
-  const iName=map['Name'], iYear=map['Year'], iGen=(map['Gender']!=null?map['Gender']:-1);
+  const iName=map['Name'], iYear=(map['Year']!=null?map['Year']:-1), iGen=(map['Gender']!=null?map['Gender']:-1);
   const pupils=new Set(), byIntake={}, byGender={};
-  for(let r=1;r<rows.length;r++){ const pid=_upPid(rows[r][iName]); const ym=String(rows[r][iYear]||'').match(/(\d{1,2})/);
-    if(!pid||!ym) continue; const yg=parseInt(ym[1],10), ik=_UP.cay-(yg-7);
-    pupils.add(pid); byIntake[ik]=(byIntake[ik]||0)+1;
+  for(let r=1;r<rows.length;r++){ const pid=_upPid(rows[r][iName]); const ym=(iYear>=0?String(rows[r][iYear]||'').match(/(\d{1,2})/):null);
+    if(!pid) continue; pupils.add(pid);
+    if(ym){ const yg=parseInt(ym[1],10), ik=_UP.cay-(yg-7); byIntake[ik]=(byIntake[ik]||0)+1; }
     const g=(iGen>=0?String(rows[r][iGen]||'').trim():'')||'?'; byGender[g]=(byGender[g]||0)+1; }
   _UP.roster={ pupils, count:pupils.size, byIntake, byGender };
 }
+// the display-name column on the roster: a TEXT column of near-unique, word-length
+// values — i.e. names, not low-cardinality codes like Gender or SEN status.
+function _upFindDisplayNameCol(headers, rows, excludeIdx){
+  let best=-1, bestCard=0; const N=Math.min(rows.length-1,200);
+  for(let i=0;i<headers.length;i++){ if(i===excludeIdx) continue;
+    const vals=[]; for(let r=1;r<=N;r++) vals.push(String(rows[r][i]==null?'':rows[r][i]).trim());
+    const ne=vals.filter(Boolean); if(ne.length<3) continue;
+    if(_upColType(ne)!=='text') continue;
+    const card=new Set(ne.map(v=>v.toLowerCase())).size/ne.length;
+    const avgLen=ne.reduce((a,v)=>a+v.length,0)/ne.length;
+    if(card>0.7 && avgLen>=3 && card>bestCard){ best=i; bestCard=card; } }
+  return best;
+}
+// Roster ingestion. The enrolment number (digits column) is the key; a separate
+// name column (if present) is folded INTO the one field the engine reads, as
+// "{enrolment} {name}" — identical in shape to the data that already works, so
+// the engine is untouched and the name then flows through to the display.
+function _upStageRoster(slot, slotId, rows, map){
+  const headers=rows[0].map(h=>String(h).trim());
+  const norm=s=>String(s).trim().toLowerCase();
+  const find=re=>headers.findIndex(h=>re.test(norm(h)));
+  const N=Math.min(rows.length-1,200);
+  const isIdCol=i=>{ let d=0,t=0; for(let r=1;r<=N;r++){ const v=String(rows[r][i]==null?'':rows[r][i]).trim(); if(!v) continue; t++; if(/^\d{4,}$/.test(v)) d++; } return t>0 && d/t>0.6; };
+  // enrolment = the join key: header says so, else the column of long digit-strings (4+ digits, not the 1-2 digit Year)
+  let enrolIdx=find(/enrol|admission|adno|adm\b|upn|pupil\s*id|student\s*id|^id$/);
+  if(enrolIdx<0) enrolIdx=headers.findIndex((h,i)=>isIdCol(i));
+  if(enrolIdx<0 && map && map['Name']!=null) enrolIdx=map['Name'];
+  // display name = header says name/pupil, else a high-cardinality text column
+  let nameColIdx=find(/^name$|surname|forename|pupil\s*name|student\s*name|full\s*name|^pupil$|^student$/);
+  if(nameColIdx<0 || nameColIdx===enrolIdx) nameColIdx=_upFindDisplayNameCol(headers, rows, enrolIdx);
+  const yearIdx=find(/year|^yr$|nc\s*year|year\s*group|^yg$/);
+  const genIdx=find(/gender|sex/);
+  if(enrolIdx<0){ _upMsg('Couldn\'t find the enrolment-number column in this roster file — it should have a column of pupil ID numbers (e.g. "Adno").'); return; }
+  if(yearIdx<0){ _upMsg('Couldn\'t find the Year column in this roster file (e.g. "Year 11").'); return; }
+
+  // fold the enrolment number into the one "Name" field the engine reads
+  const out=rows.map(r=>r.slice()); let combined=false;
+  if(nameColIdx>=0 && enrolIdx>=0 && nameColIdx!==enrolIdx){
+    out[0][nameColIdx]='Name';
+    for(let r=1;r<out.length;r++){ const enr=String(out[r][enrolIdx]||'').trim(), nm=String(out[r][nameColIdx]||'').trim();
+      if(enr) out[r][nameColIdx]=enr+(nm?(' '+nm):''); }
+    combined=true;
+  }
+  const readIdx=(nameColIdx>=0?nameColIdx:enrolIdx);
+  const ygOf=row=>{ const m=String(row[yearIdx]||'').match(/(\d{1,2})/); return m?parseInt(m[1],10):null; };
+
+  // one staged file per year group (sen_Y10.csv / sen_Y11.csv) — the engine splits SEN by filename
+  const years={};
+  for(let r=1;r<out.length;r++){ const yg=ygOf(out[r]); if(yg==null) continue; (years[yg]=years[yg]||[]).push(out[r]); }
+  if(!Object.keys(years).length){ _upMsg('No pupils with a readable year group were found in this file.'); return; }
+  Object.keys(years).forEach(yg=>{
+    const lines=[out[0].map(_upCsvCell).join(',')];
+    years[yg].forEach(row=>lines.push(row.map(_upCsvCell).join(',')));
+    const csv=lines.join('\n')+'\n', name=_upRoleFilename('sen', +yg);
+    const blob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name };
+    _UP.staged['sen|'+yg]={ file:blob, name };
+  });
+  _upAccumulateRoster(out, { Name:readIdx, Year:yearIdx, Gender:genIdx }, Object.keys(years).map(Number));
+  const ylabel=Object.keys(years).sort().map(y=>'Y'+y).join(', ');
+  _upMsg('Roster checked — '+_UP.roster.count+' pupils ('+ylabel+')'+(combined?', names captured':'')+'. The other slots are now unlocked.', true); rUpload();
+}
+// accumulate the roster across per-year uploads; re-uploading a year replaces just that year's pupils
+function _upAccumulateRoster(rows, map, yearsInFile){
+  const iName=map['Name'], iYear=(map['Year']!=null?map['Year']:-1), iGen=(map['Gender']!=null?map['Gender']:-1);
+  _UP.rosterYears=_UP.rosterYears||{};
+  yearsInFile.forEach(yg=>{ delete _UP.rosterYears[yg]; });
+  for(let r=1;r<rows.length;r++){ const pid=_upPid(rows[r][iName]); if(!pid) continue;
+    const ym=(iYear>=0?String(rows[r][iYear]||'').match(/(\d{1,2})/):null); const yg=ym?parseInt(ym[1],10):'?';
+    const b=(_UP.rosterYears[yg]=_UP.rosterYears[yg]||{ pupils:new Set(), genders:{} });
+    b.pupils.add(pid);
+    const g=(iGen>=0?String(rows[r][iGen]||'').trim():'')||'?'; b.genders[g]=(b.genders[g]||0)+1; }
+  const pupils=new Set(), byIntake={}, byGender={};
+  Object.keys(_UP.rosterYears).forEach(yg=>{ const b=_UP.rosterYears[yg];
+    b.pupils.forEach(p=>pupils.add(p));
+    if(yg!=='?'){ const ik=_UP.cay-(parseInt(yg,10)-7); byIntake[ik]=(byIntake[ik]||0)+b.pupils.size; }
+    Object.entries(b.genders).forEach(([g,n])=>{ byGender[g]=(byGender[g]||0)+n; }); });
+  _UP.roster={ pupils, count:pupils.size, byIntake, byGender };
+}
+
+// Risk 3: hold staging behind a confirm if the file contains pupils not on the roster.
+function _upIdGateThenStage(slot, slotId, role, rows, map, stage){
+  if(role==='sen' || !_UP.roster || map['Name']==null){ stage(); return; }
+  const seen=new Set(); let unknown=[], total=0;
+  for(let r=1;r<rows.length;r++){ const pid=_upPid(rows[r][map['Name']]); if(!pid||seen.has(pid)) continue; seen.add(pid); total++;
+    if(!_UP.roster.pupils.has(pid)) unknown.push(pid); }
+  if(!unknown.length){ stage(); return; }
+  _UP.confirm={ title:'Pupils not on your roll',
+    body:'<b>'+unknown.length+'</b> of '+total+' pupils in this file aren\'t on your current roster — for example '
+      +_upEsc(unknown.slice(0,6).join(', '))+(unknown.length>6?'…':'')+'. '
+      +'That usually means the wrong cohort, an old export, or pupils who have left. Their rows won\'t show on the dashboard. Upload anyway?',
+    onYes:stage };
+  rUpload();
+}
+function _upRenderConfirm(out){
+  const c=_UP.confirm;
+  out.innerHTML='<div style="max-width:680px"><h2 style="margin:.2rem 0 .6rem">'+_upEsc(c.title)+'</h2>'
+    +'<div style="font-size:.85rem;color:var(--tx);line-height:1.5;margin-bottom:1.1rem">'+c.body+'</div>'
+    +'<div style="display:flex;gap:.7rem"><button onclick="window._upConfirmYes()" style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff)">Upload anyway</button>'
+    +'<button onclick="window._upConfirmNo()" style="font-family:inherit;font-size:.8rem;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx)">Cancel</button></div></div>';
+}
+window._upConfirmYes=function(){ const c=_UP.confirm; _UP.confirm=null; if(c&&c.onYes) c.onYes(); rUpload(); };
+window._upConfirmNo=function(){ _UP.confirm=null; _upMsg('Cancelled — nothing was staged.'); rUpload(); };
 
 window._upChoose=async function(slotId, input){
   const file=input.files&&input.files[0]; if(!file) return;
   const slot=_upChecklist().find(s=>s.id===slotId); if(!slot) return;
-  const det=_upDetectRole(file.name);
   const want=_upSlotRole(slot);
 
-  // recognised filename that belongs to a DIFFERENT slot -> defence (a)
-  if(det.role && !_upStagedMatchesSlot(file.name, slot)){
-    _upMsg('That file looks like a <b>'+_upEsc(det.label||det.role)+'</b> file, which doesn\'t match this slot ('+_upEsc(slot.title)+').'); input.value=''; return; }
+  if(/\.xlsx?$/i.test(file.name)){ _upMsg('Please export as CSV (or tab-separated text) so the data can be checked before it\'s uploaded.'); input.value=''; return; }
+  if(!/\.(csv|tsv|txt)$/i.test(file.name)){ _upMsg('Please upload a CSV or tab-separated text export.'); input.value=''; return; }
+  let rows; try{ rows=_upParseCSV(await _upReadFile(file)); }catch(e){ _upMsg('Could not read that file.'); input.value=''; return; }
+  if(rows.length<2){ _upMsg('That file has no data rows.'); input.value=''; return; }
+  const headers=rows[0].map(h=>String(h).trim()), sig=_upSig(headers);
 
-  // recognised + matches slot -> stage pristine (roster also derives in-browser)
-  if(det.role && _upStagedMatchesSlot(file.name, slot)){
-    if(slot.kind==='roster'){ return _upRosterPristine(slotId, file, input); }
-    if(_UP.roster && /\.csv$/i.test(file.name)) await _upRosterCheck(file);
-    _UP.staged[slotId]={ file, name:file.name }; _upMsg('Ready to upload: '+_upEsc(file.name), true); rUpload(); return;
+  // Risk 2 — judge the file by its DATA, not its headers.
+  const m=_upMatchColumns(headers, rows, want.role);
+  if(m.problems.length){
+    await _upLoadColmaps();
+    const known=_UP.colmaps[want.role]&&_UP.colmaps[want.role][sig];
+    if(known){ if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, known); return; } _upIdGateThenStage(slot, slotId, want.role, rows, known, ()=>_upApplyMappedFile(slot, slotId, want.role, want.yg, rows, known, file.name)); rUpload(); return; }
+    if(!m.hasName){ _upMsg('This doesn\'t look like data for <b>'+_upEsc(slot.title)+'</b> — '+_upEsc(m.problems[0])+'. Check you picked the right export.'); input.value=''; return; }
+    _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:file.name, map:m.map }; rUpload(); return;
   }
 
-  // unrecognised filename -> column tagging (try remembered layout first)
-  if(!/\.csv$/i.test(file.name)){ _upMsg('Spreadsheet (.xlsx) files with unfamiliar names can\'t be auto-read in the browser yet — please export as CSV, or rename to the usual export name.'); input.value=''; return; }
-  let rows; try{ rows=_upParseCSV(await _upReadFile(file)); }catch(e){ _upMsg('Could not read that file.'); input.value=''; return; }
-  if(!rows.length){ _upMsg('That file has no rows.'); input.value=''; return; }
-  const headers=rows[0].map(h=>String(h).trim()), sig=_upSig(headers);
+  // data looks right. Recognised columns -> keep file pristine; unfamiliar -> normalise via tag panel.
+  if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, m.map); return; }
+  if(_upHeadersRecognised(headers, want.role)){
+    _upIdGateThenStage(slot, slotId, want.role, rows, m.map, ()=>_upStagePristine(slot, slotId, want.role, rows, m.map, file)); rUpload(); return;
+  }
   await _upLoadColmaps();
   const known=_UP.colmaps[want.role]&&_UP.colmaps[want.role][sig];
-  if(known){ if(_UP.roster && want.role!=='sen') await _upRosterCheckRows(rows, known); 
-    _upApplyMappedFile(slotId, want.role, want.yg, rows, known, file.name); rUpload(); return; }
-  _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:file.name, map:{} };
-  rUpload();
+  if(known){ _upIdGateThenStage(slot, slotId, want.role, rows, known, ()=>_upApplyMappedFile(slot, slotId, want.role, want.yg, rows, known, file.name)); rUpload(); return; }
+  _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:file.name, map:m.map }; rUpload();
 };
-function _upRosterPristine(slotId, file, input){
-  return _upReadFile(file).then(txt=>{
-    const rows=_upParseCSV(txt); const hdr=rows[0].map(h=>String(h).trim());
-    const iName=hdr.findIndex(h=>/^name$/i.test(h)), iYear=hdr.findIndex(h=>/^year$/i.test(h)), iGen=hdr.findIndex(h=>/gender/i.test(h));
-    if(iName<0||iYear<0){ // recognised name but unfamiliar columns -> tag
-      _UP.tag={ slotId, slotTitle:'Pupil roster', role:'sen', yg:null, headers:hdr, rows, sig:_upSig(hdr), origName:file.name, map:{} }; rUpload(); return; }
-    _upDeriveRoster(rows, {Name:iName, Year:iYear, Gender:iGen});
-    _UP.staged[slotId]={ file, name:file.name };
-    _upMsg('Roster recognised: '+_UP.roster.count+' pupils. The other slots are now unlocked.', true); rUpload();
-  }).catch(()=>{ _upMsg('Could not read the roster.'); input.value=''; });
-}
-async function _upRosterCheck(file){ try{ await _upRosterCheckRows(_upParseCSV(await _upReadFile(file))); }catch(e){} }
-async function _upRosterCheckRows(rows, map){
-  const hdr=rows[0].map(h=>String(h).trim());
-  const iName=(map&&map['Name']!=null)?map['Name']:hdr.findIndex(h=>/name|forename|pupil/i.test(h));
-  if(iName<0) return; let known=0,total=0;
-  for(let r=1;r<Math.min(rows.length,600);r++){ const pid=_upPid(rows[r][iName]); if(!pid) continue; total++; if(_UP.roster.pupils.has(pid)) known++; }
-  if(total>20 && known/total<0.5) _upMsg('Heads-up: most pupils in this file aren\'t in the current roster ('+known+'/'+total+' matched) — possibly the wrong cohort or an old export.');
-}
 
 window._upUploadAll=async function(){
   if(!_UP.schoolId){ _upMsg('Uploading is switched on with the Part-2 go-live.'); return; }
