@@ -6374,6 +6374,22 @@ function _upParseCSV(text){
 function _upReadFile(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result||'')); r.onerror=()=>rej(new Error('read failed')); r.readAsText(file); }); }
 function _upSig(headers){ return headers.map(h=>String(h).trim().toLowerCase()).sort().join('|'); }
 
+// The roster that ALREADY exists — derived from the loaded data (DD.registry), so an
+// established school doesn't have to re-upload SEN just to touch other files. A SEN upload
+// is only needed to CHANGE the pupil list. Returns null for a brand-new school (no pupils).
+function _upRosterFromData(){
+  try{
+    var reg=(typeof DD!=='undefined')&&DD&&DD.registry; if(!reg) return null;
+    var pupils=new Set(), byIntake={}, byGender={};
+    Object.keys(reg).forEach(function(k){ var p=reg[k]; if(!p) return;
+      pupils.add(String(k));
+      var ik=(p.intake!=null?p.intake:'?'); byIntake[ik]=(byIntake[ik]||0)+1;
+      var g=(p.gender||'?'); byGender[g]=(byGender[g]||0)+1; });
+    if(!pupils.size) return null;
+    return { pupils:pupils, count:pupils.size, byIntake:byIntake, byGender:byGender, fromData:true };
+  }catch(e){ return null; }
+}
+
 function _upCohorts(){
   const cay=_UP.cay, set={};
   try{ const intakes=(DD&&DD.config&&Array.isArray(DD.config.intakes))?DD.config.intakes
@@ -6436,6 +6452,8 @@ function _upServerFor(slot){
   return _UP.serverFiles.find(o=>_upStagedMatchesSlot(o.name, slot)) || null;
 }
 function _upSlotStatus(slot){
+  if(slot.kind==='roster' && _UP.roster && _UP.roster.fromData && !_UP.staged[slot.id])
+    return {tag:'loaded', label:'from current data', col:'var(--green,#3b6d11)'};
   if(_UP.staged[slot.id]) return {tag:'staged', label:'ready to upload', col:'var(--amber,#b8860b)'};
   const sv=_upServerFor(slot);
   if(sv){
@@ -6475,6 +6493,10 @@ function rUpload(){
 
   if(_UP.tag){ return _upRenderTag(out); }
 
+  // an established school already has a roster (in the loaded data) — recognise it so the
+  // other slots are unlocked without forcing a SEN re-upload.
+  if(!_UP.roster){ var _rd=_upRosterFromData(); if(_rd) _UP.roster=_rd; }
+
   const noSchool=!_UP.schoolId;
   const banner=noSchool
     ? '<div style="padding:.7rem .9rem;border:1px solid var(--bd);border-radius:8px;background:var(--sf2);color:var(--mu);font-size:.82rem;margin-bottom:1rem">'
@@ -6484,7 +6506,8 @@ function rUpload(){
   const rosterSummary=rosterReady
     ? '<div style="margin-top:.5rem;font-size:.8rem;color:var(--tx)"><b>'+_UP.roster.count+'</b> pupils · '
       +Object.entries(_UP.roster.byIntake).map(([ik,n])=>'intake '+ik+': '+n).join(' · ')+' · '
-      +Object.entries(_UP.roster.byGender).map(([g,n])=>(g||'?')+': '+n).join(' · ')+'</div>' : '';
+      +Object.entries(_UP.roster.byGender).map(([g,n])=>(g||'?')+': '+n).join(' · ')
+      +(_UP.roster.fromData?' <span style="color:var(--mu)">— from your current data; upload a SEN export only to change the pupil list</span>':'')+'</div>' : '';
 
   const slots=_upChecklist();
   const attention=slots.filter(s=>{ const st=_upSlotStatus(s); return st.tag==='missing'||st.stale; }).length;
