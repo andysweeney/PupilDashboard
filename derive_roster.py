@@ -2,21 +2,35 @@
 """derive_roster.py — derive the authoritative pupil roster from the SEN-with-Gender export.
 
 The roster is the FIRST thing the portal needs: it attaches every pupil to a cohort, so the
-engine can stop guessing cohorts from hardcoded streams and inconsistent leaving tags. We read
-each pupil's CURRENT year group from the file's `Year` column (not the leaving tag in the name),
-then turn that into a permanent intake year using the one fact the file can't supply — the
-current academic year, which the Admin confirms once:
+engine can stop guessing cohorts from hardcoded streams and inconsistent leaving tags. Each
+per-cohort roster file is named sen_<intake>.csv, where <intake> is the cohort's permanent
+intake year — the Admin confirms it once when adding the cohort, and it is authoritative for
+every pupil in that file. The file therefore needs no Year column at all.
 
-    intake = current_academic_year - (current_year_group - 7)
+A pupil's current year group is then a pure function of that intake and the one school-wide
+fact the Admin confirms once — the current academic year:
 
-No "Year 11 is the end of their career" assumption: only the universal one-year-per-grade rule.
+    current_year_group = current_academic_year - intake + 7
+
+(A legacy file whose name carries no intake falls back to reading a Year column.) Everything
+downstream — attendance, behaviour, grades — joins to the roster on the pupil number and
+inherits its cohort from there; no other file derives or carries a year group.
 
 Output: a roster keyed by pupil number, carrying name, intake, current year group, gender and SEN
-status. Adding a new cohort (Y7, Y12, anything) needs nothing here — it's just more rows.
+status. Adding a new cohort (Y7, Y12, anything) needs nothing here — it's just another file.
 """
 import csv, os, re
 
 YEAR_RX = re.compile(r'(\d{1,2})')
+INTAKE_RX = re.compile(r'sen_(\d{4})\.csv$', re.I)
+
+
+def intake_from_path(path):
+    """A per-cohort roster file is named sen_<intake>.csv. That intake is the Admin's
+    confirmed assertion for the whole file and is authoritative — the file needs no Year
+    column. Returns the intake year, or None if the name doesn't carry one."""
+    m = INTAKE_RX.search(os.path.basename(str(path or '')))
+    return int(m.group(1)) if m else None
 
 
 def pid_of(name):
@@ -41,23 +55,31 @@ def derive_roster(sen_paths, current_acad_year):
     roster = {}
     anomalies = []
     for path in sen_paths:
+        file_intake = intake_from_path(path)        # the Admin's confirmed cohort, if named so
         for r in _read(path):
             r = {(k.strip() if k else k): v for k, v in r.items()}
             name = r.get('Name')
             pid = pid_of(name)
-            yg = yg_of(r.get('Year'))
             if pid is None:
                 anomalies.append(f"{os.path.basename(path)}: no pupil number in {name!r}")
                 continue
-            if yg is None:
-                anomalies.append(f"{os.path.basename(path)}: no year group for pupil {pid}")
-                continue
-            intake = current_acad_year - (yg - 7)
+            if file_intake is not None:
+                # intake asserted by the Admin — the whole file is this cohort. No Year needed.
+                intake = file_intake
+                yg = current_acad_year - intake + 7          # current year group, for display only
+            else:
+                # legacy file: fall back to reading the current year group from the Year column
+                yg = yg_of(r.get('Year'))
+                if yg is None:
+                    anomalies.append(f"{os.path.basename(path)}: no intake in filename and "
+                                     f"no year group for pupil {pid}")
+                    continue
+                intake = current_acad_year - (yg - 7)
             sen = (r.get('SEN Status Code') or r.get('SEN Status') or '').strip()
             gender = (r.get('Gender') or '').strip()
             if pid in roster and roster[pid]['intake'] != intake:
-                anomalies.append(f"pupil {pid} appears in two year groups "
-                                 f"({roster[pid]['current_yg']} and {yg})")
+                anomalies.append(f"pupil {pid} listed in two cohorts "
+                                 f"(intake {roster[pid]['intake']} and {intake})")
             roster[pid] = {'pid': pid, 'name': str(name).strip(), 'intake': intake,
                            'current_yg': yg, 'gender': gender, 'sen': sen}
     # summary
@@ -92,3 +114,4 @@ if __name__ == '__main__':
         print("anomalies:", anomalies[:10])
     write_roster_csv(roster, os.path.join(os.path.dirname(__file__), 'Roster.csv'))
     print("wrote Roster.csv")
+
