@@ -522,6 +522,19 @@ for p, r in roster_map.items():
 print(f"Registry: {len(registry)} pupils "
       f"({sum(1 for v in registry.values() if v['gender']=='U')} with unknown gender)")
 
+# The roster is authoritative for who is currently on roll. If a roster has been provided,
+# anyone it no longer lists — but who is still known to us (has data, or was on roll before)
+# — is marked as having Left. Re-uploading a cohort's roster therefore flips departed pupils
+# to Left automatically, while they keep their history.
+if _CURRENT_ROSTER:
+    _left_n = 0
+    for _p in registry:
+        _is_left = _p not in _CURRENT_ROSTER
+        registry[_p]['left'] = _is_left
+        if _is_left:
+            _left_n += 1
+    print(f"On roll: {len(registry) - _left_n}; left (kept with history): {_left_n}")
+
 # ── FSM & SEN FLAGS ──
 print("Processing FSM and SEN flags...")
 fsm_set = set()
