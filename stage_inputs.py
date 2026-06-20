@@ -112,28 +112,31 @@ def stage(upload_dir, out_dir, grade_term=DEFAULT_GRADE_TERM, current_acad_year=
     log = (lambda *a: print(*a)) if verbose else (lambda *a: None)
     summary = {}
 
-    for yg, att_name in [(10, 'Year_10_attend_updated.csv'), (11, 'Year_11_attend_updated.csv')]:
-        paths = files('attendance', yg)
-        if not paths:
-            continue
-        att = pd.concat([_att_norm(_read(p)) for p in paths], ignore_index=True)
-        att.to_csv(os.path.join(out_dir, att_name), index=False)
-        summary[f'attendance_y{yg}'] = len(att)
+    # Category-generic staging: every file of a category is pooled regardless of which cohort
+    # or year group it belongs to. The engine reads these by glob and assigns each pupil's
+    # cohort from the roster (by admission number), so NO year group is hardcoded here — a
+    # Year 7 cohort's files flow through exactly like a Year 11 cohort's.
+    def of_role(*roles):
+        return [p for (r, _yg), ps in buckets.items() if r in roles for p in ps]
 
-    for yg, name in [(10, 'Behave_codes.csv'), (11, 'Behave_data.csv')]:
-        parts = [_beh_norm(_read(p), False) for p in files('behave_current', yg)] + \
-                [_beh_norm(_read(p), True) for p in files('behave_historic', yg)]
-        if parts:
-            beh = pd.concat(parts, ignore_index=True)
-            beh.to_csv(os.path.join(out_dir, name), index=False)
-            summary[f'behaviour_y{yg}'] = len(beh)
+    att_paths = of_role('attendance')
+    if att_paths:
+        att = pd.concat([_att_norm(_read(p)) for p in att_paths], ignore_index=True)
+        att.to_csv(os.path.join(out_dir, 'attend_updated.csv'), index=False)   # engine globs *attend_updated.csv
+        summary['attendance'] = len(att)
 
-    for yg, name in [(10, 'Detentions.csv'), (11, 'Detention_data.csv')]:
-        paths = files('detention', yg)
-        if paths:
-            det = pd.concat([_read(p) for p in paths], ignore_index=True)[['Name', 'Detention Date', 'Detention Type']]
-            det.to_csv(os.path.join(out_dir, name), index=False)
-            summary[f'detentions_y{yg}'] = len(det)
+    beh_parts = [_beh_norm(_read(p), False) for p in of_role('behave_current')] + \
+                [_beh_norm(_read(p), True)  for p in of_role('behave_historic')]
+    if beh_parts:
+        beh = pd.concat(beh_parts, ignore_index=True)
+        beh.to_csv(os.path.join(out_dir, 'Behave_all.csv'), index=False)        # engine globs Behave*.csv
+        summary['behaviour'] = len(beh)
+
+    det_paths = of_role('detention')
+    if det_paths:
+        det = pd.concat([_read(p) for p in det_paths], ignore_index=True)[['Name', 'Detention Date', 'Detention Type']]
+        det.to_csv(os.path.join(out_dir, 'Detention_all.csv'), index=False)      # engine globs Detention*.csv
+        summary['detentions'] = len(det)
 
     # FSM — one combined file covers every cohort (engine reads FSM.csv once against the full registry)
     fsm_paths = [p for (role, _), ps in buckets.items() if role == 'fsm' for p in ps]
@@ -142,17 +145,18 @@ def stage(upload_dir, out_dir, grade_term=DEFAULT_GRADE_TERM, current_acad_year=
         fsm.to_csv(os.path.join(out_dir, 'FSM.csv'), index=False)
         summary['fsm'] = len(fsm)
 
-    # SEN — Y10 as .xlsx, Y11 as .csv (the engine's two SEN inputs)
-    for p in files('sen', 10):
-        sen = _read(p)
-        sen['SEN Status'] = sen.get('SEN Status Code', sen.get('SEN Status'))
-        keep = [c for c in ['Name', 'SEN Status Code', 'SEN Status'] if c in sen.columns]
-        sen[keep].to_excel(os.path.join(out_dir, 'SEN.xlsx'), index=False)
-        summary['sen_y10'] = len(sen)
-    for p in files('sen', 11):
-        sen = _read(p).rename(columns={'SEN Status Code': 'SEN Status'})
-        sen[['Name', 'SEN Status']].to_csv(os.path.join(out_dir, 'SEN.csv'), index=False)
-        summary['sen_y11'] = len(sen)
+    # SEN status — one whole-school snapshot. Pool every SEN file, normalise the status column
+    # (exports use either 'SEN Status Code' or 'SEN Status'), and write the engine's SEN.csv.
+    sen_all = of_role('sen')
+    if sen_all:
+        parts = []
+        for p in sen_all:
+            s = _read(p)
+            s['SEN Status'] = s.get('SEN Status Code', s.get('SEN Status'))
+            parts.append(s[[c for c in ['Name', 'SEN Status'] if c in s.columns]])
+        sen = pd.concat(parts, ignore_index=True).dropna(subset=['Name'])
+        sen.to_csv(os.path.join(out_dir, 'SEN.csv'), index=False)
+        summary['sen'] = len(sen)
 
     # ROSTER — the authoritative pupil->cohort map. Derived from the SEN-with-Gender exports
     # (they carry the current year group + gender for the whole cohort), anchored to the
@@ -172,14 +176,13 @@ def stage(upload_dir, out_dir, grade_term=DEFAULT_GRADE_TERM, current_acad_year=
     elif sen_paths:
         log("  roster: skipped — current academic year not supplied")
 
-    for yg, name in [(10, 'House_Points_Y10.csv'), (11, 'House_Points_Y11.csv')]:
-        paths = files('housepoints', yg)
-        if paths:
-            hp = pd.concat([_read(p) for p in paths], ignore_index=True).rename(columns={'Forename': 'Name'})
-            if 'Event Date' in hp.columns:
-                hp['Date'] = hp['Event Date']; hp['Event/Date'] = hp['Event Date']
-            hp.to_csv(os.path.join(out_dir, name), index=False)
-            summary[f'housepoints_y{yg}'] = len(hp)
+    hp_paths = of_role('housepoints')
+    if hp_paths:
+        hp = pd.concat([_read(p) for p in hp_paths], ignore_index=True).rename(columns={'Forename': 'Name'})
+        if 'Event Date' in hp.columns:
+            hp['Date'] = hp['Event Date']; hp['Event/Date'] = hp['Event Date']
+        hp.to_csv(os.path.join(out_dir, 'House_Points.csv'), index=False)        # engine reads House_Points.csv
+        summary['housepoints'] = len(hp)
 
     # GRADES — combine every attainment + effort file into one Reports.csv (engine keys by pupil number)
     attain = [p for (role, _), ps in buckets.items() if role == 'grade_attain' for p in ps]
