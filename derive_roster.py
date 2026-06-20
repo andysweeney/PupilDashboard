@@ -114,4 +114,3 @@ if __name__ == '__main__':
         print("anomalies:", anomalies[:10])
     write_roster_csv(roster, os.path.join(os.path.dirname(__file__), 'Roster.csv'))
     print("wrote Roster.csv")
-
