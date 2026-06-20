@@ -6406,7 +6406,11 @@ function rSchools(){
     +'<div style="font-size:.66rem;color:var(--mu);margin:.25rem 0 1rem">They can change this after signing in.</div>'
     +'<button id="ns-go" onclick="window._provisionSchool()" style="'+BTN+'">Create school</button>'
     +'<div id="ns-msg" style="font-size:.8rem;margin-top:.8rem;min-height:1rem"></div>'
-    +'</div></div>';
+    +'</div>'
+    +'<h3 style="margin:1.4rem 0 .4rem;font-size:.95rem">Existing schools</h3>'
+    +'<div id="ns-list" style="font-size:.82rem;color:var(--mu)">Loading\u2026</div>'
+    +'</div>';
+  _nsLoadSchools();
 }
 window._nsSlugSuggest=function(){
   const n=document.getElementById('ns-name'), s=document.getElementById('ns-slug');
@@ -6436,7 +6440,58 @@ window._provisionSchool=async function(){
     set('\u2713 <b>'+_upEsc(name)+'</b> created. '+_upEsc(email)+' can sign in now'+warn+'.',OK);
     ['ns-name','ns-slug','ns-email','ns-pw'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.value=''; delete el.dataset.touched; } });
     if(go) go.disabled=false;
+    try{ _nsLoadSchools(); }catch(e){}
   }catch(e){ if(go) go.disabled=false; set('Could not create: '+_upEsc(e&&e.message||String(e)),ERR); }
+};
+
+// ── Existing schools list + delete (type-the-slug to confirm) ──
+let _NS_SCHOOLS=[], _NS_DEL=null;
+async function _nsLoadSchools(){
+  const el=document.getElementById('ns-list'); if(!el) return;
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/schools?select=school_id,display_name&order=display_name.asc',
+      { headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken() } });
+    _NS_SCHOOLS = r.ok ? (await r.json()) : [];
+  }catch(e){ _NS_SCHOOLS=[]; }
+  _NS_DEL=null; _nsRenderList();
+}
+function _nsRenderList(){
+  const el=document.getElementById('ns-list'); if(!el) return;
+  if(!Array.isArray(_NS_SCHOOLS) || !_NS_SCHOOLS.length){ el.innerHTML='<div style="color:var(--mu);font-size:.78rem">No schools yet.</div>'; return; }
+  const INP='font-family:inherit;font-size:.82rem;padding:.4rem .55rem;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);color:var(--tx)';
+  el.innerHTML=_NS_SCHOOLS.map(s=>{
+    const slug=String(s.school_id||''), name=_upEsc(s.display_name||slug), eslug=_upEsc(slug);
+    if(_NS_DEL===slug){
+      return '<div style="border:1px solid #fed7aa;background:#fff7ed;border-radius:8px;padding:.7rem .8rem;margin-bottom:.5rem">'
+        +'<div style="font-size:.78rem;color:#9a3412;margin-bottom:.5rem">Permanently delete <b>'+name+'</b> — its admin login, its uploads and its data, all of it. Type <b>'+eslug+'</b> to confirm.</div>'
+        +'<div style="display:flex;gap:.5rem;align-items:center">'
+          +'<input id="ns-del-in" oninput="window._nsDelCheck()" placeholder="'+eslug+'" style="flex:1;'+INP+'">'
+          +'<button id="ns-del-go" onclick="window._nsDelConfirm()" disabled style="font-family:inherit;font-size:.78rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;border:1px solid var(--bd);background:#c0392b;color:#fff;cursor:pointer;opacity:.5">Delete</button>'
+          +'<button onclick="window._nsDelCancel()" style="font-family:inherit;font-size:.78rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx);cursor:pointer">Cancel</button>'
+        +'</div><div id="ns-del-msg" style="font-size:.74rem;margin-top:.4rem"></div></div>';
+    }
+    return '<div style="display:flex;align-items:center;gap:.6rem;padding:.45rem .2rem;border-bottom:1px solid var(--bd)">'
+      +'<div style="flex:1;color:var(--tx)">'+name+' <span style="color:var(--mu);font-size:.72rem">· '+eslug+'</span></div>'
+      +'<button onclick="window._nsAskDelete(\''+eslug+'\')" style="font-family:inherit;font-size:.72rem;color:#c0392b;border:1px solid var(--bd);border-radius:6px;padding:.25rem .6rem;background:var(--sf2);cursor:pointer">Delete</button>'
+      +'</div>';
+  }).join('');
+}
+window._nsAskDelete=function(slug){ _NS_DEL=slug; _nsRenderList(); };
+window._nsDelCancel=function(){ _NS_DEL=null; _nsRenderList(); };
+window._nsDelCheck=function(){ const i=document.getElementById('ns-del-in'), b=document.getElementById('ns-del-go'); if(i&&b){ const ok=i.value.trim()===_NS_DEL; b.disabled=!ok; b.style.opacity=ok?'1':'.5'; } };
+window._nsDelConfirm=async function(){
+  const slug=_NS_DEL; if(!slug) return;
+  const b=document.getElementById('ns-del-go'), msg=document.getElementById('ns-del-msg');
+  const set=(t,c)=>{ if(msg){ msg.innerHTML=t; msg.style.color=c||'var(--mu)'; } };
+  if(b) b.disabled=true; set('Deleting\u2026');
+  try{
+    const r=await fetch(SB_URL+'/functions/v1/provision-school',
+      { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' },
+        body:JSON.stringify({ action:'delete', slug }) });
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok || !j.ok){ if(b) b.disabled=false; return set('Could not delete: '+_upEsc(j.error||('HTTP '+r.status)),'#c0392b'); }
+    await _nsLoadSchools();
+  }catch(e){ if(b) b.disabled=false; set('Could not delete: '+_upEsc(e&&e.message||String(e)),'#c0392b'); }
 };
 
 
