@@ -127,6 +127,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div class="tabs">
 <button id="tab-admin" class="tb" style="display:none" onclick="sw('admin',this)">🔧 Admin</button>
 <button id="tab-upload" class="tb" style="display:none" onclick="sw('upload',this)">⬆️ Upload</button>
+<button id="tab-schools" class="tb" style="display:none" onclick="sw('schools',this)">🏫 Schools</button>
 <button class="tb on" onclick="sw('pupil',this)">👤 Pupil</button>
 <button class="tb" onclick="sw('subject',this)">📚 Subject</button>
 <button class="tb" onclick="sw('class',this)">🏫 Class</button>
@@ -353,6 +354,10 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div id="upload-out"></div>
 </div>
 
+<div id="vw-schools" class="vw">
+<div id="schools-out"></div>
+</div>
+
 <div id="vw-peer" class="vw">
 <div id="peer-rows"></div>
 <div style="margin:.6rem 0"><button id="peer-add-btn" onclick="peerAddRow()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.72rem;padding:.35rem .8rem;border-radius:6px;cursor:pointer">+ Add Comparison Group</button></div>
@@ -418,6 +423,20 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     if(!authToken()){ renderLoginScreen(); return; }
     setInterval(function(){authRefresh();}, 45*60*1000); // keep long sessions alive
   }
+  // Empty dashboard skeleton for a brand-new school whose data.json doesn't exist yet.
+  // Mirrors the engine's output shape (every key present, all collections empty) so the app
+  // boots cleanly with zero pupils; config maps are empty and fall back to the built-in defaults.
+  function _EMPTY_DD(){
+    const d=new Date(), cay=(d.getMonth()>=8?d.getFullYear():d.getFullYear()-1);
+    const e={config:{subjects:[],ability_map:{},periods:[],period_labels:[],intakes:[],
+      current_acad_year:cay,real_data:false,att_codes:{},sen_codes:{},incident_codes:{},
+      house_point_weights:{},house_point_types:[]}};
+    ['subjectKeys','periodKeys','registry','enrolments','progress','attendance','attendanceMarks',
+     'attByPeriod','attByPeriodSubj','attAbsSubj','senStatus','weekLessons','timetables',
+     'slotDenominators','schoolDayCounts','slotTeachers','splitSlotMeta','suppressedAbsences'].forEach(k=>e[k]={});
+    ['dateIndex','teacherIndex','sanctions','sanctionDetails','housePoints','housePointDetails'].forEach(k=>e[k]=[]);
+    return e;
+  }
   let DD;
   try{
     let resp;
@@ -428,8 +447,20 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     }else{
       resp=await fetch('./data.json');
     }
-    if(!resp.ok)throw new Error('Failed to load data: '+resp.status);
-    DD=await resp.json();
+    if(!resp.ok){
+      // A signed-in tenant whose data.json isn't there yet is a NEW school, not an error: boot an
+      // empty dashboard. A platform owner (who may have no school of their own) always boots empty
+      // so they can reach the Schools tab.
+      if(SB_ON && isPlatformOwner()){
+        DD=_EMPTY_DD(); window._ONBOARDING=true;
+      }else if(SB_ON && _SID && (resp.status===404||resp.status===400)){
+        DD=_EMPTY_DD(); window._ONBOARDING=true;
+      }else{
+        throw new Error('Failed to load data: '+resp.status);
+      }
+    }else{
+      DD=await resp.json();
+    }
     // admin "data-key" settings are resolved later from the admin-owned store, not here.
     // Cohort settings: the top year-group the school teaches (cohorts past it have LEFT),
     // plus any manual per-intake 'left'/'active' overrides. Default top year = 11.
@@ -1006,6 +1037,11 @@ function schoolId(){
   try{ var u=authUser(); var t=u&&u.app_metadata&&u.app_metadata.school_id; if(t) return t; }catch(e){}
   return null;
 }
+// Platform owner = the operator who can create new schools. Set in app_metadata (server-side,
+// not user-writable), so a regular school admin can never gain this.
+function isPlatformOwner(){
+  try{ var u=authUser(); return !!(u&&u.app_metadata&&u.app_metadata.platform_owner===true); }catch(e){ return false; }
+}
 function authExpired(){if(!_SESSION)return true;const exp=_SESSION.expires_at?_SESSION.expires_at*1000:0;return !exp||Date.now()>(exp-60000);}
 async function authSignIn(email,password){
   const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email:email,password:password})});
@@ -1142,6 +1178,7 @@ async function checkAdmin(){
   }
   try{const b=document.getElementById('tab-admin'); if(b) b.style.display=IS_ADMIN?'':'none';}catch(e){}
   try{const u=document.getElementById('tab-upload'); if(u) u.style.display=IS_ADMIN?'':'none';}catch(e){}
+  try{const s=document.getElementById('tab-schools'); if(s) s.style.display=isPlatformOwner()?'':'none';}catch(e){}
 }
 await checkAdmin();
 // Two-way dismissal sync: pull the team's shared dismissals in and push any local-only
@@ -2851,7 +2888,15 @@ function renderConductGrid(x, ay){
 }
 
 function rP(){
-  const x=parseInt(document.getElementById('p-sel').value);if(!x)return;
+  const x=parseInt(document.getElementById('p-sel').value);
+  if(!x){
+    if(window._ONBOARDING && !window._onbRedir){
+      if(IS_ADMIN){ window._onbRedir=true; try{ sw('upload', document.getElementById('tab-upload')); }catch(e){} return; }
+      if(isPlatformOwner()){ window._onbRedir=true; try{ sw('schools', document.getElementById('tab-schools')); }catch(e){} return; }
+    }
+    if(window._ONBOARDING){ const el=document.getElementById('vw-pupil'); if(el) el.innerHTML='<div style="padding:2rem 1rem;color:var(--mu);font-size:.92rem">No pupils yet — '+(IS_ADMIN?'head to <b>⬆️ Upload</b> to add your first cohort.':'your administrator hasn\u2019t added any data yet.')+'</div>'; }
+    return;
+  }
   const pu=REG[x],ink=pu.intake,en=getEn(ink,x),data=getProg(ink,x),ctg=curTG(en);
   const pp=PER.filter(p=>data[p]),nP=pp.length;
   // hasGrades: true if ANY period has subject grades (not just the latest — Spring grades
@@ -6321,14 +6366,78 @@ function renderNet(){
 }
 
 function sw(v,btn){
+  if(window._ONBOARDING){
+    if(IS_ADMIN && v!=='upload' && v!=='admin' && v!=='schools'){ v='upload'; btn=document.getElementById('tab-upload'); }
+    else if(!IS_ADMIN && isPlatformOwner() && v!=='schools' && v!=='admin'){ v='schools'; btn=document.getElementById('tab-schools'); }
+  }
   if(v==='admin' && !IS_ADMIN) return;   // non-admins cannot open Admin
   if(v==='upload' && !IS_ADMIN) return;  // non-admins cannot open Upload
+  if(v==='schools' && !isPlatformOwner()) return;  // only the platform owner can create schools
   document.querySelectorAll('.vw').forEach(v2=>v2.classList.remove('on'));
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else rP();
 }
+
+
+// ===== PLATFORM OWNER: ADD SCHOOL (owner-only) =====
+// Renders the create-a-school form. The privileged work (creating the user, writing the locked
+// tables, seeding the key) happens server-side in the provision-school Edge Function — the browser
+// only ever sends a request with the owner's own token.
+function rSchools(){
+  if(!isPlatformOwner()){ return; }
+  const out=document.getElementById('schools-out'); if(!out) return;
+  const LBL='display:block;font-size:.78rem;font-weight:600;color:var(--tx);margin:.7rem 0 .25rem';
+  const INP='width:100%;font-family:inherit;font-size:.85rem;padding:.45rem .6rem;border:1px solid var(--bd);border-radius:7px;background:var(--sf2);color:var(--tx);box-sizing:border-box';
+  const BTN='font-family:inherit;font-size:.82rem;font-weight:600;padding:.55rem 1.1rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff)';
+  out.innerHTML='<div style="max-width:560px"><h2 style="margin:.2rem 0 .3rem">Add a school</h2>'
+    +'<div style="font-size:.82rem;color:var(--mu);margin-bottom:1rem">Creates the school, its first admin account, and a starter key — in one step. Only you can see this.</div>'
+    +'<div style="border:1px solid var(--bd);border-radius:10px;padding:1rem 1.1rem">'
+    +'<label style="'+LBL+'">School name</label>'
+    +'<input id="ns-name" oninput="window._nsSlugSuggest()" placeholder="Oakwood High School" style="'+INP+'">'
+    +'<label style="'+LBL+'">Slug — permanent id</label>'
+    +'<input id="ns-slug" oninput="this.dataset.touched=\'1\'" placeholder="oakwood-high" style="'+INP+'">'
+    +'<div style="font-size:.66rem;color:var(--mu);margin:.25rem 0 0">Lower-case letters, numbers and hyphens. Becomes their storage prefix; can\u2019t change later.</div>'
+    +'<label style="'+LBL+'">First admin \u2014 email</label>'
+    +'<input id="ns-email" type="email" placeholder="head@oakwood.sch.uk" style="'+INP+'">'
+    +'<label style="'+LBL+'">First admin \u2014 password</label>'
+    +'<input id="ns-pw" type="text" placeholder="at least 8 characters" style="'+INP+'">'
+    +'<div style="font-size:.66rem;color:var(--mu);margin:.25rem 0 1rem">They can change this after signing in.</div>'
+    +'<button id="ns-go" onclick="window._provisionSchool()" style="'+BTN+'">Create school</button>'
+    +'<div id="ns-msg" style="font-size:.8rem;margin-top:.8rem;min-height:1rem"></div>'
+    +'</div></div>';
+}
+window._nsSlugSuggest=function(){
+  const n=document.getElementById('ns-name'), s=document.getElementById('ns-slug');
+  if(!n||!s||s.dataset.touched) return;
+  s.value=n.value.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,63);
+};
+window._provisionSchool=async function(){
+  const msg=document.getElementById('ns-msg'), go=document.getElementById('ns-go');
+  const name=(document.getElementById('ns-name').value||'').trim();
+  const slug=(document.getElementById('ns-slug').value||'').trim().toLowerCase();
+  const email=(document.getElementById('ns-email').value||'').trim().toLowerCase();
+  const pw=document.getElementById('ns-pw').value||'';
+  const ERR='#c0392b', OK='#1a7f4b';
+  const set=(t,c)=>{ if(msg){ msg.innerHTML=t; msg.style.color=c||'var(--mu)'; } };
+  if(!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) return set('Slug must be lower-case letters, numbers and hyphens.',ERR);
+  if(!name) return set('Enter the school name.',ERR);
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return set('Enter a valid admin email.',ERR);
+  if(pw.length<8) return set('Password must be at least 8 characters.',ERR);
+  if(go) go.disabled=true; set('Creating '+_upEsc(name)+'\u2026');
+  try{
+    const r=await fetch(SB_URL+'/functions/v1/provision-school',
+      { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' },
+        body:JSON.stringify({ slug, display_name:name, admin_email:email, admin_password:pw }) });
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok || !j.ok){ if(go) go.disabled=false; return set('Could not create: '+_upEsc(j.error||('HTTP '+r.status)),ERR); }
+    const warn=(j.warnings&&j.warnings.length)?' (note: '+_upEsc(j.warnings.join('; '))+')':'';
+    set('\u2713 <b>'+_upEsc(name)+'</b> created. '+_upEsc(email)+' can sign in now'+warn+'.',OK);
+    ['ns-name','ns-slug','ns-email','ns-pw'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.value=''; delete el.dataset.touched; } });
+    if(go) go.disabled=false;
+  }catch(e){ if(go) go.disabled=false; set('Could not create: '+_upEsc(e&&e.message||String(e)),ERR); }
+};
 
 
 // ===== ADMIN UPLOAD PAGE (inserted) =====
@@ -6400,7 +6509,8 @@ function _upCsvCell(v){ v=String(v==null?'':v); return /[",\n\r]/.test(v)?'"'+v.
 
 function _upDetectRole(fname){
   const f=String(fname||'').toLowerCase(); let yg=null;
-  if(/year[_ ]?11|y11/.test(f)) yg=11; else if(/year[_ ]?10|y10/.test(f)) yg=10;
+  const ym=f.match(/(?:year[_ ]?|y)(1[0-3]|[7-9])(?![0-9])/);   // cohort year group 7–13 from the page's own canonical name
+  if(ym) yg=+ym[1];
   if(/in_year/.test(f))        return {role:'attendance', label:'Attendance', yg};
   if(/on_track_for/.test(f))   return {role:'grade_attain', label:'Grades (on-track)', yg};
   if(/effort/.test(f))         return {role:'grade_effort', label:'Grades (effort)', yg};
@@ -6459,6 +6569,8 @@ function _upCohorts(){
   // slots appear straight away (before the rebuild that folds it into the saved data).
   try{ if(_UP.roster && _UP.roster.byIntake)
         Object.keys(_UP.roster.byIntake).forEach(ik=>{ if(ik && ik!=='?' && !isNaN(+ik)) set[+ik]=true; }); }catch(e){}
+  // cohorts also persist via their stored roster file (sen_<intake>.csv), so they survive a refresh
+  try{ (_UP.serverFiles||[]).forEach(o=>{ const m=String(o.name||'').match(/^sen_(\d{4})\.csv$/i); if(m) set[+m[1]]=true; }); }catch(e){}
   return Object.keys(set).map(Number).sort((a,b)=>a-b).map(ik=>{
     const yg=7+(cay-ik), C=_UP.cohortCfg||{topYear:11,left:{}}, o=(C.left||{})[ik];
     const left=(o==='left')?true:(o==='active')?false:(yg>(C.topYear||11));
@@ -6725,6 +6837,7 @@ function rUpload(){
   if(!_UP.serverLoaded){ _upLoadColmaps(); _upLoadCohortCfg(); _upRefreshServer().then(()=>rUpload()); }
 
   if(_UP.tag){ return _upRenderTag(out); }
+  if(_UP.cohortPick){ return _upRenderCohortConfirm(out); }
   if(_UP.confirm){ return _upRenderConfirm(out); }
   if(_UP.del){ return _upRenderDelConfirm(out); }
 
@@ -6745,38 +6858,54 @@ function rUpload(){
       +(_UP.roster.fromData?' <span style="color:var(--mu)">— from your current data; upload a SEN export only to change the pupil list</span>':'')+'</div>' : '';
 
   const slots=_upChecklist();
-  const attention=slots.filter(s=>{ const st=_upSlotStatus(s); return st.tag==='missing'||st.stale; }).length;
+  const cohortSlots=slots.filter(s=>s.kind==='cohort');
+  const fsmSlot=slots.find(s=>s.kind==='combined');
+  const cohorts=_upCohorts().filter(c=>!c.left);
   let newest=null; (_UP.serverFiles||[]).forEach(o=>{ if(o.updated_at && (!newest||o.updated_at>newest)) newest=o.updated_at; });
 
-  const rows=slots.map(s=>{
-    const st=_upSlotStatus(s), locked=(s.kind!=='roster')&&!rosterReady, staged=_UP.staged[s.id];
-    return '<div style="display:flex;align-items:center;gap:.8rem;padding:.6rem .2rem;border-bottom:1px solid var(--bd);'+(locked?'opacity:.45':'')+'">'
-      +'<span style="width:10px;height:10px;border-radius:50%;background:'+st.col+';flex:0 0 auto"></span>'
-      +'<div style="flex:1"><div style="font-size:.85rem;font-weight:600;color:var(--tx)">'+_upEsc(s.title)+'</div>'
-        +'<div style="font-size:.68rem;color:var(--mu)">'+(s.hint?_upEsc(s.hint)+' · ':'')+st.label+' · '+s.lifecycle+'</div>'
-        +'<div style="font-size:.66rem;color:var(--mu);margin-top:.2rem;line-height:1.4">'+_upNeedsLine(_upSlotRole(s).role)+'</div>'
-        +(staged?'<div style="font-size:.7rem;color:var(--tx);margin-top:.15rem">📄 '+_upEsc(staged.name)+'</div>':'')
+  const stagedNames=(slotId)=>{ const pre=slotId+'|'; return Object.keys(_UP.staged).filter(k=>k===slotId||k.indexOf(pre)===0).map(k=>_UP.staged[k].name); };
+  const slotRow=(s,locked)=>{
+    const st=_upSlotStatus(s), sn=stagedNames(s.id);
+    return '<div style="display:flex;align-items:center;gap:.8rem;padding:.5rem .1rem;border-bottom:1px solid var(--bd);'+(locked?'opacity:.45':'')+'">'
+      +'<span style="width:9px;height:9px;border-radius:50%;background:'+st.col+';flex:0 0 auto"></span>'
+      +'<div style="flex:1"><div style="font-size:.82rem;font-weight:600;color:var(--tx)">'+_upEsc(s.title)+'</div>'
+        +'<div style="font-size:.66rem;color:var(--mu)">'+(s.hint?_upEsc(s.hint)+' · ':'')+st.label+' · '+s.lifecycle+'</div>'
+        +(sn.length?'<div style="font-size:.68rem;color:var(--tx);margin-top:.15rem">📄 '+sn.map(_upEsc).join(', ')+'</div>':'')
       +'</div>'
-      +(locked?'<span style="font-size:.7rem;color:var(--mu)">🔒 roster first</span>'
+      +(locked?'<span style="font-size:.7rem;color:var(--mu)">🔒</span>'
         :'<label style="font-size:.72rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:.3rem .6rem;cursor:pointer;background:var(--sf2)">Choose file'
           +'<input type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="window._upChoose(\''+s.id+'\',this)"></label>')
       +'</div>';
+  };
+  const rosterInput=(label)=>'<label style="font-family:inherit;font-size:.76rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:.35rem .7rem;cursor:pointer;background:var(--sf2);white-space:nowrap">'+label
+    +'<input type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="window._upChoose(\'sen\',this)"></label>';
+
+  const cohortCards=cohorts.map(c=>{
+    const cs=cohortSlots.filter(s=>s.cohort && s.cohort.intake===c.intake);
+    const n=(_UP.roster&&_UP.roster.byIntake&&_UP.roster.byIntake[c.intake])||'';
+    return '<div style="border:1px solid var(--bd);border-radius:10px;padding:.5rem .9rem;margin-top:.8rem">'
+      +'<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.1rem">'
+        +'<div style="flex:1;font-size:.9rem;font-weight:700;color:var(--tx)">'+c.intake+' intake <span style="font-weight:400;color:var(--mu)">· Year '+c.yg+(n?' · '+n+' pupils':'')+'</span></div>'
+        +rosterInput('Edit cohort')
+      +'</div>'+cs.map(s=>slotRow(s,false)).join('')+'</div>';
   }).join('');
 
-  const canRebuild=!noSchool && Object.keys(_UP.staged).length===0 && rosterReady;
+  const fsmHtml='<div style="border:1px solid var(--bd);border-radius:10px;padding:.4rem .9rem;margin-top:.8rem">'+slotRow(fsmSlot, !cohorts.length)+'</div>';
+
+  const canRebuild=!noSchool && Object.keys(_UP.staged).length===0 && cohorts.length>0;
+  const btn=(on)=>'font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;'+(on?'':'opacity:.5;cursor:not-allowed;');
   out.innerHTML='<div style="max-width:860px"><h2 style="margin:.2rem 0 .3rem">Upload data</h2>'
-    +'<div style="font-size:.82rem;color:var(--mu);margin-bottom:1rem">'+attention+' item'+(attention!==1?'s':'')+' need attention.'
-      +(newest?' Last updated on the server: '+_upAge(newest)+'.':'')+' Upload the roster first; the rest unlock once it\'s confirmed.</div>'
-    +banner+(rosterReady?'':'<div style="font-size:.78rem;color:var(--tx);margin-bottom:.4rem">Step 1 — choose your SEN-with-gender export to define this year\'s pupils.</div>')
-    +rosterSummary+'<div id="up-msg" style="font-size:.78rem;margin:.5rem 0;min-height:1rem"></div>'
-    +'<div style="border:1px solid var(--bd);border-radius:10px;padding:.4rem .9rem;margin-top:.4rem">'+rows+'</div>'
+    +'<div style="font-size:.82rem;color:var(--mu);margin-bottom:.6rem">Each cohort is added from its SEN &amp; gender roster; its data uploads then appear beneath it. The roster you upload is the cohort\'s full membership — anyone on it is on roll, anyone missing has left.'+(newest?' Last server update: '+_upAge(newest)+'.':'')+'</div>'
+    +banner
+    +'<div style="display:flex;align-items:center;gap:.7rem;margin:.7rem 0"><div style="flex:1;font-size:.82rem;color:var(--tx)">'+(cohorts.length?('<b>'+cohorts.length+'</b> cohort'+(cohorts.length!==1?'s':'')):'No cohorts yet — add your first to begin')+'</div>'+rosterInput('+ Add New Cohort')+'</div>'
+    +'<div id="up-msg" style="font-size:.78rem;margin:.4rem 0;min-height:1rem"></div>'
+    +cohortCards
+    +fsmHtml
     +_upCohortPanel()
-    +'<div style="display:flex;gap:.7rem;align-items:center;margin-top:1rem">'
-      +'<button onclick="window._upUploadAll()" '+(noSchool||!Object.keys(_UP.staged).length?'disabled':'')
-        +' style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff);'+((noSchool||!Object.keys(_UP.staged).length)?'opacity:.5;cursor:not-allowed':'')+'">Upload chosen files</button>'
-      +'<button onclick="window._upRebuild()" '+(canRebuild?'':'disabled')
-        +' style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx);'+(canRebuild?'':'opacity:.5;cursor:not-allowed')+'">Rebuild dashboard</button>'
-      +'<span style="font-size:.7rem;color:var(--mu)">Rebuild runs after your files are uploaded (~1 min, in the background).</span>'
+    +'<div style="display:flex;gap:.7rem;align-items:center;margin-top:1.2rem">'
+      +'<button onclick="window._upUploadAll()" '+(noSchool||!Object.keys(_UP.staged).length?'disabled':'')+' style="'+btn(!(noSchool||!Object.keys(_UP.staged).length))+'background:var(--tx);color:var(--bg,#fff)">Upload chosen files</button>'
+      +'<button onclick="window._upRebuild()" '+(canRebuild?'':'disabled')+' style="'+btn(canRebuild)+'background:var(--sf2);color:var(--tx)">Rebuild dashboard</button>'
+      +'<span style="font-size:.7rem;color:var(--mu)">Rebuild after your files are uploaded (~1 min, in the background).</span>'
     +'</div>'+_upStorePanel()+'</div>';
 }
 function _upMsg(html,ok){ const m=document.getElementById('up-msg'); if(m) m.innerHTML='<span style="color:'+(ok?'var(--green,#3b6d11)':'var(--red,#a32d2d)')+'">'+html+'</span>'; }
@@ -6881,7 +7010,8 @@ function _upStageRoster(slot, slotId, rows, map){
   const yearIdx=find(/year|^yr$|nc\s*year|year\s*group|^yg$/);
   const genIdx=find(/gender|sex/);
   if(enrolIdx<0){ _upMsg('Couldn\'t find the enrolment-number column in this roster file — it should have a column of pupil ID numbers (e.g. "Adno").'); return; }
-  if(yearIdx<0){ _upMsg('Couldn\'t find the Year column in this roster file (e.g. "Year 11").'); return; }
+  // Year column is NOT required — the Admin confirms the cohort's intake in the next step, and
+  // that assertion is authoritative. A Year column, if present, is only used to pre-fill the guess.
 
   // fold the enrolment number into the one "Name" field the engine reads
   const out=rows.map(r=>r.slice()); let combined=false;
@@ -6892,23 +7022,73 @@ function _upStageRoster(slot, slotId, rows, map){
     combined=true;
   }
   const readIdx=(nameColIdx>=0?nameColIdx:enrolIdx);
-  const ygOf=row=>{ const m=String(row[yearIdx]||'').match(/(\d{1,2})/); return m?parseInt(m[1],10):null; };
+  let nPupils=0; for(let r=1;r<out.length;r++){ if(_upPid(out[r][readIdx])) nPupils++; }
+  if(!nPupils){ _upMsg('No pupils with an enrolment number were found in this file.'); return; }
 
-  // one staged file per year group (sen_Y10.csv / sen_Y11.csv) — the engine splits SEN by filename
-  const years={};
-  for(let r=1;r<out.length;r++){ const yg=ygOf(out[r]); if(yg==null) continue; (years[yg]=years[yg]||[]).push(out[r]); }
-  if(!Object.keys(years).length){ _upMsg('No pupils with a readable year group were found in this file.'); return; }
-  Object.keys(years).forEach(yg=>{
-    const lines=[out[0].map(_upCsvCell).join(',')];
-    years[yg].forEach(row=>lines.push(row.map(_upCsvCell).join(',')));
-    const csv=lines.join('\n')+'\n', name=_upRoleFilename('sen', +yg);
-    const blob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name };
-    _UP.staged['sen|'+yg]={ file:blob, name };
-  });
-  _upAccumulateRoster(out, { Name:readIdx, Year:yearIdx, Gender:genIdx }, Object.keys(years).map(Number));
-  const ylabel=Object.keys(years).sort().map(y=>'Y'+y).join(', ');
-  _upMsg('Roster checked — '+_UP.roster.count+' pupils ('+ylabel+')'+(combined?', names captured':'')+'. The other slots are now unlocked.', true); rUpload();
+  // If the file happens to carry a Year column, use it only to PRE-FILL the suggested intake.
+  const seen={};
+  if(yearIdx>=0){ for(let r=1;r<out.length;r++){ if(!_upPid(out[r][readIdx])) continue;
+      const m=String(out[r][yearIdx]||'').match(/(\d{1,2})/); if(m){ const ik=_UP.cay-(parseInt(m[1],10)-7); seen[ik]=(seen[ik]||0)+1; } } }
+  const ikKeys=Object.keys(seen);
+  const suggested=ikKeys.length?+ikKeys.sort((a,b)=>seen[b]-seen[a])[0]:null;
+  const multiYG=ikKeys.length>1;
+
+  // hand off to the confirm-the-intake step; nothing is staged until the Admin confirms
+  _UP.cohortPick={ out, readIdx, genIdx, count:nPupils, suggested, multiYG, combined };
+  _upMsg(''); rUpload();
 }
+
+// One cohort = one intake, asserted by the Admin. Accumulates cohorts (replacing this one) and
+// rebuilds the page roster — keyed by intake, with no reliance on a Year column anywhere.
+function _upAccumulateCohort(rows, iName, iGen, intake){
+  _UP.rosterCohorts=_UP.rosterCohorts||{};
+  const b={ pupils:new Set(), genders:{} };
+  for(let r=1;r<rows.length;r++){ const pid=_upPid(rows[r][iName]); if(!pid) continue; b.pupils.add(pid);
+    const g=(iGen>=0?String(rows[r][iGen]||'').trim():'')||'?'; b.genders[g]=(b.genders[g]||0)+1; }
+  _UP.rosterCohorts[intake]=b;
+  const pupils=new Set(), byIntake={}, byGender={};
+  Object.keys(_UP.rosterCohorts).forEach(ik=>{ const c=_UP.rosterCohorts[ik];
+    c.pupils.forEach(p=>pupils.add(p)); byIntake[ik]=(byIntake[ik]||0)+c.pupils.size;
+    Object.entries(c.genders).forEach(([g,n])=>{ byGender[g]=(byGender[g]||0)+n; }); });
+  _UP.roster={ pupils, count:pupils.size, byIntake, byGender };
+}
+
+function _upRenderCohortConfirm(out){
+  const p=_UP.cohortPick; if(!p){ rUpload(); return; }
+  let opts='';
+  for(let yg=7; yg<=13; yg++){ const ik=_UP.cay-(yg-7); const sel=((p.suggested!=null)?(ik===p.suggested):(yg===11))?' selected':'';
+    opts+='<option value="'+ik+'"'+sel+'>'+ik+' intake — Year '+yg+' this year</option>'; }
+  out.innerHTML='<div style="max-width:560px"><h2 style="margin:.2rem 0 .6rem">Add cohort</h2>'
+    +'<div style="border:1px solid var(--bd);border-radius:10px;padding:1rem 1.1rem">'
+    +'<div style="font-size:.9rem;color:var(--tx);margin-bottom:.3rem"><b>'+p.count+'</b> pupils found in this roster'+(p.combined?' (names captured)':'')+'.</div>'
+    +((p.suggested!=null)
+        ?'<div style="font-size:.78rem;color:var(--mu);margin-bottom:.8rem">This looks like the <b>'+p.suggested+' intake</b> — Year '+(7+(_UP.cay-p.suggested))+' this year. Confirm it, or change it below.</div>'
+        :'<div style="font-size:.78rem;color:var(--mu);margin-bottom:.8rem">Choose the intake this cohort belongs to. It never changes as they move up the school, so it stays fixed from here — and everything else attaches to it by enrolment number.</div>')
+    +(p.multiYG?'<div style="font-size:.76rem;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:7px;padding:.5rem .7rem;margin-bottom:.8rem">This file seems to contain more than one year group. A cohort is a single intake — if these are different cohorts, cancel and add them one at a time.</div>':'')
+    +'<label style="font-size:.8rem;font-weight:600;color:var(--tx);display:block;margin-bottom:.3rem">Intake year for this cohort</label>'
+    +'<select id="up-intake-pick" style="font-family:inherit;font-size:.85rem;padding:.45rem .6rem;border:1px solid var(--bd);border-radius:7px;background:var(--sf2);color:var(--tx);width:100%;margin-bottom:1rem">'+opts+'</select>'
+    +'<div style="display:flex;gap:.7rem">'
+      +'<button onclick="window._upCohortConfirm()" style="font-family:inherit;font-size:.82rem;font-weight:600;padding:.5rem 1rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff)">Add cohort</button>'
+      +'<button onclick="window._upCohortCancel()" style="font-family:inherit;font-size:.82rem;font-weight:600;padding:.5rem 1rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx)">Cancel</button>'
+    +'</div></div></div>';
+}
+
+window._upCohortConfirm=function(){
+  const p=_UP.cohortPick; if(!p) return;
+  const sel=document.getElementById('up-intake-pick'); const intake=sel?parseInt(sel.value,10):p.suggested;
+  if(!intake){ _upMsg('Please choose an intake year.'); return; }
+  const lines=[p.out[0].map(_upCsvCell).join(',')];
+  for(let r=1;r<p.out.length;r++){ if(_upPid(p.out[r][p.readIdx])) lines.push(p.out[r].map(_upCsvCell).join(',')); }
+  const csv=lines.join('\n')+'\n', name='sen_'+intake+'.csv';
+  const blob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name };
+  _UP.staged['sen|'+intake]={ file:blob, name };          // replaces any prior staged roster for this cohort
+  _upAccumulateCohort(p.out, p.readIdx, p.genIdx, intake);
+  const yg=7+(_UP.cay-intake);
+  _UP.cohortPick=null;
+  _upMsg('Cohort ready — '+intake+' intake (Year '+yg+'), '+p.count+' pupils. Its upload slots are below; choose files, then Upload.', true);
+  rUpload();
+};
+window._upCohortCancel=function(){ _UP.cohortPick=null; _upMsg(''); rUpload(); };
 // accumulate the roster across per-year uploads; re-uploading a year replaces just that year's pupils
 function _upAccumulateRoster(rows, map, yearsInFile){
   const iName=map['Name'], iYear=(map['Year']!=null?map['Year']:-1), iGen=(map['Gender']!=null?map['Gender']:-1);
