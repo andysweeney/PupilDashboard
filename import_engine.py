@@ -14,7 +14,7 @@ Enrichment steps (added May 2026):
 """
 
 import pandas as pd
-import json, re, os, glob
+import json, re, os, glob, csv
 from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -416,6 +416,49 @@ if unknown_marks:
 # in the Name. Year-group is derived from intake; TG has its year prefix stripped.
 print("Building pupil registry...")
 
+# ── PUPIL LEDGER ── persistent last-known characteristics for every pupil ever seen
+# on a roster, so leavers keep their name/gender/cohort/SEN/FSM after they drop off.
+# The current roster always wins; the ledger only fills pupils it no longer contains,
+# so it can never alter a current pupil.
+LEDGER_PATH = os.environ.get('LEDGER_PATH', '/home/claude/pupil_ledger.csv')
+
+def _load_ledger(path):
+    out = {}
+    if not os.path.exists(path):
+        return out
+    try:
+        with open(path, newline='', encoding='utf-8-sig') as _f:
+            for _row in csv.DictReader(_f):
+                _p = (_row.get('Pupil') or '').strip()
+                if not _p:
+                    continue
+                _iv = (_row.get('Intake') or '').strip()
+                try: _ik = int(_iv) if _iv else None
+                except (ValueError, TypeError): _ik = None
+                _g = (_row.get('Gender') or 'U').strip().upper()[:1]
+                out[_p] = {'name': (_row.get('Name') or '').strip(),
+                           'gender': _g if _g in ('M', 'F') else 'U',
+                           'intake': _ik,
+                           'sen': (_row.get('SEN') or '').strip(),
+                           'fsm': (_row.get('FSM') or 'N').strip().upper()[:1]}
+    except Exception as _e:
+        print(f"Ledger: could not read {path} ({_e}); treating as empty")
+    return out
+
+def _write_ledger(path, ledger):
+    try:
+        with open(path, 'w', newline='', encoding='utf-8') as _f:
+            _w = csv.writer(_f)
+            _w.writerow(['Pupil', 'Name', 'Gender', 'Intake', 'SEN', 'FSM'])
+            for _p in sorted(ledger):
+                _L = ledger[_p]
+                _w.writerow([_p, _L.get('name', ''), _L.get('gender', 'U'),
+                             ('' if _L.get('intake') is None else int(_L['intake'])),
+                             _L.get('sen', ''), _L.get('fsm', 'N')])
+        print(f"Ledger: wrote {len(ledger)} pupils -> {path}")
+    except Exception as _e:
+        print(f"Ledger: could not write {path} ({_e})")
+
 # Roster: pid -> {intake, gender, name}. Produced by the staging step (derive_roster) as Roster.csv.
 roster_map = {}
 _roster_path = f'{UP}/Roster.csv'
@@ -432,6 +475,22 @@ if os.path.exists(_roster_path):
     print(f"Roster: {len(roster_map)} pupils (authoritative cohort source)")
 else:
     print("Roster: none found — falling back to cohort tags in pupil names")
+
+# Merge the ledger: current roster wins; the ledger supplies only pupils no longer on it.
+_ledger = _load_ledger(LEDGER_PATH)
+_CURRENT_ROSTER = set(roster_map.keys())
+# Pupils with actual data still in the store (attendance is the universal existence seed).
+# A ledger pupil whose data has been deleted drops out of this set, which gates both the
+# leaver-restore below and the ledger prune at the end — so wiping a cohort forgets them
+# instead of re-injecting them as empty 'ghost' records.
+_att_pids = set(att_all['pid'].dropna().astype(str).unique())
+_merged = 0
+for _p, _L in _ledger.items():
+    if _p not in roster_map and _L.get('intake') is not None and _p in _att_pids:
+        roster_map[_p] = {'intake': _L['intake'], 'gender': _L.get('gender', 'U'),
+                          'name': _L.get('name') or str(_p)}
+        _merged += 1
+print(f"Ledger: {len(_ledger)} known pupils, {_merged} leavers restored to roster")
 
 # Gender — authoritative from the roster, with any SEN 'Gender' column as a fallback.
 gender_map = {p: r['gender'] for p, r in roster_map.items() if r.get('gender') in ('M', 'F')}
@@ -471,6 +530,13 @@ for _, row in fsm_y10.iterrows():
     if p in registry and row.get('Eligible for free meals') == 'T':
         fsm_set.add(p)
 
+# Leaver FSM: keep last-known FSM for pupils no longer on the roster. Current pupils
+# already reflect the latest list above (including coming OFF free meals), so this
+# only ever adds leavers — it cannot change a current pupil's status.
+for _p, _L in _ledger.items():
+    if _p in registry and _p not in _CURRENT_ROSTER and _L.get('fsm') == 'Y':
+        fsm_set.add(_p)
+
 sen_map = {}
 for df_sen, col_pref in [(sen_y10, 'SEN Status Code'), (sen_y11, 'SEN Status')]:
     col = col_pref if col_pref in df_sen.columns else ('SEN Status Code' if 'SEN Status Code' in df_sen.columns else 'SEN Status')
@@ -480,9 +546,32 @@ for df_sen, col_pref in [(sen_y10, 'SEN Status Code'), (sen_y11, 'SEN Status')]:
         if pd.notna(status) and str(status).strip():
             sen_map[p] = str(status).strip()
 
+# Leaver SEN: keep last-known SEN status for pupils no longer on the roster.
+for _p, _L in _ledger.items():
+    if _p not in _CURRENT_ROSTER and _p in _att_pids and _L.get('sen') and _p not in sen_map:
+        sen_map[_p] = _L['sen']
+
 ehcp_set = {p for p, s in sen_map.items() if s == 'E'}
 send_set = set(sen_map.keys())
 print(f"FSM: {len(fsm_set)}, SEND: {len(send_set)}, EHCP: {len(ehcp_set)}")
+
+# Refresh the ledger from this run's current pupils (leaver rows are left untouched),
+# then persist it so the next rebuild can restore anyone who has since left.
+for _p in _CURRENT_ROSTER:
+    _r = roster_map.get(_p)
+    if not _r:
+        continue
+    _ledger[_p] = {'name': _r.get('name') or str(_p), 'gender': _r.get('gender', 'U'),
+                   'intake': _r.get('intake'), 'sen': sen_map.get(_p, ''),
+                   'fsm': 'Y' if _p in fsm_set else 'N'}
+# Prune anyone the store no longer holds data for and who isn't on the current roll, so a
+# deleted cohort's identity rows don't linger (and can't be re-injected next rebuild).
+_pruned = [_p for _p in list(_ledger) if _p not in _CURRENT_ROSTER and _p not in _att_pids]
+for _p in _pruned:
+    del _ledger[_p]
+if _pruned:
+    print(f"Ledger: pruned {len(_pruned)} pupils with no remaining data in the store")
+_write_ledger(LEDGER_PATH, _ledger)
 
 # ── BUILD TIMETABLES (per academic year) ──
 # A pupil's timetable differs each year, so timetables are nested by AY (start year):
