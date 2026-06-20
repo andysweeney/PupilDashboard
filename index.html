@@ -431,17 +431,27 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     if(!resp.ok)throw new Error('Failed to load data: '+resp.status);
     DD=await resp.json();
     // admin "data-key" settings are resolved later from the admin-owned store, not here.
-    // ── Pupil display names ───────────────────────────────────────────────
+    // Cohort settings: the top year-group the school teaches (cohorts past it have LEFT),
+    // plus any manual per-intake 'left'/'active' overrides. Default top year = 11.
+    let COHORT_CFG={topYear:11,left:{}};
+    try{ const _cv=await sbGet('cohort_settings'); if(_cv&&typeof _cv==='object') COHORT_CFG={topYear:(parseInt(_cv.topYear,10)||11), left:(_cv.left||{})}; }catch(e){}
+    window.COHORT_CFG=COHORT_CFG;
+    // ── Pupil display names + leaver state ────────────────────────────────
     // The enrolment number is the join key on every file and stays the pupil's
     // internal id (the registry key / .index). For DISPLAY we show the name the
     // roster carries: strip the leading enrolment number and trailing cohort tag
     // off the label. When no name is present (e.g. pseudonymised data) the label
     // is left exactly as it was, so nothing regresses. Idempotent on re-runs.
+    // We also set .left here so a cohort past the top year reads as LEFT everywhere
+    // (the display for that was already built, just never switched on).
     (function(){ const reg=(DD&&DD.registry)||{};
+      const cay=(DD.config&&DD.config.current_acad_year)||new Date().getFullYear();
       for(const k in reg){ const r=reg[k]; if(!r) continue;
         const raw=String(r.id==null?'':r.id); const m=raw.match(/^\s*0*(\d+)/); if(m) r.enr=m[1];
         const nm=raw.replace(/^\s*\d+\s*/,'').replace(/\s*\([^)]*\)\s*$/,'').trim();
-        if(nm) r.id=nm; }
+        if(nm) r.id=nm;
+        if(r.intake!=null){ const o=COHORT_CFG.left[r.intake];
+          r.left=(o==='left')?true:(o==='active')?false:((cay-r.intake+7)>COHORT_CFG.topYear); } }
     })();
   }catch(e){
     document.body.innerHTML='<div style="color:var(--red);padding:2rem;font-family:sans-serif"><b>Error loading data</b><br>'+e.message+'<br><br>If you are signed in and still see this, check that data.json exists in the Supabase bucket "'+DATA_BUCKET+'" and that its read policy allows authenticated users.</div>';
@@ -1257,6 +1267,11 @@ const _c={};function dc(i){if(_c[i])try{_c[i].destroy()}catch(e){}_c[i]=null}fun
 
 function ygAt(ink,ay){return ay-ink+7}
 function curYG(ink){return ygAt(ink,CAY)}
+// A cohort has LEFT once its current year-group passes the school's top year,
+// unless an admin override forces it. Top year + overrides come from cohort_settings.
+function _cohortTopYear(){return (window.COHORT_CFG&&window.COHORT_CFG.topYear)||11;}
+function _cohortLeft(ink){ const C=window.COHORT_CFG||{topYear:11,left:{}}; const o=(C.left||{})[ink];
+  return (o==='left')?true:(o==='active')?false:(curYG(ink)>(C.topYear||11)); }
 function atSchool(ink){return curYG(ink)<=11}
 function inkKey(ink){return'I'+ink}
 
@@ -2978,7 +2993,8 @@ function rP(){
   if(lt.ehcp&&!SEN_STATUS[String(x)])fl.push('<span class="fb2" style="background:#a78bfa18;border:1px solid #a78bfa44;color:var(--lilac)">EHCP</span>');
   if(lt.fsm)fl.push('<span class="fb2" style="background:#6488ff18;border:1px solid #6488ff44;color:var(--blue)">FSM</span>');
   const leftTag=pu.left?'<span class="left-tag">LEFT SCHOOL</span>':'';
-  const cYG=pu.left?`was Y11 in ${ink+4}-${ink+5}`:`Y${curYG(ink)}`;
+  const _ty=_cohortTopYear();
+  const cYG=pu.left?`was Y${_ty} in ${ink+(_ty-7)}-${ink+(_ty-7)+1}`:`Y${curYG(ink)}`;
   const drp=SUBS.filter(s=>sDrop(en,s)).map(s=>`<span style="font-size:.62rem;padding:.08rem .3rem;border-radius:3px;background:rgba(181,72,59,.08);border:1px solid rgba(181,72,59,.25);color:var(--bel)">${s} dropped</span>`).join(' ');
   const tL=!isA?(()=>{const c=clAt(en,sf,lp);if(!c)return'';const allCls=en.filter(r=>r.t==='cls'&&r.s===sf).sort((a,b)=>a.f.localeCompare(b.f));const prevTeachers=[...new Set(allCls.map(r=>r.tc))].filter(t=>t!==c.tc);const prevStr=prevTeachers.length?` <span style="font-size:.7rem;color:var(--mu)">(prev: ${prevTeachers.join(', ')})</span>`:'';const ct=classTeachers(ink,x,sf,c.c);const teacherDisplay=ct.isMulti?ct.label:c.tc;return`<span style="font-size:.78rem;color:var(--mu)">taught by <b style="color:var(--tx)">${teacherDisplay}</b> (Class ${c.c})${prevStr}</span>`})():'';
 
@@ -4187,7 +4203,7 @@ function rCmp(){
         sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
         nCodes,nOnCalls,nDetentions,ytdAtt,
         status:ay+1<=CAY?'complete':(ay===CAY?'current':'future'),
-        left:curYG(ink)>11});
+        left:_cohortLeft(ink)});
     }
   }
 
@@ -6341,6 +6357,29 @@ const _UP_ROLE_FIELDS = {
   grade_attain:  [['Name',1],['Basic details',1],['Result',1]],
 };
 
+// What each export must CONTAIN, described by the data — not header names, which vary
+// between SIMS setups. 'req' = output won't build / will be empty without it. 'deg' =
+// builds, but a specific analysis is lost — the consequence is shown so it's an honest choice.
+const _UP_ROLE_NEEDS = {
+  sen:           { req:['each pupil\u2019s enrolment number','each pupil\u2019s name','their year group'],
+                   deg:[['gender','gender comparisons stop working — everyone reads as unknown'],['SEN status','SEN flags & filtering are empty']] },
+  attendance:    { req:['the pupil\u2019s enrolment number','the date of each session','the attendance mark/code','the day & period of each session'],
+                   deg:[['the registration / tutor group','tutor-group labels & grouping disappear across the dashboard'],['subject','no attendance breakdown by subject'],['teacher','no teacher-level attendance']] },
+  behave_current:{ req:['the pupil\u2019s enrolment number','the date','what the behaviour incident was'],
+                   deg:[['subject','no behaviour breakdown by subject'],['the lesson day & period','no behaviour breakdown by period'],['teacher','no teacher-level behaviour']] },
+  detention:     { req:['the pupil\u2019s enrolment number','the date of the detention','the type of detention'], deg:[] },
+  housepoints:   { req:['the pupil\u2019s enrolment number'], deg:[['the date it was awarded','points still count, but no trend over time']] },
+  fsm:           { req:['the enrolment number of each pupil on free school meals'], deg:[] },
+  grade_attain:  { req:['the pupil\u2019s enrolment number','the subject or assessment','the grade / result'], deg:[] },
+};
+function _upNeedsLine(role){
+  const n=_UP_ROLE_NEEDS[role]; if(!n) return '';
+  let s='<b style="font-weight:600">Must contain:</b> '+n.req.join(', ');
+  if(n.deg&&n.deg.length) s+='<br><span style="opacity:.85"><b style="font-weight:600">Reduced without:</b> '
+    +n.deg.map(d=>d[0]+' <span style="opacity:.75">('+d[1]+')</span>').join(', ')+'</span>';
+  return s;
+}
+
 const _UP = {
   // which school: taken from the signed-in account's token (the source of truth),
   // with the subdomain as a later fallback for branding. Live getter so it's always current.
@@ -6351,6 +6390,7 @@ const _UP = {
   serverFiles: null,   // [{name, updated_at}] from a server refresh (null = not loaded)
   serverLoaded: false,
   colmaps: null,       // remembered { role: { signature: fieldMap } } from app_settings
+  cohortCfg: null,     // { topYear, left:{intake:'left'|'active'} } from app_settings
   tag: null,           // active column-tagging task
 };
 
@@ -6419,8 +6459,10 @@ function _upCohorts(){
   // slots appear straight away (before the rebuild that folds it into the saved data).
   try{ if(_UP.roster && _UP.roster.byIntake)
         Object.keys(_UP.roster.byIntake).forEach(ik=>{ if(ik && ik!=='?' && !isNaN(+ik)) set[+ik]=true; }); }catch(e){}
-  return Object.keys(set).map(Number).sort((a,b)=>a-b).map(ik=>({
-    intake:ik, yg:7+(cay-ik), label:'Year '+(7+(cay-ik))+' (intake '+ik+')' }));
+  return Object.keys(set).map(Number).sort((a,b)=>a-b).map(ik=>{
+    const yg=7+(cay-ik), C=_UP.cohortCfg||{topYear:11,left:{}}, o=(C.left||{})[ik];
+    const left=(o==='left')?true:(o==='active')?false:(yg>(C.topYear||11));
+    return { intake:ik, yg, left, label: ik+' intake · '+(left?'left':'Year '+yg) }; });
 }
 function _upSlotRole(slot){
   if(slot.kind==='roster')   return {role:'sen', yg:null};
@@ -6436,6 +6478,101 @@ function _upRoleFilename(role,yg){
   return tag+(yg?('_Y'+yg):'')+'.csv';
 }
 function _upSlotStoreName(slot){ const r=_upSlotRole(slot); return _upRoleFilename(r.role, r.yg); }
+
+// ── Per-academic-year bucketing for dated event files ──
+// Dated exports (attendance, behaviour, detentions, house points) are split by the
+// academic year of each row's date and stored one file per year, the name carrying an
+// _ay{startYYYY} suffix on top of the role + cohort keywords. So a cohort's several
+// per-year files COEXIST in the store instead of overwriting (the staging step already
+// concatenates all of a cohort's files and the engine re-buckets by date), while
+// re-uploading the same year cleanly overwrites just that year.
+function _upRoleFilenameAY(role,yg,ay){ return _upRoleFilename(role,yg).replace(/\.csv$/, '_ay'+ay+'.csv'); }
+function _upIsDatedRole(role){ return role==='attendance'||role==='behave_current'||role==='detention'||role==='housepoints'; }
+const _UP_MONTHS={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+function _upParseDate(s){
+  s=String(s==null?'':s).trim(); if(!s) return null; let m;
+  if(m=s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/)){ let d=+m[1],mo=+m[2],y=+m[3]; if(y<100)y+=2000; if(mo>=1&&mo<=12&&d>=1&&d<=31)return{y,m:mo,d}; }
+  if(m=s.match(/^(\d{1,2})[\/.\- ]([A-Za-z]{3,})[\/.\- ](\d{2,4})$/)){ let d=+m[1],mo=_UP_MONTHS[m[2].slice(0,3).toLowerCase()],y=+m[3]; if(y<100)y+=2000; if(mo&&d>=1&&d<=31)return{y,m:mo,d}; }
+  if(m=s.match(/^(\d{4})[\/.\-](\d{1,2})[\/.\-](\d{1,2})$/)){ let y=+m[1],mo=+m[2],d=+m[3]; if(mo>=1&&mo<=12&&d>=1&&d<=31)return{y,m:mo,d}; }
+  return null;
+}
+function _upAYStart(dt){ return dt.m>=9?dt.y:dt.y-1; }   // UK Sept–Aug, labelled by start year
+// any staged entry for this slot? (handles the multi-file slots: sen|10, attend_x|ay2024…)
+function _upHasStaged(slotId){
+  if(_UP.staged[slotId]) return true;
+  const pre=slotId+'|'; return Object.keys(_UP.staged).some(k=>k.indexOf(pre)===0);
+}
+// Split a dated file into one staged file per academic year. Header is identical in each.
+function _upStageByAY(slotId, role, yg, header, dataRows, slotTitle){
+  const pre=slotId+'|'; Object.keys(_UP.staged).forEach(k=>{ if(k===slotId||k.indexOf(pre)===0) delete _UP.staged[k]; });
+  const N=Math.min(dataRows.length,60);
+  const rateOf=i=>{ let ok=0,tot=0; for(let r=0;r<N;r++){ const v=dataRows[r][i]; if(v==null||String(v).trim()==='')continue; tot++; if(_upParseDate(v))ok++; } return tot?ok/tot:0; };
+  let dateIdx=-1, bestRate=0;
+  for(let i=0;i<header.length;i++){ if(/date/i.test(String(header[i]))){ const rt=rateOf(i); if(rt>=0.6){ dateIdx=i; bestRate=rt; break; } } }
+  if(dateIdx<0){ for(let i=0;i<header.length;i++){ const rt=rateOf(i); if(rt>bestRate){ bestRate=rt; dateIdx=i; } } }
+  const mkBlob=(name,rowsArr)=>{ const lines=[header.map(_upCsvCell).join(',')]; rowsArr.forEach(row=>lines.push(row.map(_upCsvCell).join(','))); const csv=lines.join('\n')+'\n'; return (typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{_text:csv,name}; };
+  if(dateIdx<0 || bestRate<0.6){   // no usable date column: store as one file so nothing is lost
+    const name=_upRoleFilename(role,yg); _UP.staged[slotId]={file:mkBlob(name,dataRows),name};
+    _upMsg('Checked and ready: '+dataRows.length+' rows for '+_upEsc(slotTitle)+' (no date column found — stored as one file).', true); return;
+  }
+  const groups={};
+  dataRows.forEach(row=>{ const dt=_upParseDate(row[dateIdx]); const ay=dt?_upAYStart(dt):'na'; (groups[ay]=groups[ay]||[]).push(row); });
+  Object.keys(groups).forEach(ay=>{
+    const name=(ay==='na')?_upRoleFilename(role,yg).replace(/\.csv$/,'_ayna.csv'):_upRoleFilenameAY(role,yg,ay);
+    const group=groups[ay];
+    if(_upIsMergeRole(role) && ay!=='na'){            // behaviour/detentions/house points: time-window merge at upload
+      let lo=Infinity, hi=-Infinity;
+      group.forEach(row=>{ const k=_upDateKey(row[dateIdx]); if(k!=null){ if(k<lo)lo=k; if(k>hi)hi=k; } });
+      _UP.staged[slotId+'|ay'+ay]={ name, file:mkBlob(name,group),
+        merge:{ header:header.slice(), rows:group, dateColName:String(header[dateIdx]), lo, hi } };
+    } else {                                          // attendance (replace per AY) + any 'na' bucket
+      _UP.staged[slotId+'|ay'+ay]={ file:mkBlob(name,group), name };
+    }
+  });
+  const yrs=Object.keys(groups).filter(k=>k!=='na').map(Number).sort((a,b)=>a-b);
+  const span=yrs.length?(yrs.length>1?(yrs.length+' academic years ('+yrs.map(y=>y+'/'+String(y+1).slice(2)).join(', ')+')'):(yrs[0]+'/'+String(yrs[0]+1).slice(2))):'';
+  _upMsg('Checked and ready: '+dataRows.length+' rows for '+_upEsc(slotTitle)+(span?' — '+span:'')+'.', true);
+}
+function _upBlob(csv,name){ return (typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{_text:csv,name}; }
+function _upIsMergeRole(role){ return role==='behave_current'||role==='detention'||role==='housepoints'; }
+function _upDateKey(s){ const d=_upParseDate(s); return d?(d.y*10000+d.m*100+d.d):null; }
+// Pure time-window merge: keep stored rows whose date is OUTSIDE [lo,hi], then append the new
+// rows. Columns align by header name (new header first, any stored-only columns appended), so a
+// prior upload with a different layout loses nothing. Stored rows with no readable date are kept.
+function _upWindowMerge(storedText, header, newRows, dateColName, lo, hi){
+  const norm=s=>String(s).trim().toLowerCase();
+  let sRows=null; try{ sRows=_upParseCSV(storedText); }catch(e){ sRows=null; }
+  if(!sRows || !sRows.length){
+    const out=[header.map(_upCsvCell).join(',')]; newRows.forEach(r=>out.push(r.map(_upCsvCell).join(','))); return out.join('\n')+'\n';
+  }
+  const sHeader=sRows[0].map(h=>String(h));
+  const merged=header.slice(), pos={}; merged.forEach((h,i)=>pos[norm(h)]=i);
+  sHeader.forEach(h=>{ if(pos[norm(h)]==null){ pos[norm(h)]=merged.length; merged.push(h); } });
+  let sDateIdx=sHeader.findIndex(h=>norm(h)===norm(dateColName));
+  if(sDateIdx<0){ let best=-1,br=0; const N=Math.min(sRows.length,60);
+    for(let i=0;i<sHeader.length;i++){ let ok=0,t=0; for(let r=1;r<N;r++){ const v=sRows[r][i]; if(v==null||String(v).trim()==='')continue; t++; if(_upParseDate(v))ok++; } const rt=t?ok/t:0; if(rt>br){br=rt;best=i;} }
+    sDateIdx=(br>=0.6)?best:-1; }
+  const mapRow=(row,hdr)=>{ const out=new Array(merged.length).fill(''); hdr.forEach((h,i)=>{ out[pos[norm(h)]]=row[i]; }); return out; };
+  const out=[merged.map(_upCsvCell).join(',')];
+  for(let r=1;r<sRows.length;r++){ const k=(sDateIdx>=0)?_upDateKey(sRows[r][sDateIdx]):null; if(k!=null && k>=lo && k<=hi) continue; out.push(mapRow(sRows[r],sHeader).map(_upCsvCell).join(',')); }
+  newRows.forEach(r=>out.push(mapRow(r,header).map(_upCsvCell).join(',')));
+  return out.join('\n')+'\n';
+}
+// Read-modify-write at upload time. Fetch the stored file, window-merge, return the blob to PUT.
+// "File absent" (404/400) → write the new rows. "Couldn't read" (any other status) → throw, so
+// we NEVER blind-overwrite and lose the stored history on a transient/permission error.
+async function _upMergeWithStored(it){
+  const path=_UP.schoolId+'/uploads/raw/'+it.name;
+  let storedText=null, status=0;
+  try{ const r=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+encodeURI(path),
+        { headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken() } });
+    status=r.status; if(r.ok) storedText=await r.text();
+  }catch(e){ status=-1; }
+  if(storedText==null && status!==404 && status!==400)
+    throw new Error('could not read existing '+it.name+' (HTTP '+status+') — not overwriting');
+  const m=it.merge;
+  return _upBlob(_upWindowMerge(storedText||'', m.header, m.rows, m.dateColName, m.lo, m.hi), it.name);
+}
 
 // Risk 2: classify a column by what its VALUES look like, not its header.
 function _upColType(vals){
@@ -6482,6 +6619,7 @@ function _upChecklist(){
   const slots=[{ id:'sen', kind:'roster', title:'Pupil roster — SEN & gender export',
                  hint:'Upload this first. Defines every pupil, year group and gender.', lifecycle:'replace-latest' }];
   _upCohorts().forEach(c=>{
+    if(c.left) return;   // left cohorts keep their history but take no new uploads
     slots.push({ id:'attend_'+c.intake, kind:'cohort', cohort:c, title:'Attendance — '+c.label, lifecycle:'per-term' });
     slots.push({ id:'behave_'+c.intake, kind:'cohort', cohort:c, title:'Behaviour — '+c.label, lifecycle:'per-term' });
     slots.push({ id:'detention_'+c.intake, kind:'cohort', cohort:c, title:'Detentions — '+c.label, lifecycle:'per-term' });
@@ -6520,9 +6658,9 @@ function _upServerFor(slot){
   return _UP.serverFiles.find(o=>_upStagedMatchesSlot(o.name, slot)) || null;
 }
 function _upSlotStatus(slot){
-  if(slot.kind==='roster' && _UP.roster && _UP.roster.fromData && !_UP.staged[slot.id])
+  if(slot.kind==='roster' && _UP.roster && _UP.roster.fromData && !_upHasStaged(slot.id))
     return {tag:'loaded', label:'from current data', col:'var(--green,#3b6d11)'};
-  if(_UP.staged[slot.id]) return {tag:'staged', label:'ready to upload', col:'var(--amber,#b8860b)'};
+  if(_upHasStaged(slot.id)) return {tag:'staged', label:'ready to upload', col:'var(--amber,#b8860b)'};
   const sv=_upServerFor(slot);
   if(sv){
     const age=_upAge(sv.updated_at);
@@ -6543,7 +6681,7 @@ async function _upRefreshServer(){
       { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' }, body:JSON.stringify(body) });
     if(!r.ok) throw new Error('HTTP '+r.status);
     const rows=await r.json();
-    _UP.serverFiles=(rows||[]).filter(o=>o&&o.id&&o.name).map(o=>({name:o.name, updated_at:(o.updated_at||(o.metadata&&o.metadata.lastModified)||null)}));
+    _UP.serverFiles=(rows||[]).filter(o=>o&&o.id&&o.name).map(o=>({name:o.name, updated_at:(o.updated_at||(o.metadata&&o.metadata.lastModified)||null), size:(o.metadata&&o.metadata.size)||null}));
   }catch(e){ _UP.serverFiles=[]; }
 }
 
@@ -6553,14 +6691,42 @@ async function _upLoadColmaps(){
   _UP.colmaps={};
   try{ if(typeof sbGet==='function' && _UP.schoolId){ const v=await sbGet('upload_colmaps'); if(v&&typeof v==='object') _UP.colmaps=v; } }catch(e){}
 }
+async function _upLoadCohortCfg(){
+  if(_UP.cohortCfg) return;
+  _UP.cohortCfg={ topYear:11, left:{} };
+  try{ if(typeof sbGet==='function'){ const v=await sbGet('cohort_settings'); if(v&&typeof v==='object') _UP.cohortCfg={ topYear:(parseInt(v.topYear,10)||11), left:(v.left||{}) }; } }catch(e){}
+}
+async function _upSaveCohortCfg(){ try{ if(typeof sbSet==='function' && _UP.schoolId) await sbSet('cohort_settings', _UP.cohortCfg); }catch(e){} }
+window._upSetTopYear=async function(v){ const n=parseInt(v,10); if(!n||n<7||n>15) return; _UP.cohortCfg=_UP.cohortCfg||{topYear:11,left:{}}; _UP.cohortCfg.topYear=n; await _upSaveCohortCfg(); rUpload(); };
+window._upSetCohortState=async function(ik,state){ _UP.cohortCfg=_UP.cohortCfg||{topYear:11,left:{}}; _UP.cohortCfg.left=_UP.cohortCfg.left||{};
+  if(state==='auto') delete _UP.cohortCfg.left[ik]; else _UP.cohortCfg.left[ik]=state; await _upSaveCohortCfg(); rUpload(); };
 
+function _upCohortPanel(){
+  const cfg=_UP.cohortCfg||{topYear:11,left:{}};
+  const rows=_upCohorts().map(c=>{
+    const state=(cfg.left||{})[c.intake]||'auto';
+    const opt=(v,lbl)=>'<option value="'+v+'"'+(state===v?' selected':'')+'>'+lbl+'</option>';
+    return '<div style="display:flex;align-items:center;gap:.6rem;padding:.32rem 0;border-bottom:1px solid var(--bd)">'
+      +'<div style="flex:1;font-size:.78rem;color:var(--tx)"><b style="font-weight:600">'+c.intake+' intake</b> '
+        +'<span style="color:var(--mu);font-size:.72rem">· currently '+(c.left?'<b style="color:var(--bel)">left</b>':'Year '+c.yg)+'</span></div>'
+      +'<select onchange="window._upSetCohortState('+c.intake+',this.value)" style="font-family:inherit;font-size:.72rem;padding:.2rem .4rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)">'
+        +opt('auto','Auto')+opt('active','Force active')+opt('left','Mark left')+'</select></div>';
+  }).join('');
+  return '<details style="margin-top:1rem;border:1px solid var(--bd);border-radius:10px;padding:.1rem .9rem .6rem">'
+    +'<summary style="cursor:pointer;font-size:.82rem;font-weight:600;color:var(--tx);padding:.6rem 0">Year groups &amp; leavers</summary>'
+    +'<div style="font-size:.74rem;color:var(--mu);margin-bottom:.7rem;line-height:1.5">Each cohort is identified by its <b>intake year</b>, which never changes. Once a cohort passes the top year your school teaches it is marked <b>left</b> on 1 September \u2014 kept for cross-year comparison, but no longer offered upload slots. Set the top year, or override any cohort by hand.</div>'
+    +'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.7rem;font-size:.78rem;color:var(--tx)">Top year we teach:&nbsp;'
+      +'<input type="number" min="7" max="15" value="'+(cfg.topYear||11)+'" onchange="window._upSetTopYear(this.value)" style="width:3.5rem;font-family:inherit;font-size:.78rem;padding:.2rem .4rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)"></div>'
+    +rows+'</details>';
+}
 function rUpload(){
   const out=document.getElementById('upload-out'); if(!out) return;
   if(!IS_ADMIN){ out.innerHTML='<div style="padding:2rem;color:var(--mu)">Admins only.</div>'; return; }
-  if(!_UP.serverLoaded){ _upLoadColmaps(); _upRefreshServer().then(()=>rUpload()); }
+  if(!_UP.serverLoaded){ _upLoadColmaps(); _upLoadCohortCfg(); _upRefreshServer().then(()=>rUpload()); }
 
   if(_UP.tag){ return _upRenderTag(out); }
   if(_UP.confirm){ return _upRenderConfirm(out); }
+  if(_UP.del){ return _upRenderDelConfirm(out); }
 
   // an established school already has a roster (in the loaded data) — recognise it so the
   // other slots are unlocked without forcing a SEN re-upload.
@@ -6588,11 +6754,12 @@ function rUpload(){
       +'<span style="width:10px;height:10px;border-radius:50%;background:'+st.col+';flex:0 0 auto"></span>'
       +'<div style="flex:1"><div style="font-size:.85rem;font-weight:600;color:var(--tx)">'+_upEsc(s.title)+'</div>'
         +'<div style="font-size:.68rem;color:var(--mu)">'+(s.hint?_upEsc(s.hint)+' · ':'')+st.label+' · '+s.lifecycle+'</div>'
+        +'<div style="font-size:.66rem;color:var(--mu);margin-top:.2rem;line-height:1.4">'+_upNeedsLine(_upSlotRole(s).role)+'</div>'
         +(staged?'<div style="font-size:.7rem;color:var(--tx);margin-top:.15rem">📄 '+_upEsc(staged.name)+'</div>':'')
       +'</div>'
       +(locked?'<span style="font-size:.7rem;color:var(--mu)">🔒 roster first</span>'
         :'<label style="font-size:.72rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:.3rem .6rem;cursor:pointer;background:var(--sf2)">Choose file'
-          +'<input type="file" accept=".csv,.xlsx" style="display:none" onchange="window._upChoose(\''+s.id+'\',this)"></label>')
+          +'<input type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="window._upChoose(\''+s.id+'\',this)"></label>')
       +'</div>';
   }).join('');
 
@@ -6603,13 +6770,14 @@ function rUpload(){
     +banner+(rosterReady?'':'<div style="font-size:.78rem;color:var(--tx);margin-bottom:.4rem">Step 1 — choose your SEN-with-gender export to define this year\'s pupils.</div>')
     +rosterSummary+'<div id="up-msg" style="font-size:.78rem;margin:.5rem 0;min-height:1rem"></div>'
     +'<div style="border:1px solid var(--bd);border-radius:10px;padding:.4rem .9rem;margin-top:.4rem">'+rows+'</div>'
+    +_upCohortPanel()
     +'<div style="display:flex;gap:.7rem;align-items:center;margin-top:1rem">'
       +'<button onclick="window._upUploadAll()" '+(noSchool||!Object.keys(_UP.staged).length?'disabled':'')
         +' style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff);'+((noSchool||!Object.keys(_UP.staged).length)?'opacity:.5;cursor:not-allowed':'')+'">Upload chosen files</button>'
       +'<button onclick="window._upRebuild()" '+(canRebuild?'':'disabled')
         +' style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx);'+(canRebuild?'':'opacity:.5;cursor:not-allowed')+'">Rebuild dashboard</button>'
       +'<span style="font-size:.7rem;color:var(--mu)">Rebuild runs after your files are uploaded (~1 min, in the background).</span>'
-    +'</div></div>';
+    +'</div>'+_upStorePanel()+'</div>';
 }
 function _upMsg(html,ok){ const m=document.getElementById('up-msg'); if(m) m.innerHTML='<span style="color:'+(ok?'var(--green,#3b6d11)':'var(--red,#a32d2d)')+'">'+html+'</span>'; }
 
@@ -6652,20 +6820,22 @@ window._upSaveTag=async function(){
 };
 // build a normalised CSV (canonical headers) and stage it; derive roster if applicable
 function _upApplyMappedFile(slot, slotId, role, yg, rows, map, origName){
-  const name=_upSlotStoreName(slot);
   const fields=(_UP_ROLE_FIELDS[role]||[]).map(f=>f[0]).filter(c=>map[c]!=null);
-  const lines=[fields.map(_upCsvCell).join(',')];
-  for(let r=1;r<rows.length;r++) lines.push(fields.map(c=>_upCsvCell(rows[r][map[c]])).join(','));
-  const csv=lines.join('\n')+'\n';
-  const blob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name };
   if(role==='sen'){ _upDeriveRoster(rows, map); }
+  const dataRows=[]; for(let r=1;r<rows.length;r++) dataRows.push(fields.map(c=>rows[r][map[c]]));
+  if(_upIsDatedRole(role)){ _upStageByAY(slotId, role, _upSlotRole(slot).yg, fields, dataRows, slot.title); return; }
+  const lines=[fields.map(_upCsvCell).join(',')];
+  dataRows.forEach(row=>lines.push(row.map(_upCsvCell).join(',')));
+  const csv=lines.join('\n')+'\n', name=_upSlotStoreName(slot);
+  const blob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name };
   _UP.staged[slotId]={ file:blob, name };
-  _upMsg('Checked and ready: '+(rows.length-1)+' rows for '+_upEsc(slot.title)+'.', true);
+  _upMsg('Checked and ready: '+dataRows.length+' rows for '+_upEsc(slot.title)+'.', true);
 }
 // keep a recognised SIMS file's content intact (engine relies on some of its columns);
 // only the stored NAME is standardised.
 function _upStagePristine(slot, slotId, role, rows, map, file){
   if(role==='sen'){ _upDeriveRoster(rows, map); }
+  if(_upIsDatedRole(role)){ _upStageByAY(slotId, role, _upSlotRole(slot).yg, rows[0].map(h=>String(h)), rows.slice(1), slot.title); return; }
   _UP.staged[slotId]={ file, name:_upSlotStoreName(slot) };
   _upMsg('Checked and ready: '+(rows.length-1)+' rows for '+_upEsc(slot.title)+'.', true);
 }
@@ -6781,6 +6951,67 @@ function _upRenderConfirm(out){
 window._upConfirmYes=function(){ const c=_UP.confirm; _UP.confirm=null; if(c&&c.onYes) c.onYes(); rUpload(); };
 window._upConfirmNo=function(){ _UP.confirm=null; _upMsg('Cancelled — nothing was staged.'); rUpload(); };
 
+// ── What's in the store: per-file & per-category delete ──
+function _upFmtSize(n){ if(n==null) return ''; if(n<1024) return n+' B'; if(n<1048576) return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+function _upStoreGroups(){
+  const files=(_UP.serverFiles||[]).slice().sort((a,b)=>a.name<b.name?-1:1);
+  const order=['sen','attendance','behave_current','detention','housepoints','grade_attain','grade_effort','fsm'];
+  const map={};
+  files.forEach(f=>{ const d=_upDetectRole(f.name); const role=d.role||'other'; const label=(d.label||'Other')+(d.yg?(' · Year '+d.yg):''); const key=role+'|'+(d.yg||'');
+    (map[key]=map[key]||{key, role, label, files:[]}).files.push(f); });
+  return Object.values(map).sort((a,b)=>{ const ia=order.indexOf(a.role), ib=order.indexOf(b.role); return (ia<0?99:ia)-(ib<0?99:ib) || (a.label<b.label?-1:1); });
+}
+function _upStorePanel(){
+  if(!_UP.schoolId || !_UP.serverFiles) return '';   // live store only
+  const groups=_upStoreGroups(); _UP._sg=groups;
+  const head='<div style="margin-top:1.6rem;border-top:1px solid var(--bd);padding-top:1rem">'
+    +'<h3 style="margin:.1rem 0 .2rem;font-size:1rem">What\'s in the store</h3>'
+    +'<div style="font-size:.72rem;color:var(--mu);margin-bottom:.7rem;line-height:1.45">These are the raw files the dashboard is built from. Deleting one removes it from the store; the dashboard itself only changes on the next rebuild.</div>';
+  if(!groups.length) return head+'<div style="font-size:.8rem;color:var(--mu)">Nothing uploaded yet.</div></div>';
+  const body=groups.map((g,gi)=>{
+    const total=g.files.reduce((a,f)=>a+(f.size||0),0);
+    const rows=g.files.map((f,fi)=>'<div style="display:flex;align-items:center;gap:.6rem;padding:.3rem 0;border-bottom:1px solid var(--bd)">'
+      +'<div style="flex:1;font-size:.74rem;color:var(--tx);word-break:break-all">'+_upEsc(f.name)+'</div>'
+      +'<div style="font-size:.66rem;color:var(--mu);white-space:nowrap">'+_upFmtSize(f.size)+(f.updated_at?' · '+_upAge(f.updated_at):'')+'</div>'
+      +'<button onclick="window._upDelete('+gi+','+fi+')" title="Delete this file" style="font-family:inherit;font-size:.7rem;color:var(--red,#a32d2d);border:1px solid var(--bd);border-radius:6px;padding:.15rem .45rem;cursor:pointer;background:var(--sf2)">Delete</button>'
+      +'</div>').join('');
+    return '<div style="margin-bottom:.9rem">'
+      +'<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.1rem">'
+        +'<div style="flex:1;font-size:.82rem;font-weight:600;color:var(--tx)">'+_upEsc(g.label)+' <span style="font-weight:400;color:var(--mu)">('+g.files.length+' file'+(g.files.length!==1?'s':'')+(total?' · '+_upFmtSize(total):'')+')</span></div>'
+        +'<button onclick="window._upDelete('+gi+',-1)" style="font-family:inherit;font-size:.7rem;font-weight:600;color:var(--red,#a32d2d);border:1px solid var(--red,#a32d2d);border-radius:6px;padding:.2rem .55rem;cursor:pointer;background:var(--sf2)">Delete all</button>'
+      +'</div>'+rows+'</div>';
+  }).join('');
+  return head+body+'</div>';
+}
+window._upDelete=function(gi, fi){
+  const g=(_UP._sg||[])[gi]; if(!g) return;
+  const files=(fi<0)?g.files.slice():[g.files[fi]];
+  _UP.del={ what:(fi<0)?('all '+files.length+' '+g.label+' file'+(files.length!==1?'s':'')):files[0].name,
+            names:files.map(f=>f.name), paths:files.map(f=>_UP.schoolId+'/uploads/raw/'+f.name) };
+  rUpload();
+};
+function _upRenderDelConfirm(out){
+  const d=_UP.del;
+  out.innerHTML='<div style="max-width:680px"><h2 style="margin:.2rem 0 .6rem">Delete from the store?</h2>'
+    +'<div style="font-size:.85rem;color:var(--tx);line-height:1.55;margin-bottom:.8rem">You\'re about to permanently delete <b>'+_upEsc(d.what)+'</b> from the store.</div>'
+    +'<div style="font-size:.74rem;color:var(--mu);line-height:1.5;margin-bottom:1rem;border:1px solid var(--bd);border-radius:8px;padding:.5rem .7rem;max-height:9rem;overflow:auto">'+d.names.map(n=>_upEsc(n)).join('<br>')+'</div>'
+    +'<div style="font-size:.78rem;color:var(--tx);line-height:1.5;margin-bottom:1.1rem">This can\'t be undone. The dashboard keeps showing the current figures until you rebuild — deleting here, then rebuilding, is what removes the data from the dashboard.</div>'
+    +'<div style="display:flex;gap:.7rem"><button onclick="window._upDelYes()" style="font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--red,#a32d2d);cursor:pointer;background:var(--red,#a32d2d);color:#fff">Delete</button>'
+    +'<button onclick="window._upDelNo()" style="font-family:inherit;font-size:.8rem;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx)">Cancel</button></div></div>';
+}
+window._upDelNo=function(){ _UP.del=null; rUpload(); };
+window._upDelYes=async function(){
+  const d=_UP.del; _UP.del=null; if(!d){ rUpload(); return; }
+  rUpload(); _upMsg('Deleting '+d.paths.length+' file'+(d.paths.length!==1?'s':'')+'…', true);
+  try{
+    const r=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET,
+      { method:'DELETE', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' }, body:JSON.stringify({prefixes:d.paths}) });
+    if(!r.ok){ if(r.status===403||r.status===401) throw new Error('deletion isn\'t enabled for your account yet (the storage delete policy still needs adding)'); throw new Error('HTTP '+r.status); }
+    _UP.serverLoaded=false; await _upRefreshServer(); rUpload();
+    _upMsg('Deleted '+d.paths.length+' file'+(d.paths.length!==1?'s':'')+' from the store. Rebuild the dashboard to publish the change.', true);
+  }catch(e){ _UP.serverLoaded=false; await _upRefreshServer(); rUpload(); _upMsg('Could not delete: '+_upEsc(e.message)); }
+};
+
 window._upChoose=async function(slotId, input){
   const file=input.files&&input.files[0]; if(!file) return;
   const slot=_upChecklist().find(s=>s.id===slotId); if(!slot) return;
@@ -6818,8 +7049,9 @@ window._upUploadAll=async function(){
   const ids=Object.keys(_UP.staged); if(!ids.length){ _upMsg('No files chosen.'); return; }
   _upMsg('Uploading '+ids.length+' file'+(ids.length!==1?'s':'')+'…', true); let done=0;
   for(const id of ids){ const it=_UP.staged[id]; const path=_UP.schoolId+'/uploads/raw/'+it.name;
-    try{ const r=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
-        { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body:it.file });
+    try{ const body = it.merge ? await _upMergeWithStored(it) : it.file;
+      const r=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
+        { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
       if(!r.ok) throw new Error('HTTP '+r.status); done++;
     }catch(e){ _upMsg('Upload failed for '+_upEsc(it.name)+': '+_upEsc(e.message)); return; } }
   _UP.staged={}; _UP.serverLoaded=false;
@@ -6834,7 +7066,6 @@ window._upRebuild=async function(){
     _upMsg('Rebuild started — it runs in the background (~1 min) and refreshes the dashboard when done.', true);
   }catch(e){ _upMsg('Could not start the rebuild: '+_upEsc(e.message)); }
 };
-
 // ===== end ADMIN UPLOAD PAGE =====
 
 // Helper: get all progress rows for a year group in the current academic year
