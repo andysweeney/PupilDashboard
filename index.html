@@ -401,6 +401,22 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   function incCatLongParts(c){return INC_CATS.map(x=>c[x.key]?c[x.key]+' '+x.id:'').filter(Boolean);}
   function incCatColonParts(c){return INC_CATS.map(x=>c[x.key]?x.id+': '+c[x.key]:'').filter(Boolean);}
   function incCatTotal(c){return INC_CATS.reduce((s,x)=>s+(c[x.key]||0),0);}
+  // ── 8 namable slots: keys & scoring roles are FIXED; only names/short/colour are per-school. ──
+  const INC_BY_KEY={}; INC_CATS.forEach(c=>INC_BY_KEY[c.key]=c);
+  function incName(key){const c=INC_BY_KEY[key];return (c&&c.id)?c.id:String(key).toUpperCase();}
+  function incShort(key){const c=INC_BY_KEY[key];return (c&&c.short)?c.short:String(key).toUpperCase();}
+  // Slot defaults (used to seed the Admin editor / reset). Order is fixed and matches INC_CATS.
+  window._INC_CAT_DEFAULTS=INC_CATS.map(c=>({key:c.key,id:c.id,short:c.short,color:c.color}));
+  // Apply a school's saved category config (array aligned to the 8 fixed slots). Names/colours only.
+  window._applyIncidentCategories=function(saved){
+    if(!Array.isArray(saved))return;
+    INC_CATS.forEach((c,i)=>{const s=saved[i];if(s&&typeof s==='object'){
+      if(typeof s.id==='string')c.id=s.id;
+      if(typeof s.short==='string'&&s.short)c.short=s.short;
+      if(typeof s.color==='string'&&s.color)c.color=s.color;}});
+    for(const k in INC_BY_ID)delete INC_BY_ID[k];INC_CATS.forEach(c=>{if(c.id)INC_BY_ID[c.id]=c;});
+    for(const k in INC_BY_KEY)delete INC_BY_KEY[k];INC_CATS.forEach(c=>{INC_BY_KEY[c.key]=c;});
+  };
   try{const _pd=document.getElementById('print-date');if(_pd)_pd.textContent=new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});}catch(e){}
   // Re-layout charts for print so axes/labels fit the print box instead of being bitmap-scaled
   window.addEventListener('beforeprint',()=>{try{document.querySelectorAll('#p-ch .chw').forEach(w=>{w.dataset.sh=w.style.height||'';w.style.height='210px'});document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}});
@@ -1158,7 +1174,8 @@ async function _resolveScales(){
   return cfg;
 }
 // ── Login gate now runs at the top of boot, before any data is fetched. ──
-await sbPrefetch(['scales','dataKeys','thresholds','gcseMap']);
+await sbPrefetch(['scales','dataKeys','thresholds','gcseMap','incident_categories']);
+try{const _ic=loadCfg('incident_categories','pupilDashboard.incidentCategories.v1');if(_ic)window._applyIncidentCategories(_ic);}catch(e){}
 // ── Admin-write gating: only users listed in the Supabase `admins` table may edit
 //    Admin settings. Non-admins never see the Admin tab; RLS is the real enforcement
 //    (any config write from a non-admin is rejected server-side). Dismissals stay open. ──
@@ -1248,7 +1265,7 @@ function _buildSUBJ(cfg){
   return {canonicalOf,displayOf,parentOf,childrenOf,isFork,family,children,hasLineage:children.length>0,_cfg:cfg};
 }
 let SUBJ=_buildSUBJ(DD.config.subject_map);
-{/* dsm:oncall-reclass:start */const _ICm=DD.config.incident_codes;let _ocReclass=0;(DD.sanctionDetails||[]).forEach((d,i)=>{if(d&&_ICm[d[0]]){d[1]=_ICm[d[0]];if(d[1]==='On-Call'&&DD.sanctions&&DD.sanctions[i]&&DD.sanctions[i][1]===0){DD.sanctions[i][1]=1;_ocReclass++;}}});DD._ocReclass=_ocReclass;try{if(_ocReclass)console.info('[dsm] reclassified '+_ocReclass+' On-Call-categorised code(s) to On-Call type');}catch(e){}/* dsm:oncall-reclass:end */}
+{/* dsm:oncall-reclass:start */const _ICm=DD.config.incident_codes;let _ocReclass=0;(DD.sanctionDetails||[]).forEach((d,i)=>{if(d&&_ICm[d[0]]){d[1]=_ICm[d[0]];if(incCatKey(d[1])==='oc'&&DD.sanctions&&DD.sanctions[i]&&DD.sanctions[i][1]===0){DD.sanctions[i][1]=1;_ocReclass++;}}});DD._ocReclass=_ocReclass;try{if(_ocReclass)console.info('[dsm] reclassified '+_ocReclass+' On-Call-categorised code(s) to On-Call type');}catch(e){}/* dsm:oncall-reclass:end */}
 {/* dsm:subj-canon:start — fold raw subject spellings into their mapped canonical across every subject-keyed structure (identity when no aliases set) */
   const _sm=DD.config&&DD.config.subject_map;
   if(SUBJ&&_sm&&_sm.aliases&&Object.keys(_sm.aliases).length){
@@ -1774,7 +1791,7 @@ const NOT_COUNTED_MARKS=new Set(DD.config?.att_codes?.not_counted||['Y1','Y2','Y
 function sancTipAttrs(codes,dets,cats,label){
   if(!codes&&!dets) return'';
   const c=cats||{b:0,u:0,e:0,a:0};
-  const tipHtml=`<div style="font-weight:600;margin-bottom:.3rem">${label||'Sanctions'}</div><table style="font-size:.65rem;border-collapse:collapse"><tr><td style="padding:.1rem .4rem">Behaviour</td><td style="padding:.1rem .4rem;font-weight:600">${c.b||0}</td></tr><tr><td style="padding:.1rem .4rem">Uniform</td><td style="padding:.1rem .4rem;font-weight:600">${c.u||0}</td></tr><tr><td style="padding:.1rem .4rem">Equipment</td><td style="padding:.1rem .4rem;font-weight:600">${c.e||0}</td></tr><tr><td style="padding:.1rem .4rem">Attendance</td><td style="padding:.1rem .4rem;font-weight:600">${c.a||0}</td></tr><tr style="border-top:1px solid var(--bd)"><td style="padding:.1rem .4rem;color:var(--violet)">Detentions</td><td style="padding:.1rem .4rem;font-weight:600;color:var(--violet)">${dets||0}</td></tr></table>`.replace(/"/g,'&quot;');
+  const tipHtml=`<div style="font-weight:600;margin-bottom:.3rem">${label||'Sanctions'}</div><table style="font-size:.65rem;border-collapse:collapse"><tr><td style="padding:.1rem .4rem">${incName('b')}</td><td style="padding:.1rem .4rem;font-weight:600">${c.b||0}</td></tr><tr><td style="padding:.1rem .4rem">${incName('u')}</td><td style="padding:.1rem .4rem;font-weight:600">${c.u||0}</td></tr><tr><td style="padding:.1rem .4rem">${incName('e')}</td><td style="padding:.1rem .4rem;font-weight:600">${c.e||0}</td></tr><tr><td style="padding:.1rem .4rem">${incName('a')}</td><td style="padding:.1rem .4rem;font-weight:600">${c.a||0}</td></tr><tr style="border-top:1px solid var(--bd)"><td style="padding:.1rem .4rem;color:var(--violet)">Detentions</td><td style="padding:.1rem .4rem;font-weight:600;color:var(--violet)">${dets||0}</td></tr></table>`.replace(/"/g,'&quot;');
   return`cursor:help" data-tip="${tipHtml}" onmouseenter="const t=document.createElement('div');t.innerHTML=this.dataset.tip;t.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(40,34,20,.15);white-space:nowrap;pointer-events:none';const r=this.getBoundingClientRect();t.style.left=(r.left+r.width/2)+'px';t.style.top=(r.top-4)+'px';t.style.transform='translate(-50%,-100%)';document.body.appendChild(t);this._t=t" onmouseleave="if(this._t){this._t.remove();this._t=null}"`;
 }
 // Compute category breakdown for a set of sanctions
@@ -2471,7 +2488,7 @@ function renderTimetable(x, ay){
           if(ss.d)parts.push('<span style="color:#1b2231;text-shadow:0 0 2px rgba(255,255,255,.6)">'+ss.d+'D</span>');
           return parts.length?'<span style="font-size:.6rem;font-weight:500;font-family:IBM Plex Mono,monospace">'+parts.join(' ')+'</span>':'';
         }
-        const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+'B');if(sc.u)cats.push(sc.u+'U');if(sc.e)cats.push(sc.e+'E');if(sc.a)cats.push(sc.a+'A');parts.push('<span style="color:#1b2231;text-shadow:0 0 2px rgba(255,255,255,.6)">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#1b2231;text-shadow:0 0 2px rgba(255,255,255,.6)">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.65rem;font-weight:500;font-family:IBM Plex Mono,monospace">'+parts.join(" · ")+"</span>"})();
+        const sancHtml=(()=>{if(!sc)return"";const codeTotal=(sc.b||0)+(sc.u||0)+(sc.e||0)+(sc.a||0);const parts=[];if(codeTotal){const cats=[];if(sc.b)cats.push(sc.b+incShort('b'));if(sc.u)cats.push(sc.u+incShort('u'));if(sc.e)cats.push(sc.e+incShort('e'));if(sc.a)cats.push(sc.a+incShort('a'));parts.push('<span style="color:#1b2231;text-shadow:0 0 2px rgba(255,255,255,.6)">'+codeTotal+' Code'+(codeTotal!==1?'s':'')+' ('+cats.join(' ')+')</span>')}if(sc.d)parts.push('<span style="color:#1b2231;text-shadow:0 0 2px rgba(255,255,255,.6)">'+sc.d+' Detention'+(sc.d!==1?'s':'')+'</span>');return'<span style="font-size:.65rem;font-weight:500;font-family:IBM Plex Mono,monospace">'+parts.join(" · ")+"</span>"})();
 
         // Teacher session info from slotTeachers (selected academic year)
         const _st=((DD.slotTeachersByAY||{})[ay]||{})[String(x)];
@@ -2502,11 +2519,7 @@ function renderTimetable(x, ay){
         if(r[1]===2){nlByDay[dow].d++}
         else{
           const cat=s.cat;
-          if(cat==='Uniform')nlByDay[dow].u++;
-          else if(cat==='Behaviour')nlByDay[dow].b++;
-          else if(cat==='Equipment')nlByDay[dow].e++;
-          else if(cat==='Attendance')nlByDay[dow].a++;
-          else nlByDay[dow].b++;
+          incCatInc(nlByDay[dow],cat);
         }
       }
     });
@@ -2538,7 +2551,7 @@ function renderTimetable(x, ay){
       const hasSanc=codeTotal||sc2.d;
       if(hasSanc){
         const parts=[];
-        if(codeTotal){const cats=[];if(sc2.b)cats.push(sc2.b+'B');if(sc2.u)cats.push(sc2.u+'U');if(sc2.e)cats.push(sc2.e+'E');if(sc2.a)cats.push(sc2.a+'A');parts.push(`<span style="color:#1b2231">${codeTotal} Code${codeTotal!==1?'s':''} (${cats.join(' ')})</span>`)}
+        if(codeTotal){const cats=[];if(sc2.b)cats.push(sc2.b+incShort('b'));if(sc2.u)cats.push(sc2.u+incShort('u'));if(sc2.e)cats.push(sc2.e+incShort('e'));if(sc2.a)cats.push(sc2.a+incShort('a'));parts.push(`<span style="color:#1b2231">${codeTotal} Code${codeTotal!==1?'s':''} (${cats.join(' ')})</span>`)}
         if(sc2.d)parts.push(`<span style="color:#1b2231">${sc2.d} Detention${sc2.d!==1?'s':''}</span>`);
         html+=`<div class="tt-cell" style="border-left:2px solid var(--mu);${heat}"><span style="font-size:.65rem;font-weight:500;font-family:'IBM Plex Mono',monospace;color:#1b2231;text-shadow:0 0 2px rgba(255,255,255,.6)">${parts.join(', ')}</span></div>`;
       }else{
@@ -3595,7 +3608,7 @@ function rSanc(x,pp,data,wrapId,cSancId,flgWId,cFlgId,sancKey,flgKey,subjFilter,
       else if(r[1]===0){
         const si=SAN_ALL3.indexOf(r);
         const cat=SANC_DET[si]?SANC_DET[si][1]:'Other';
-        if(cat==='Behaviour')wmCat[m].b++;else if(cat==='Uniform')wmCat[m].u++;else if(cat==='Equipment')wmCat[m].e++;else if(cat==='Attendance')wmCat[m].a++;else wmCat[m].b++;
+        incCatInc(wmCat[m],cat);
       }
     }
   });
@@ -7518,7 +7531,7 @@ function rSV(){
   function sancRow(item){
     const flags=item.flags?flagBadge2(item.flags):'';
     const c=item.cats||{b:0,u:0,e:0,a:0,d:0};
-    const tipHtml=`<div style='font-weight:600;margin-bottom:.3rem'>${item.n} Sanctions</div><table style='font-size:.65rem;border-collapse:collapse'><tr><td style='padding:.1rem .4rem;color:#1b2231'>Behaviour</td><td style='padding:.1rem .4rem;font-weight:600'>${c.b||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1b2231'>Uniform</td><td style='padding:.1rem .4rem;font-weight:600'>${c.u||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1b2231'>Equipment</td><td style='padding:.1rem .4rem;font-weight:600'>${c.e||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1b2231'>Attendance</td><td style='padding:.1rem .4rem;font-weight:600'>${c.a||0}</td></tr><tr style='border-top:1px solid var(--bd)'><td style='padding:.1rem .4rem;color:var(--violet)'>Detentions</td><td style='padding:.1rem .4rem;font-weight:600;color:var(--violet)'>${c.d||0}</td></tr></table>`;
+    const tipHtml=`<div style='font-weight:600;margin-bottom:.3rem'>${item.n} Sanctions</div><table style='font-size:.65rem;border-collapse:collapse'><tr><td style='padding:.1rem .4rem;color:#1b2231'>${incName('b')}</td><td style='padding:.1rem .4rem;font-weight:600'>${c.b||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1b2231'>${incName('u')}</td><td style='padding:.1rem .4rem;font-weight:600'>${c.u||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1b2231'>${incName('e')}</td><td style='padding:.1rem .4rem;font-weight:600'>${c.e||0}</td></tr><tr><td style='padding:.1rem .4rem;color:#1b2231'>${incName('a')}</td><td style='padding:.1rem .4rem;font-weight:600'>${c.a||0}</td></tr><tr style='border-top:1px solid var(--bd)'><td style='padding:.1rem .4rem;color:var(--violet)'>Detentions</td><td style='padding:.1rem .4rem;font-weight:600;color:var(--violet)'>${c.d||0}</td></tr></table>`;
     return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(40,34,20,.3)">
       <div style="min-width:6rem"><span style="font-family:'IBM Plex Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span>${clsInfo(item.idx)}</div>
       ${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}
@@ -7774,7 +7787,7 @@ function rCL(){
       <div style="overflow-y:auto;flex:1;min-height:0;padding-right:.4rem">${content}</div>
     </div>`;
   }
-  function sancRow(item){const flags=item.flags?flagBadge2(item.flags):'';const tg=pupilTG(item.idx);const c=item.cats||{b:0,u:0,e:0,a:0,d:0};const tipHtml=`<div style='font-weight:600;margin-bottom:.3rem'>${item.n} Sanctions</div><table style='font-size:.65rem;border-collapse:collapse'><tr><td style='padding:.1rem .4rem'>Behaviour</td><td style='padding:.1rem .4rem;font-weight:600'>${c.b||0}</td></tr><tr><td style='padding:.1rem .4rem'>Uniform</td><td style='padding:.1rem .4rem;font-weight:600'>${c.u||0}</td></tr><tr><td style='padding:.1rem .4rem'>Equipment</td><td style='padding:.1rem .4rem;font-weight:600'>${c.e||0}</td></tr><tr><td style='padding:.1rem .4rem'>Attendance</td><td style='padding:.1rem .4rem;font-weight:600'>${c.a||0}</td></tr><tr style='border-top:1px solid var(--bd)'><td style='padding:.1rem .4rem;color:var(--violet)'>Detentions</td><td style='padding:.1rem .4rem;font-weight:600;color:var(--violet)'>${c.d||0}</td></tr></table>`;return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(40,34,20,.3)"><div style="min-width:6rem"><span style="font-family:'IBM Plex Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span><div style="font-size:.58rem;color:var(--mu)">${tg}</div></div>${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}<span style="margin-left:auto;font-size:.72rem;font-family:'IBM Plex Mono',monospace;color:var(--orange);font-weight:600;cursor:help;position:relative" onmouseenter="const t=document.createElement('div');t.innerHTML=this.dataset.tip;t.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(40,34,20,.15);white-space:nowrap;pointer-events:none';const r=this.getBoundingClientRect();t.style.left=r.left+'px';t.style.top=(r.top-4)+'px';t.style.transform='translateY(-100%)';document.body.appendChild(t);this._t=t" onmouseleave="if(this._t){this._t.remove();this._t=null}" data-tip="${tipHtml.replace(/"/g,'&quot;')}">${item.n} sanction${item.n!==1?'s':''}</span></div>`;}
+  function sancRow(item){const flags=item.flags?flagBadge2(item.flags):'';const tg=pupilTG(item.idx);const c=item.cats||{b:0,u:0,e:0,a:0,d:0};const tipHtml=`<div style='font-weight:600;margin-bottom:.3rem'>${item.n} Sanctions</div><table style='font-size:.65rem;border-collapse:collapse'><tr><td style='padding:.1rem .4rem'>${incName('b')}</td><td style='padding:.1rem .4rem;font-weight:600'>${c.b||0}</td></tr><tr><td style='padding:.1rem .4rem'>${incName('u')}</td><td style='padding:.1rem .4rem;font-weight:600'>${c.u||0}</td></tr><tr><td style='padding:.1rem .4rem'>${incName('e')}</td><td style='padding:.1rem .4rem;font-weight:600'>${c.e||0}</td></tr><tr><td style='padding:.1rem .4rem'>${incName('a')}</td><td style='padding:.1rem .4rem;font-weight:600'>${c.a||0}</td></tr><tr style='border-top:1px solid var(--bd)'><td style='padding:.1rem .4rem;color:var(--violet)'>Detentions</td><td style='padding:.1rem .4rem;font-weight:600;color:var(--violet)'>${c.d||0}</td></tr></table>`;return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(40,34,20,.3)"><div style="min-width:6rem"><span style="font-family:'IBM Plex Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span><div style="font-size:.58rem;color:var(--mu)">${tg}</div></div>${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}<span style="margin-left:auto;font-size:.72rem;font-family:'IBM Plex Mono',monospace;color:var(--orange);font-weight:600;cursor:help;position:relative" onmouseenter="const t=document.createElement('div');t.innerHTML=this.dataset.tip;t.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:.5rem .7rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 12px rgba(40,34,20,.15);white-space:nowrap;pointer-events:none';const r=this.getBoundingClientRect();t.style.left=r.left+'px';t.style.top=(r.top-4)+'px';t.style.transform='translateY(-100%)';document.body.appendChild(t);this._t=t" onmouseleave="if(this._t){this._t.remove();this._t=null}" data-tip="${tipHtml.replace(/"/g,'&quot;')}">${item.n} sanction${item.n!==1?'s':''}</span></div>`;}
 
   // ── Pupil Discipline History table ──
   // Academic year only, up to today
@@ -10313,6 +10326,7 @@ function rPeer(){
 
     // Build incident codes table
     let incHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Incident Codes (Behaviour Categories)</div>`;
+    incHtml+=`<div style="margin-bottom:.85rem;padding:.7rem .85rem;border:1px solid var(--bd);border-radius:8px;background:var(--sf)"><div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">Incident Categories</div><div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.4">Name the categories your school uses (up to 8 slots). These become the options you assign each incident code to below, and their names, tags and colours flow through every chart and tooltip. Leave a slot blank to disable it.</div><table class="d"><thead><tr><th>Name</th><th>Tag</th><th style="text-align:center">Colour</th></tr></thead><tbody>`+INC_CATS.map((c,i)=>{const _r=`<tr><td><input id="inccat-name-${i}" value="${(c.id||'').replace(/"/g,'&quot;')}" placeholder="(unused slot)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.74rem;padding:.3rem .4rem;border-radius:4px;width:100%;box-sizing:border-box"></td><td><input id="inccat-short-${i}" value="${(c.short||'').replace(/"/g,'&quot;')}" maxlength="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'IBM Plex Mono',monospace;font-size:.74rem;padding:.3rem .4rem;border-radius:4px;width:3.5rem;box-sizing:border-box"></td><td style="text-align:center"><input type="color" id="inccat-col-${i}" value="${/^#[0-9a-fA-F]{6}$/.test(String(c.color))?c.color:'#888888'}" style="width:34px;height:24px;border:1px solid var(--bd);border-radius:4px;background:none;cursor:pointer;padding:0"></td></tr>`;return c.key==='oc'?_r+`<tr><td colspan="3" style="padding:.1rem .4rem .55rem;font-size:.65rem;color:var(--orange);line-height:1.4">⚠ Escalated tier — incidents mapped to this slot count at the On-Call weight (currently ${SW_ONCALL}×), not the standard code weight (${SW_CODE}×). Keep it for genuine senior-staff escalations only.</td></tr>`:_r;}).join('')+`</tbody></table><button onclick="window._saveIncidentCategories()" style="margin-top:.6rem;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save categories</button></div>`;
     const incCategories=[...INC_CATS.map(c=>c.id),'Detention'];
     const incCatColors=Object.assign({Detention:PAL.violet},Object.fromEntries(INC_CATS.map(c=>[c.id,c.color])));
     const unclassifiedInc=[...foundIncidentCodes].filter(c=>!incidentCodes[c]).sort();
@@ -10632,6 +10646,11 @@ function rPeer(){
     location.reload();
   };
   window._adminSetInc=function(code,cat){
+    if(cat && incCatKey(cat)==='oc'){
+      if(!confirm('Heads up: "'+code+'" will be filed under "'+incName('oc')+'", the escalated tier. Incidents here count at the On-Call weight ('+SW_ONCALL+'×), not the standard code weight ('+SW_CODE+'×). Map it there?')){
+        rAdmin(); return;
+      }
+    }
     DD.config.incident_codes[code]=cat;
     // Update sanctionDetails in place
     const SAN2=DD.sanctions||[];
@@ -10640,6 +10659,22 @@ function rPeer(){
     });
     _persistDataKeys();
     rAdmin();
+  };
+
+  // Save the 8 incident-category slots (names/tags/colours) to per-school config, apply, reload.
+  window._saveIncidentCategories=async function(){
+    const defaults=window._INC_CAT_DEFAULTS||[];
+    const saved=defaults.map((d,i)=>{
+      const nm=document.getElementById('inccat-name-'+i),
+            sh=document.getElementById('inccat-short-'+i),
+            cl=document.getElementById('inccat-col-'+i);
+      const name=nm?nm.value.trim():(d.id||'');
+      return { id:name, short:(sh&&sh.value.trim())?sh.value.trim():(name?name.slice(0,3).toUpperCase():''), color:(cl&&cl.value)?cl.value:d.color };
+    });
+    try{ await saveCfg('incident_categories','pupilDashboard.incidentCategories.v1',saved); }
+    catch(e){ alert('Could not save categories: '+e.message); return; }
+    try{ window._applyIncidentCategories(saved); }catch(e){}
+    location.reload();
   };
 
   window._adminSetSubject=function(kind,key,value){
