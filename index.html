@@ -6809,7 +6809,7 @@ function _upStagedMatchesSlot(fname, slot){
   const d=_upDetectRole(fname);
   if(slot.kind==='roster')   return d.role==='sen';
   if(slot.kind==='combined') return d.role==='fsm';
-  if(slot.cohort){ const map={attend:'attendance',behave:'behave',detention:'detention',hp:'housepoints',grades:'grade'};
+  if(slot.cohort){ const map={attend:'attendance',behave:'behave',detention:'detention',hp:'housepoints',fsm:'fsm',grades:'grade'};
     const want=map[slot.id.split('_')[0]];
     return d.role && (d.role===want || d.role.indexOf(want)===0) && (d.yg==null || d.yg===slot.cohort.yg); }
   return false;
@@ -6926,7 +6926,7 @@ function rUpload(){
   const cohorts=_upCohorts().filter(c=>!c.left);
   let newest=null; (_UP.serverFiles||[]).forEach(o=>{ if(o.updated_at && (!newest||o.updated_at>newest)) newest=o.updated_at; });
 
-  const stagedNames=(slotId)=>{ const pre=slotId+'|'; return Object.keys(_UP.staged).filter(k=>k===slotId||k.indexOf(pre)===0).map(k=>_UP.staged[k].name); };
+  const stagedNames=(slotId)=>{ const pre=slotId+'|'; return Object.keys(_UP.staged).filter(k=>k===slotId||k.indexOf(pre)===0).map(k=>_UP.staged[k]&&_UP.staged[k].name).filter(Boolean); };
   const slotRow=(s,locked)=>{
     const st=_upSlotStatus(s), sn=stagedNames(s.id);
     return '<div style="display:flex;align-items:center;gap:.8rem;padding:.5rem .1rem;border-bottom:1px solid var(--bd);'+(locked?'opacity:.45':'')+'">'
@@ -7288,7 +7288,7 @@ window._upUploadAll=async function(){
   if(!_UP.schoolId){ _upMsg('Uploading is switched on with the Part-2 go-live.'); return; }
   const ids=Object.keys(_UP.staged); if(!ids.length){ _upMsg('No files chosen.'); return; }
   _upMsg('Uploading '+ids.length+' file'+(ids.length!==1?'s':'')+'…', true); let done=0;
-  for(const id of ids){ const it=_UP.staged[id]; const path=_UP.schoolId+'/uploads/raw/'+it.name;
+  for(const id of ids){ const it=_UP.staged[id]; if(!it||!it.name){ delete _UP.staged[id]; continue; } const path=_UP.schoolId+'/uploads/raw/'+it.name;
     try{ const body = it.merge ? await _upMergeWithStored(it) : it.file;
       const r=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
         { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
