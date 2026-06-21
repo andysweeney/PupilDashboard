@@ -7287,14 +7287,40 @@ window._upUploadAll=async function(){
   _UP.staged={}; _UP.serverLoaded=false;
   _upMsg('Uploaded '+done+' file'+(done!==1?'s':'')+'. You can now rebuild the dashboard.', true); rUpload();
 };
+// When did the rebuilt data.json last change? Used to detect when a rebuild has finished.
+async function _upDataJsonUpdatedAt(){
+  try{
+    const body={prefix:_UP.schoolId+'/', limit:200, offset:0, sortBy:{column:'name',order:'asc'}};
+    const r=await fetch(SB_URL+'/storage/v1/object/list/'+DATA_BUCKET,
+      { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' }, body:JSON.stringify(body) });
+    if(!r.ok) return null;
+    const rows=await r.json();
+    const dj=(rows||[]).find(o=>o&&o.name==='data.json');
+    return dj ? (dj.updated_at||(dj.metadata&&dj.metadata.lastModified)||null) : null;
+  }catch(e){ return null; }
+}
 window._upRebuild=async function(){
   if(!_UP.schoolId){ _upMsg('Rebuild is switched on with the Part-2 go-live.'); return; }
   _upMsg('Starting rebuild…', true);
+  // remember the current dashboard file so we can tell when the new one lands
+  let baseline=null; try{ baseline=await _upDataJsonUpdatedAt(); }catch(e){}
   try{ const r=await fetch(SB_URL+'/functions/v1/rebuild',
       { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' }, body:JSON.stringify({}) });
     if(!r.ok) throw new Error('HTTP '+r.status);
-    _upMsg('Rebuild started — it runs in the background (~1 min) and refreshes the dashboard when done.', true);
-  }catch(e){ _upMsg('Could not start the rebuild: '+_upEsc(e.message)); }
+  }catch(e){ _upMsg('Could not start the rebuild: '+_upEsc(e.message)); return; }
+  // poll the store for the freshly-written data.json, then refresh the page automatically
+  const started=Date.now(), MAX=5*60*1000;
+  _upMsg('Rebuilding… this usually takes about a minute. You can leave this page open — it refreshes itself when done.', true);
+  const tick=async()=>{
+    let now=null; try{ now=await _upDataJsonUpdatedAt(); }catch(e){}
+    const done = now && (!baseline || new Date(now) > new Date(baseline));
+    if(done){ _upMsg('✓ Rebuild complete — refreshing the dashboard…', true); setTimeout(function(){ location.reload(); }, 1300); return; }
+    if(Date.now()-started > MAX){ _upMsg('The rebuild is taking longer than usual. Give it another moment, then refresh this page to see the result. If it never appears, the build may have hit an error.', true); return; }
+    const secs=Math.round((Date.now()-started)/1000);
+    _upMsg('Rebuilding… ('+secs+'s) — the dashboard refreshes automatically when it\'s ready.', true);
+    setTimeout(tick, 6000);
+  };
+  setTimeout(tick, 6000);
 };
 // ===== end ADMIN UPLOAD PAGE =====
 
