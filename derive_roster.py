@@ -77,18 +77,25 @@ def derive_roster(sen_paths, current_acad_year):
                 intake = current_acad_year - (yg - 7)
             sen = (r.get('SEN Status Code') or r.get('SEN Status') or '').strip()
             gender = (r.get('Gender') or '').strip()
+            # FSM is a pupil attribute that rides in on the roster alongside SEN and gender.
+            # Optional: a roster with no FSM column simply yields no FSM flags (never an error).
+            _fsm_raw = (r.get('FSM') or r.get('FSM Status') or r.get('Free School Meals') or '').strip()
+            fsm = 'Y' if _fsm_raw and _fsm_raw[0].upper() in ('Y', 'E', '1', 'T') else ''
             if pid in roster and roster[pid]['intake'] != intake:
                 anomalies.append(f"pupil {pid} listed in two cohorts "
                                  f"(intake {roster[pid]['intake']} and {intake})")
             roster[pid] = {'pid': pid, 'name': str(name).strip(), 'intake': intake,
-                           'current_yg': yg, 'gender': gender, 'sen': sen}
+                           'current_yg': yg, 'gender': gender, 'sen': sen, 'fsm': fsm}
     # summary
     by_intake, by_gender = {}, {}
+    fsm_count = 0
     for p in roster.values():
         by_intake[p['intake']] = by_intake.get(p['intake'], 0) + 1
         by_gender[p['gender'] or '?'] = by_gender.get(p['gender'] or '?', 0) + 1
+        if p.get('fsm') == 'Y':
+            fsm_count += 1
     summary = {'pupils': len(roster), 'by_intake': dict(sorted(by_intake.items())),
-               'by_gender': by_gender,
+               'by_gender': by_gender, 'fsm': fsm_count,
                'year_groups': dict(sorted({p['current_yg']: by_intake.get(p['intake'])
                                            for p in roster.values()}.items()))}
     return roster, summary, anomalies
@@ -97,9 +104,10 @@ def derive_roster(sen_paths, current_acad_year):
 def write_roster_csv(roster, out_path):
     with open(out_path, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
-        w.writerow(['pid', 'Name', 'Intake', 'CurrentYG', 'Gender', 'SEN Status'])
+        w.writerow(['pid', 'Name', 'Intake', 'CurrentYG', 'Gender', 'SEN Status', 'FSM'])
         for p in sorted(roster.values(), key=lambda x: x['pid']):
-            w.writerow([p['pid'], p['name'], p['intake'], p['current_yg'], p['gender'], p['sen']])
+            w.writerow([p['pid'], p['name'], p['intake'], p['current_yg'],
+                        p['gender'], p['sen'], p.get('fsm', '')])
 
 
 if __name__ == '__main__':
