@@ -666,63 +666,66 @@ _BUILTIN_TRANSITIONS = {
     'gcse91': {'9':'E','8':'S','7':'C','6':'C','5':'M','4':'W','3':'D','2':'D','1':'B'},
     'alevel': {'A*':'E','A':'S','B':'C','C':'W','D':'D','E':'B'},
 }
-_REF_SCALE    = (KEY or {}).get('scales', {}).get('referenceScale') or _BUILTIN_REF
+# referenceScale may be a DEFINITION-ID string (e.g. "ks3" -> definitions['ks3']), a best-first token
+# list, {'order':[...]}, or {'levels':[...]}. _REF_ID is that definition id when it's a string, which
+# is also how a year group that sits ON the reference is recognised (attainmentByYearGroup -> _REF_ID).
+_REF_SCALE_CFG = (KEY or {}).get('scales', {}).get('referenceScale')
+_REF_ID = _REF_SCALE_CFG if isinstance(_REF_SCALE_CFG, str) else None
 _TRANSITIONS  = dict(_BUILTIN_TRANSITIONS); _TRANSITIONS.update((KEY or {}).get('transitions', {}) or {})
-# ── OPTION 2: resolve each grade to a RANK on the reference ladder AT IMPORT, using the grade's
-# year group to pick the right scale. This is what lets a KS3 'E' (top) and an A-Level 'E' (bottom)
-# coexist: they are the SAME STRING but are resolved through different scales, so they never collide.
-# The rank (1 = best) is stored alongside the raw grade; the dashboard plots the rank for a
-# continuous cross-key-stage line and shows the raw grade in tables.
-def _build_ref_rank(ref):
-    """Reference ladder (best-first) -> {token: rank}, rank 1 = best. Accepts a plain best-first list,
-    a {'order': [...]}, or a {'levels': [{'raw': [...]}, ...]} structure."""
-    order = []
-    if isinstance(ref, list):
-        order = [[t] for t in ref]
-    elif isinstance(ref, dict):
-        lv = ref.get('levels')
-        if isinstance(lv, list):
-            for l in lv:
-                raws = l.get('raw') or ([l.get('code')] if l.get('code') else [])
-                order.append([str(x) for x in raws])
-        elif isinstance(ref.get('order'), list):
-            order = [[t] for t in ref['order']]
-    rank = {}
-    for i, toks in enumerate(order):
-        for t in toks:
-            rank[str(t)] = i + 1
-            rank[str(t).upper()] = i + 1
-    return rank
-_REF_RANK = _build_ref_rank(_REF_SCALE)
-def _ref_order_tokens(ref):
-    """Reference ladder as an ordered best-first token list, for the dashboard's ability axis."""
-    if isinstance(ref, list):
-        return [str(t) for t in ref]
-    if isinstance(ref, dict):
-        lv = ref.get('levels')
-        if isinstance(lv, list):
-            out = []
-            for l in lv:
-                raws = l.get('raw') or ([l.get('code')] if l.get('code') else [])
-                if raws:
-                    out.append(str(raws[0]))
-            return out
-        if isinstance(ref.get('order'), list):
-            return [str(t) for t in ref['order']]
-    return []
-_REF_ORDER = _ref_order_tokens(_REF_SCALE)
+# ── OPTION 2: resolve each grade to a RANK on the reference ladder AT IMPORT, using the grade's year
+# group to pick the right scale. A KS3 'E' (top) and an A-Level 'E' (bottom) are the SAME STRING but
+# resolve through different scales, so they never collide. Rank (1 = best) is stored beside the raw
+# grade; the dashboard plots the rank for a continuous cross-key-stage line.
+def _level_tokens(levels):
+    """[{raw|csv|code: [...]}, ...] -> best-first synonym groups [[tok,...], ...]."""
+    out = []
+    for l in (levels or []):
+        raws = l.get('raw') or l.get('csv') or ([l.get('code')] if l.get('code') else [])
+        if not isinstance(raws, list):
+            raws = [raws]
+        raws = [str(x) for x in raws if x not in (None, '')]
+        if raws:
+            out.append(raws)
+    return out
+def _resolve_ref_groups(cfg):
+    """Reference ladder (best-first synonym groups) from referenceScale: a definition-id string, a
+    token list, {'order':[...]}, or {'levels':[...]}. Falls back to the built-in B-E ladder if the
+    school's key has nothing readable, so the axis is never silently blank."""
+    groups = []
+    if isinstance(cfg, str):
+        groups = _level_tokens((_SCALE_DEFS.get(cfg) or {}).get('levels'))
+    elif isinstance(cfg, list):
+        groups = [[str(t)] for t in cfg]
+    elif isinstance(cfg, dict):
+        if isinstance(cfg.get('levels'), list):
+            groups = _level_tokens(cfg['levels'])
+        elif isinstance(cfg.get('order'), list):
+            groups = [[str(t)] for t in cfg['order']]
+    return groups or [[t] for t in _BUILTIN_REF]
+_REF_GROUPS = _resolve_ref_groups(_REF_SCALE_CFG)
+_REF_ORDER  = [g[0] for g in _REF_GROUPS]
+_REF_RANK   = {}
+for _ri, _rg in enumerate(_REF_GROUPS):
+    for _rt in _rg:
+        _REF_RANK[str(_rt)] = _ri + 1
+        _REF_RANK[str(_rt).upper()] = _ri + 1
 def map_attainment_rank(canon, year_group):
     """Validated attainment token -> RANK on the reference ladder (1 = best), using the YEAR GROUP to
-    pick the scale. KS3/reference grades rank directly (the token IS a reference band). KS4/KS5 grades
-    map through the key's transitions onto a reference band first, then to its rank. A token with no
-    reference assignment returns None and is flagged for the Admin to calibrate."""
+    pick the scale. A grade whose scale IS the reference ranks directly; any other scale maps through
+    the key's transition (keyed '{scale}:{reference}', else '{scale}') onto a reference band first.
+    No reference assignment -> None, flagged for the Admin to calibrate."""
     if not _REF_RANK or canon is None:
         return None
     s = str(canon)
     scale_id = _ATTAIN_BY_YG.get(year_group) or _default_scale_for_yg(year_group)
-    if scale_id is None:                                    # reference/KS3 grade
+    if scale_id is None or scale_id == _REF_ID:             # the scale IS the reference (e.g. KS3)
         return _REF_RANK.get(s) or _REF_RANK.get(s.upper())
-    tmap = _TRANSITIONS.get(scale_id) or {}                 # KS4/KS5 grade -> reference band
+    tmap = None                                             # other scale -> reference via transition
+    for _k in (((scale_id + ':' + _REF_ID) if _REF_ID else None), scale_id):
+        if _k and _k in _TRANSITIONS:
+            tmap = _TRANSITIONS[_k]; break
+    if not tmap:
+        return None
     refband = tmap.get(s) or tmap.get(s.upper())
     if refband is None:
         return None
