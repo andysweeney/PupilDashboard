@@ -6512,7 +6512,7 @@ window._nsDelConfirm=async function(){
 
 // canonical columns each role needs (from stage_inputs.py); [name, required]
 const _UP_ROLE_FIELDS = {
-  sen:           [['Name',1],['Year',1],['Gender',0],['SEN Status',0]],
+  sen:           [['Name',1],['Year',1],['Gender',0],['SEN Status',0],['FSM',0]],
   attendance:    [['Name',1],['Date',1],['Mark',1],['Subject',0],['Teacher',0],['Period Description',0]],
   behave_current:[['Name',1],['Date',1],['Incident',1],['Subject',0],['Lesson - Period',0],['Teacher',0]],
   detention:     [['Name',1],['Detention Date',1],['Detention Type',1]],
@@ -6793,7 +6793,6 @@ function _upChecklist(){
     slots.push({ id:'hp_'+c.intake, kind:'cohort', cohort:c, title:'House points — '+c.label, lifecycle:'per-term' });
     slots.push({ id:'grades_'+c.intake, kind:'cohort', cohort:c, title:'Grades (on-track + effort) — '+c.label, lifecycle:'accumulate' });
   });
-  slots.push({ id:'fsm', kind:'combined', title:'Free school meals (all cohorts)', lifecycle:'replace-latest' });
   return slots;
 }
 function _upStagedMatchesSlot(fname, slot){
@@ -6914,7 +6913,6 @@ function rUpload(){
 
   const slots=_upChecklist();
   const cohortSlots=slots.filter(s=>s.kind==='cohort');
-  const fsmSlot=slots.find(s=>s.kind==='combined');
   const cohorts=_upCohorts().filter(c=>!c.left);
   let newest=null; (_UP.serverFiles||[]).forEach(o=>{ if(o.updated_at && (!newest||o.updated_at>newest)) newest=o.updated_at; });
 
@@ -6945,17 +6943,14 @@ function rUpload(){
       +'</div>'+cs.map(s=>slotRow(s,false)).join('')+'</div>';
   }).join('');
 
-  const fsmHtml='<div style="border:1px solid var(--bd);border-radius:10px;padding:.4rem .9rem;margin-top:.8rem">'+slotRow(fsmSlot, !cohorts.length)+'</div>';
-
   const canRebuild=!noSchool && Object.keys(_UP.staged).length===0 && cohorts.length>0;
   const btn=(on)=>'font-family:inherit;font-size:.8rem;font-weight:600;padding:.5rem .9rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;'+(on?'':'opacity:.5;cursor:not-allowed;');
   out.innerHTML='<div style="max-width:860px"><h2 style="margin:.2rem 0 .3rem">Upload data</h2>'
-    +'<div style="font-size:.82rem;color:var(--mu);margin-bottom:.6rem">Each cohort is added from its SEN &amp; gender roster; its data uploads then appear beneath it. The roster you upload is the cohort\'s full membership — anyone on it is on roll, anyone missing has left.'+(newest?' Last server update: '+_upAge(newest)+'.':'')+'</div>'
+    +'<div style="font-size:.82rem;color:var(--mu);margin-bottom:.6rem">Start each cohort with its roster (the SEN, gender &amp; FSM export) — it comes first, because everything else attaches to it by enrolment number. The roster is the cohort\'s full membership: anyone on it is on roll, anyone missing has left. The cohort\'s data uploads then appear beneath it.'+(newest?' Last server update: '+_upAge(newest)+'.':'')+'</div>'
     +banner
     +'<div style="display:flex;align-items:center;gap:.7rem;margin:.7rem 0"><div style="flex:1;font-size:.82rem;color:var(--tx)">'+(cohorts.length?('<b>'+cohorts.length+'</b> cohort'+(cohorts.length!==1?'s':'')):'No cohorts yet — add your first to begin')+'</div>'+rosterInput('+ Add New Cohort')+'</div>'
     +'<div id="up-msg" style="font-size:.78rem;margin:.4rem 0;min-height:1rem"></div>'
     +cohortCards
-    +fsmHtml
     +_upCohortPanel()
     +'<div style="display:flex;gap:.7rem;align-items:center;margin-top:1.2rem">'
       +'<button onclick="window._upUploadAll()" '+(noSchool||!Object.keys(_UP.staged).length?'disabled':'')+' style="'+btn(!(noSchool||!Object.keys(_UP.staged).length))+'background:var(--tx);color:var(--bg,#fff)">Upload chosen files</button>'
