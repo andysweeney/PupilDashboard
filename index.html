@@ -1148,14 +1148,52 @@ async function resetCfg(id,lsKey){
   try{localStorage.removeItem(_cfgKey(lsKey));}catch(e){}
   if(SB_ON){try{await sbDel(id);delete _SBCACHE[id];}catch(e){console.warn('[cfg] server reset failed for',id,e.message);}}
 }
+// Built-in national DISPLAY scales (GCSE / A-Level / numeric effort), detected from the grades
+// actually present so a fresh school's imported KS4/KS5 grades render with no setup. National
+// standards only — the school's own saved scale always overrides these in _resolveScales, and a
+// mixed/unknown set of grades (e.g. KS3 bands) yields [] so the school defines its own. This is the
+// display twin of the engine's built-in attainment scales; nothing school-specific is baked in.
+function _scanGradeTokens(){
+  const ab=new Set(), ef=new Set();
+  try{
+    Object.values(PRG||{}).forEach(byPeriod=>Object.values(byPeriod||{}).forEach(rows=>(rows||[]).forEach(r=>{
+      const gd=(r&&typeof r[3]==='object'&&!Array.isArray(r[3])&&r[3])||(r&&typeof r[2]==='object'&&!Array.isArray(r[2])&&r[2])||null;
+      if(gd)Object.values(gd).forEach(g=>{if(Array.isArray(g)){if(g[0]!=null&&g[0]!=='')ab.add(String(g[0]).trim());if(g[1]!=null&&g[1]!=='')ef.add(g[1]);}});
+    })));
+  }catch(e){}
+  return {ab,ef};
+}
+function _builtinAbilityLevels(tokens){
+  const arr=[...tokens].map(t=>String(t).trim()).filter(Boolean);
+  if(!arr.length)return [];
+  if(arr.every(t=>/^[1-9]$/.test(t))){                       // GCSE 9-1 (9 best)
+    const col={9:PAL.green,8:PAL.green,7:PAL.blue,6:PAL.blue,5:PAL.sky,4:PAL.gold,3:PAL.orange,2:PAL.red,1:PAL.red};
+    return [9,8,7,6,5,4,3,2,1].map(n=>({csv:[String(n)],label:String(n),colour:col[n]}));
+  }
+  const ALV=['A*','A','B','C','D','E'];
+  if(arr.every(t=>ALV.includes(t.toUpperCase()))){           // A-Level A*-E (A* best)
+    const col={'A*':PAL.green,'A':PAL.green,'B':PAL.blue,'C':PAL.sky,'D':PAL.orange,'E':PAL.red};
+    return ALV.map(g=>({csv:[g],label:g,colour:col[g]}));
+  }
+  return [];                                                 // mixed/unknown -> school defines its own
+}
+function _builtinEffortLevels(vals){
+  const nums=[...vals].map(Number).filter(v=>!isNaN(v));
+  if(!nums.length)return [];
+  const uniq=[...new Set(nums)].sort((a,b)=>a-b);            // ascending -> 1 = best (common UK convention)
+  const col=[PAL.green,PAL.blue,PAL.gold,PAL.orange,PAL.red];
+  return uniq.map((v,i)=>({csv:[String(v)],label:String(v),colour:col[Math.min(i,col.length-1)]}));
+}
 function _defaultScales(){
-  // Grading + effort scales START BLANK for a new school — Admin builds them in Settings.
-  // A configured school's own ability_map (from its data.json config) still seeds the ability axis;
-  // there is no hardcoded fallback scale, so nothing is pre-populated for a fresh school.
-  return {
-    ability:(CFG.ability_map&&Object.keys(CFG.ability_map).length)?Object.entries(CFG.ability_map).map(([code,label])=>({csv:[code],label,colour:_ABCOL_DEFAULT[label]||PAL.slate})).reverse():[],
-    effort:[]
-  };
+  // Ability: a school's own ability_map (legacy flat config) seeds the axis; otherwise fall back to
+  // the standard scale its imported grades use (GCSE/A-Level), detected from the data. Effort falls
+  // back to the numeric scale present. Both are national templates only — the school's saved scale
+  // overrides them in _resolveScales — and unknown bands stay blank for the school to define.
+  const {ab,ef}=_scanGradeTokens();
+  const ability=(CFG.ability_map&&Object.keys(CFG.ability_map).length)
+    ? Object.entries(CFG.ability_map).map(([code,label])=>({csv:[code],label,colour:_ABCOL_DEFAULT[label]||PAL.slate})).reverse()
+    : _builtinAbilityLevels(ab);
+  return {ability, effort:_builtinEffortLevels(ef)};
 }
 function _sanitiseScales(cfg){
   const clean=k=>(cfg&&Array.isArray(cfg[k])?cfg[k]:[]).map(r=>({
