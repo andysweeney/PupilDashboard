@@ -228,7 +228,9 @@ def map_ability(v, flagset):
     return None
 
 def map_effort(v, flagset):
-    """Raw 'Effort Value' -> 1..4, or None (flagging the unknown raw value)."""
+    """Raw 'Effort Value' -> the school's effort scale value, or None (flagging the unknown raw
+    value). A bare number with no explicit mapping passes straight through (effort "1" -> 1), so
+    numeric effort imports without setup; the Admin can still formalise the scale and its direction."""
     s = _norm_raw(v)
     if s is None:
         return None
@@ -236,6 +238,8 @@ def map_effort(v, flagset):
         return EFFORT_VALUE_MAP[s]
     if s.title() in EFFORT_VALUE_MAP:
         return EFFORT_VALUE_MAP[s.title()]
+    if re.fullmatch(r'\d{1,2}', s):
+        return int(s)                     # self-evident numeric effort passes through
     flagset.add(s)
     return None
 
@@ -662,17 +666,44 @@ def _scale_token_map(scale_id):
     return out
 _SCALE_TOKENS = {sid: _scale_token_map(sid) for sid in _SCALE_DEFS}
 
+# Built-in national attainment scales. These are universal standards, identical for every school,
+# so they live in code only as TEMPLATES — a school's key (attainmentByYearGroup + definitions)
+# always overrides, and picking a preset in Admin copies the definition into that school's key.
+# Nothing school-specific is encoded here; this is just the engine knowing what "GCSE grade 7"
+# means, the same way it knows September is month 9.
+_BUILTIN_SCALES = {
+    'gcse91': [str(n) for n in range(9, 0, -1)],          # 9 (best) .. 1
+    'alevel': ['A*', 'A', 'B', 'C', 'D', 'E'],            # A* (best) .. E
+}
+def _builtin_token_map(levels):
+    out = {}
+    for t in levels:
+        out[str(t)] = str(t); out[str(t).upper()] = str(t)
+    return out
+_BUILTIN_SCALE_TOKENS = {sid: _builtin_token_map(lvls) for sid, lvls in _BUILTIN_SCALES.items()}
+
+def _default_scale_for_yg(yg):
+    """National default qualification scale for a year group, used ONLY when the school's key has
+    not assigned one. KS4 -> GCSE, KS5 -> A-Level. KS3 returns None: those bands are school-specific
+    and must be defined in the key, so they surface as a flag rather than being guessed."""
+    if yg in (10, 11): return 'gcse91'
+    if yg in (12, 13): return 'alevel'
+    return None
+
 def map_attainment_scaled(raw, year_group, flagset):
     """Validated raw attainment token, read through the scale the year group uses. Stored AS-IS so the
     dashboard derives rank (1..n, 1=best) and labels from that scale — a GCSE grade stays a GCSE grade,
-    a KS3 letter stays a letter. A token not valid for the year group's scale is flagged."""
+    a KS3 letter stays a letter. The school key's assignment wins; absent that, a national default
+    applies for KS4/KS5 so self-evident grades (a "7" is GCSE 7) import without setup. A token not
+    valid for the resolved scale is flagged for the Admin to resolve."""
     s = _norm_raw(raw)
     if s is None:
         return None
-    scale_id = _ATTAIN_BY_YG.get(year_group)
+    scale_id = _ATTAIN_BY_YG.get(year_group) or _default_scale_for_yg(year_group)
     if scale_id is None:
         flagset.add(s); return None
-    canon = _SCALE_TOKENS.get(scale_id, {}).get(s) or _SCALE_TOKENS.get(scale_id, {}).get(s.upper())
+    tokens = _SCALE_TOKENS.get(scale_id) or _BUILTIN_SCALE_TOKENS.get(scale_id) or {}
+    canon = tokens.get(s) or tokens.get(s.upper())
     if canon is None:
         flagset.add(s); return None              # token not valid for this year group's scale
     return canon
@@ -713,12 +744,15 @@ if len(reports):
         if term is None:
             _rep_no_term += 1
             continue
-        if _SCALE_DEFS:
-            _ay = int(term.split()[1])
-            _yg = _ay - registry[p]['intake'] + 7
-            ability = map_attainment_scaled(row.get('Ability Value'), _yg, _unmapped_ability)
-        else:
-            ability = map_ability(row.get('Ability Value'), _unmapped_ability)
+        _ay = int(term.split()[1])
+        _yg = _ay - registry[p]['intake'] + 7
+        ability = map_attainment_scaled(row.get('Ability Value'), _yg, _unmapped_ability)
+        if ability is None and ABILITY_VALUE_MAP:
+            # Legacy: a school configured a flat abilityValueMap instead of per-year scales.
+            _legacy = map_ability(row.get('Ability Value'), set())
+            if _legacy is not None:
+                ability = _legacy
+                _unmapped_ability.discard(_norm_raw(row.get('Ability Value')))
         effort = map_effort(row.get('Effort Value'), _unmapped_effort)
         ote = map_ote(row.get('OTA Grade')) if 'OTA Grade' in reports.columns else None
         if ability is None and effort is None and ote is None:
