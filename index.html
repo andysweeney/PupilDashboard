@@ -6635,7 +6635,7 @@ function _upSlotRole(slot){
   if(slot.kind==='roster')   return {role:'sen', yg:null};
   if(slot.kind==='combined') return {role:'fsm', yg:null};
   const base=slot.id.split('_')[0], yg=slot.cohort?slot.cohort.yg:null;
-  return {role:{attend:'attendance',behave:'behave_current',detention:'detention',hp:'housepoints',grades:'grade_attain'}[base], yg};
+  return {role:{attend:'attendance',behave:'behave_current',detention:'detention',hp:'housepoints',fsm:'fsm',grades:'grade_attain'}[base], yg};
 }
 // Risk 1: stored filename is fixed PER SLOT, so re-uploading a slot always REPLACES
 // (no Date.now, no admin filename) — a slot can never accumulate duplicate files.
@@ -6762,14 +6762,23 @@ function _upMatchColumns(headers, rows, role){
   const fields=_UP_ROLE_FIELDS[role]||[['Name',1]];
   const types=headers.map((h,i)=>_upColType(rows.slice(1,40).map(r=>r[i])));
   const norm=s=>String(s).trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+  const ID_HDR=/(pupil\s*id|adno|admission|adm\b|upn|student\s*id|^id$|enrol|^name$|surname|forename|pupil\s*name|student\s*name|full\s*name|^pupil$|^student$)/i;
   const map={}, used=new Set();
   fields.forEach(([canon])=>{ const want=_UP_FIELD_TYPE[canon]||'text';
     let idx=-1;
-    if(want!=='text') idx=headers.findIndex((h,i)=>!used.has(i)&&types[i]===want);     // trust the DATA first
-    if(idx<0) idx=headers.findIndex((h,i)=>!used.has(i)&&norm(h)===norm(canon));        // then exact header
-    if(idx<0){ const kw=norm(canon.split(' ')[0]); if(kw.length>2) idx=headers.findIndex((h,i)=>!used.has(i)&&norm(h).indexOf(kw)>=0); }
+    if(canon==='Name'){
+      // The join key. Pupils are joined by Pupil ID; the name itself lives only on the SEN file.
+      // So accept EITHER a separate Pupil ID column (digits only) OR a combined "ID Name" column:
+      // prefer an explicit pupil-id / name header, then a column the typer reads as an id/name.
+      idx=headers.findIndex((h,i)=>!used.has(i)&&ID_HDR.test(String(h).trim()));
+      if(idx<0) idx=headers.findIndex((h,i)=>!used.has(i)&&types[i]==='name');
+    } else {
+      if(want!=='text') idx=headers.findIndex((h,i)=>!used.has(i)&&types[i]===want);     // trust the DATA first
+      if(idx<0) idx=headers.findIndex((h,i)=>!used.has(i)&&norm(h)===norm(canon));        // then exact header
+      if(idx<0){ const kw=norm(canon.split(' ')[0]); if(kw.length>2) idx=headers.findIndex((h,i)=>!used.has(i)&&norm(h).indexOf(kw)>=0); }
+    }
     if(idx>=0){ map[canon]=idx; used.add(idx); } });
-  const hasName=types.some(t=>t==='name');
+  const hasName=(map['Name']!=null);
   const problems=[];
   if(!hasName) problems.push('no column of pupil admission numbers (e.g. "017961 Smith")');
   fields.forEach(([canon,req])=>{ if(req && (_UP_FIELD_TYPE[canon]==='date') && (map[canon]==null||types[map[canon]]!=='date')) problems.push('no column of dates for "'+canon+'"'); });
@@ -6783,14 +6792,15 @@ function _upHeadersRecognised(headers, role){
 }
 
 function _upChecklist(){
-  const slots=[{ id:'sen', kind:'roster', title:'Pupil roster — SEN & gender export',
-                 hint:'Upload this first. Defines every pupil, year group and gender.', lifecycle:'replace-latest' }];
+  const slots=[{ id:'sen', kind:'roster', title:'SEN with gender — establishes the cohort',
+                 hint:'Upload this first. It lists every pupil with their Pupil ID and name, year group, gender and SEN status. Everything else attaches by Pupil ID.', lifecycle:'replace-latest' }];
   _upCohorts().forEach(c=>{
     if(c.left) return;   // left cohorts keep their history but take no new uploads
     slots.push({ id:'attend_'+c.intake, kind:'cohort', cohort:c, title:'Attendance — '+c.label, lifecycle:'per-term' });
     slots.push({ id:'behave_'+c.intake, kind:'cohort', cohort:c, title:'Behaviour — '+c.label, lifecycle:'per-term' });
     slots.push({ id:'detention_'+c.intake, kind:'cohort', cohort:c, title:'Detentions — '+c.label, lifecycle:'per-term' });
     slots.push({ id:'hp_'+c.intake, kind:'cohort', cohort:c, title:'House points — '+c.label, lifecycle:'per-term' });
+    slots.push({ id:'fsm_'+c.intake, kind:'cohort', cohort:c, title:'Free school meals — '+c.label, lifecycle:'replace-latest' });
     slots.push({ id:'grades_'+c.intake, kind:'cohort', cohort:c, title:'Grades (on-track + effort) — '+c.label, lifecycle:'accumulate' });
   });
   return slots;
