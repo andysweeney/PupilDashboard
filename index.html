@@ -987,7 +987,7 @@ const ABPS=DD.attByPeriodSubj||{}; // {pupilIdx: {period: {subject: attendance%}
 // so the export no longer needs to carry ability_map.
 // ── Grading-scale foundation (1 = BEST convention). Single source of truth for
 //    rank/label/short/colour/tick-names; each level lists the raw CSV token(s) that
-//    map to it, rank = position (${ABILITY.levels[0].label} = best). ABILITY derives from ability_map (best
+//    map to it, rank = position (${ABILITY.bestLabel} = best). ABILITY derives from ability_map (best
 //    first); EFFORT from a default 1..n. NOTE: this block is intentionally inert wrt
 //    the current display — the 1=best *flip* is applied as a separate, verified pass. ──
 function _mkScale(levels){
@@ -996,6 +996,7 @@ function _mkScale(levels){
   levels.forEach(lv=>{(lv.csv||[]).forEach(c=>byTok[String(c)]=lv); byLabel[lv.label]=lv;});
   const get=t=>byTok[String(t)]||byLabel[t]||null;
   return {levels,n:levels.length,
+    bestLabel:(levels[0]&&levels[0].label!=null)?levels[0].label:'—',
     rank:t=>{const l=get(t);return l?l.rank:null;},
     label:t=>{const l=get(t);return l?l.label:null;},
     short:t=>{const l=get(t);return l?l.short:null;},
@@ -1093,17 +1094,20 @@ function renderLoginScreen(){
   setTimeout(function(){const e=D.getElementById('lg-email');if(e)e.focus();},0);
 }
 const _SBHEAD=()=>({apikey:SB_KEY,Authorization:'Bearer '+(authToken()||SB_KEY)});
+// Per-school config isolation: every app_settings row is namespaced by the school id
+// (from JWT app_metadata) so schools never read or overwrite each other's config.
+function _cfgKey(id){ try{ var s=schoolId(); return s ? s+':'+id : id; }catch(e){ return id; } }
 async function sbGet(id){
-  const r=await fetch(SB_URL+'/rest/v1/app_settings?id=eq.'+encodeURIComponent(id)+'&select=value',{headers:_SBHEAD(),cache:'no-store'});
+  const r=await fetch(SB_URL+'/rest/v1/app_settings?id=eq.'+encodeURIComponent(_cfgKey(id))+'&select=value',{headers:_SBHEAD(),cache:'no-store'});
   if(!r.ok) throw new Error('sbGet '+id+' '+r.status);
   const rows=await r.json(); return (rows&&rows.length)?rows[0].value:null;
 }
 async function sbSet(id,value){
-  const r=await fetch(SB_URL+'/rest/v1/app_settings',{method:'POST',headers:Object.assign(_SBHEAD(),{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({id,value,updated_at:new Date().toISOString()})});
+  const r=await fetch(SB_URL+'/rest/v1/app_settings',{method:'POST',headers:Object.assign(_SBHEAD(),{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({id:_cfgKey(id),value,updated_at:new Date().toISOString()})});
   if(!r.ok) throw new Error('sbSet '+id+' '+r.status); return true;
 }
 async function sbDel(id){
-  const r=await fetch(SB_URL+'/rest/v1/app_settings?id=eq.'+encodeURIComponent(id),{method:'DELETE',headers:_SBHEAD()}); return r.ok;
+  const r=await fetch(SB_URL+'/rest/v1/app_settings?id=eq.'+encodeURIComponent(_cfgKey(id)),{method:'DELETE',headers:_SBHEAD()}); return r.ok;
 }
 const _SBCACHE={};
 async function sbPrefetch(ids){
@@ -1132,14 +1136,12 @@ async function resetCfg(id,lsKey){
   if(SB_ON){try{await sbDel(id);delete _SBCACHE[id];}catch(e){console.warn('[cfg] server reset failed for',id,e.message);}}
 }
 function _defaultScales(){
+  // Grading + effort scales START BLANK for a new school — Admin builds them in Settings.
+  // A configured school's own ability_map (from its data.json config) still seeds the ability axis;
+  // there is no hardcoded fallback scale, so nothing is pre-populated for a fresh school.
   return {
-    ability:Object.entries((CFG.ability_map&&Object.keys(CFG.ability_map).length)?CFG.ability_map:_ABMAP_DEFAULT).map(([code,label])=>({csv:[code],label,colour:_ABCOL_DEFAULT[label]||PAL.slate})).reverse(),
-    effort:[
-      {csv:['1'],label:'1',note:'Excellent',colour:PAL.red},
-      {csv:['2'],label:'2',note:'Good',colour:PAL.orange},
-      {csv:['3'],label:'3',note:'Developing',colour:PAL.sky},
-      {csv:['4'],label:'4',note:'Low',colour:PAL.green}
-    ]
+    ability:(CFG.ability_map&&Object.keys(CFG.ability_map).length)?Object.entries(CFG.ability_map).map(([code,label])=>({csv:[code],label,colour:_ABCOL_DEFAULT[label]||PAL.slate})).reverse():[],
+    effort:[]
   };
 }
 function _sanitiseScales(cfg){
@@ -1208,18 +1210,13 @@ const AG=Object.keys(AM),AN=Object.values(AM);
 const DATAKEYS_LS_KEY='pupilDashboard.dataKeys.v1';
 const _DATAKEY_DEFAULTS={
   att_codes:{present:["/","B","D","K","L","P","V","W"],authorised_absent:["C","C1","C2","E","I","J","J1","M","Q","R","S","T","X"],unauthorised_absent:["-","?","G","N","O","U"],not_counted:["Y","Y1","Y2","Y3","Y4","Y5","Y6","Y7"]},
-  sen_codes:{"K":"SEN Support","E":"EHCP","Add":"Additional Help","add":"Additional Help","Strat":"Strategies Applied","strat":"Strategies Applied","N":"SEN Monitoring"},
+  sen_codes:{},
   incident_codes:{},
   subject_map:{aliases:{},canonical:{}}
 };
 async function _resolveDataKeys(){
-  // incident baseline = legacy export mapping + regex defaults over every reason in the data
+  // incident mappings start blank — Admin assigns each raw reason to a category (no auto-categorisation)
   const incBase=Object.assign({},_DATAKEY_DEFAULTS.incident_codes,(DD.config&&DD.config.incident_codes)||{});
-  const seen=new Set();(DD.sanctionDetails||[]).forEach(d=>{if(d&&d[0]!=null)seen.add(d[0]);});
-  seen.forEach(reason=>{const r=String(reason).toLowerCase();
-    if(/on.?call/.test(r))incBase[reason]='On-Call';
-    else if(/welfare/.test(r))incBase[reason]='Welfare';
-    else if(/home.?learning/.test(r))incBase[reason]='Home Learning';});
   const out={
     att_codes:Object.assign({},_DATAKEY_DEFAULTS.att_codes,(DD.config&&DD.config.att_codes)||{}),
     sen_codes:Object.assign({},_DATAKEY_DEFAULTS.sen_codes,(DD.config&&DD.config.sen_codes)||{}),
@@ -1712,9 +1709,7 @@ function hideCTModal(){}
 let SW_CODE=1, SW_ONCALL=3, SW_DET=5;
 // GCSE 1-9 → ability letter mapping (used to render OTA grades in dashboard).
 // Loaded from config.gcse_to_letter; falls back to the default below.
-let GCSE_TO_LETTER = (DD.config && DD.config.gcse_to_letter) ? DD.config.gcse_to_letter : {
-  '1':'B','2':'B','3':'D','4':'W','5':'M','6':'C','7':'C','8':'S','9':'E','U':'B'
-};
+let GCSE_TO_LETTER = (DD.config && DD.config.gcse_to_letter) ? DD.config.gcse_to_letter : {};
 function sancWeight(type){return type===2?SW_DET:type===1?SW_ONCALL:SW_CODE}
 function applySW(){
   SW_CODE=parseInt(document.getElementById('sw-code').value)||1;
@@ -1746,7 +1741,7 @@ function chB(v,l){if(v===null)return`<div><span style="font-size:.65rem;color:va
 function abAvg(row,subs){if(!row)return null;const s=subs.map(s2=>row.sc[s2]?AS[AM[row.sc[s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
 function abDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(ABILITY.n,Math.max(1,Math.round(v)));const lv=ABILITY.levels[r-1];return lv?lv.label:'';}
 function abGrade(v){if(v==null||isNaN(v))return '—';var n=ABILITY.n;var r=Math.min(n,Math.max(1,v));var lo=Math.floor(r),hi=Math.ceil(r);var a=ABILITY.levels[lo-1],b=ABILITY.levels[hi-1];var na=a?parseFloat(a.label):NaN,nb=b?parseFloat(b.label):NaN;if(!isNaN(na)&&!isNaN(nb)){var g=na+(r-lo)*(nb-na);return String(Math.round(g*10)/10);}return abDesc(v);}
-function scaleKeyHTML(){var sep='<span style="color:var(--bd);margin:0 .2rem">·</span>';var ab=ABILITY.levels.map(function(lv){return '<span style="display:inline-flex;align-items:center;gap:.25rem"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+(lv.colour||PAL.slate)+'"></span>'+lv.label+'</span>';}).join(sep);var ef=EFFORT.levels.map(function(lv){return '<span>'+lv.label+(lv.note?' '+lv.note:'')+'</span>';}).join(sep);return '<div class="crd" style="grid-column:1/-1"><div class="ct2">Scale key <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">'+ABILITY.levels[0].label+' = best ability · '+EFFORT.levels[0].label+' = highest effort</span></div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Ability</b>'+ab+'</div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Effort</b>'+ef+'</div></div>';}
+function scaleKeyHTML(){var sep='<span style="color:var(--bd);margin:0 .2rem">·</span>';var ab=ABILITY.levels.map(function(lv){return '<span style="display:inline-flex;align-items:center;gap:.25rem"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+(lv.colour||PAL.slate)+'"></span>'+lv.label+'</span>';}).join(sep);var ef=EFFORT.levels.map(function(lv){return '<span>'+lv.label+(lv.note?' '+lv.note:'')+'</span>';}).join(sep);return '<div class="crd" style="grid-column:1/-1"><div class="ct2">Scale key <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">'+ABILITY.bestLabel+' = best ability · '+EFFORT.bestLabel+' = highest effort</span></div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Ability</b>'+ab+'</div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Effort</b>'+ef+'</div></div>';}
 function abAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return abGrade(n);}
 function efDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(EFFORT.n,Math.max(1,Math.round(v)));const lv=EFFORT.levels[r-1];return lv?(lv.note||lv.label):'';}
 function efAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return fN(n)+' '+efDesc(n);}
@@ -3239,12 +3234,12 @@ function rP(){
 
   if(hasGrades&&isA){
     document.getElementById('p-crds').innerHTML=`
-    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div>
+    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${abGrade(a6)}</span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
     </div>
-    <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div>
+    <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efRkStr}</b> in ${ctg}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -3291,7 +3286,7 @@ function rP(){
   dc('pab');dc('pef');
   if(hasGrades){
   const labs=pp.map(p=>PL[PER.indexOf(p)]);
-  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
+  document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
   const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay: subject-specific when single subject, overall when all
@@ -4280,7 +4275,7 @@ function rCmp(){
     </tr>`}).join('');
 
   out.innerHTML=`<div class="dw"><div class="dwt">Year ${targetYG} ${subLabel} \u2014 Cohort Comparison Over Time</div>
-    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
+    <table class="d ctr"><thead><tr><th>Academic Year</th><th>Intake</th><th>Pupils</th><th style="text-align:center">YTD Att.</th><th>Avg Ab. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></th><th>Avg Ef. <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">${isAll?'':'In-lesson '}Codes</th><th style="color:var(--red)">${isAll?'':'In-lesson '}On-Calls</th><th style="color:var(--violet)">${isAll?'':'In-lesson '}Detentions</th></tr></thead>
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort by Stage \u2014 Cohort Comparison</div><div class="chw"><canvas id="c-cmpef"></canvas></div></div></div>`;
 
@@ -4503,7 +4498,7 @@ function rPrg(){
     <tbody>${tblRows}</tbody></table></div>
     <div class="ch-g"><div class="chc"><div class="cht">${subLabel} Ability — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgab"></canvas></div></div><div class="chc"><div class="cht">${subLabel} Effort — Intake ${ink} Progression</div><div class="chw"><canvas id="c-prgef"></canvas></div></div></div>
     <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">${subLabel} Grade Distribution Over Time — Intake ${ink}</div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prggrade"></canvas></div></div>
-    <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">Effort Distribution Over Time — Intake ${ink} <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prgefgrade"></canvas></div></div>`;
+    <div class="chc full" style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1.25rem"><div class="cht">Effort Distribution Over Time — Intake ${ink} <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(200px,18vw,320px)"><canvas id="c-prgefgrade"></canvas></div></div>`;
 
   dc('prgab');dc('prgef');
 
@@ -7573,13 +7568,13 @@ function rSV(){
   }else{
 
   document.getElementById('sv-cards').innerHTML=`
-    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div>
+    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${abGrade(avg)}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
     </div>
-    <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div>
+    <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -7589,12 +7584,12 @@ function rSV(){
     <div class="crd"><div class="ct2">Effort Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${efRows}</div></div>`;
 
   dc('svab');dc('svef');dc('svst');dc('svefst');
-  document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
+  document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
 
   // Distribution section title
   document.getElementById('sv-dist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Distribution Over Time</div>`;
 
-  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
+  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
 
   // Build per-period data points for all pupils and each sub-group
   function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
@@ -8004,7 +7999,7 @@ function rCL(){
 
   dc('clab');dc('clef');dc('clst');dc('clefst');
   if(hasGradesCL){
-  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
+  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
 
   function ptAb(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
   function ptEf(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}
@@ -8423,8 +8418,8 @@ function rPeer(){
     return;
   }
 
-  const abNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.levels[0].label} = best)</span>';
-  const efNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.levels[0].label} = highest effort)</span>';
+  const abNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span>';
+  const efNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span>';
 
   const sancNote='<span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(weekly · per pupil · codes + detentions)</span>';
 
@@ -8582,8 +8577,8 @@ function rPeer(){
       <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?PAL.green:parseFloat(tgYtdAtt)>=90?'var(--tx)':PAL.red}">${tgYtdAtt}%</div>
       <div style="font-size:.72rem;color:var(--mu)">Codes: <span style="color:var(--orange);font-weight:600">${tgCodes}</span> · Detentions: <span style="color:var(--violet);font-weight:600">${tgDets}</span></div>
     </div>
-    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.levels[0].label} = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${abGrade(avg)}</div></div>
-    <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${EFFORT.levels[0].label} = highest effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></div></div>`:''}
+    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.bestLabel} = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${abGrade(avg)}</div></div>
+    <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${EFFORT.bestLabel} = highest effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></div></div>`:''}
   </div>`;
 
   // ── PUPIL TABLE ──
@@ -8753,7 +8748,7 @@ function rPeer(){
     const efYMin=allEfVals.length?Math.max(1,Math.floor(Math.min(...allEfVals)-.5)):1;
     const efYMax=allEfVals.length?Math.min(4,Math.ceil(Math.max(...allEfVals)+.5)):4;
 
-    document.getElementById('tg-charts').innerHTML=`<div class="chc"><div class="cht">${tgName} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.levels[0].label} = best)</span></div><div class="chw"><canvas id="c-tgab"></canvas></div></div><div class="chc"><div class="cht">${tgName} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${EFFORT.levels[0].label} = highest effort)</span></div><div class="chw"><canvas id="c-tgef"></canvas></div></div>`;
+    document.getElementById('tg-charts').innerHTML=`<div class="chc"><div class="cht">${tgName} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.bestLabel} = best)</span></div><div class="chw"><canvas id="c-tgab"></canvas></div></div><div class="chc"><div class="cht">${tgName} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw"><canvas id="c-tgef"></canvas></div></div>`;
 
     dc('tgab');dc('tgef');
     const showLegend={labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:8,padding:6}};
@@ -10417,15 +10412,17 @@ function rPeer(){
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem">
         ${(()=>{
           // Build the Grade Mapping panel inline
-          const letterOptions=['B','D','W','M','C','S','E'];
-          const letterNames={B:'Below',D:'Developing',W:'Working',M:'Meeting',C:'Confident',S:'Skilful',E:'Excellent'};
+          // Options come from the school's CONFIGURED ability scale, not a hardcoded B-E set.
+          const _abLv=(typeof ABILITY!=='undefined'&&ABILITY.levels)?ABILITY.levels:[];
+          const letterOptions=_abLv.map(l=>(l.csv&&l.csv[0])).filter(Boolean);
+          const letterNames={};_abLv.forEach(l=>{if(l.csv&&l.csv[0])letterNames[l.csv[0]]=l.label||l.csv[0];});
           const gradeRow=(g)=>{
-            const cur=GCSE_TO_LETTER[g]||'B';
-            const opts=letterOptions.map(l=>`<option value="${l}"${l===cur?' selected':''}>${l} (${letterNames[l]})</option>`).join('');
+            const cur=GCSE_TO_LETTER[g]||'';
+            const opts=['<option value="">— not set —</option>'].concat(letterOptions.map(l=>`<option value="${l}"${l===cur?' selected':''}>${l}${letterNames[l]?' ('+letterNames[l]+')':''}</option>`)).join('');
             const label=g==='U'?'Ungraded (U)':`Grade ${g}`;
             return `<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem"><label style="font-size:.74rem;color:var(--tx);min-width:9rem;margin:0">${label}</label><select id="gm-${g}" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'Hanken Grotesk',sans-serif;font-size:.78rem;padding:.35rem .5rem;border-radius:6px;flex:1;max-width:14rem">${opts}</select></div>`;
           };
-          const rows=['1','2','3','4','5','6','7','8','9','U'].map(gradeRow).join('');
+          const rows=letterOptions.length?['1','2','3','4','5','6','7','8','9','U'].map(gradeRow).join(''):'<div style="font-size:.72rem;color:var(--red);padding:.4rem 0;line-height:1.4">Define your Ability grading scale first (in <b>Grading Scales</b> below), then return here to map each GCSE grade to it.</div>';
           return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.85rem 1rem;background:var(--sf)">
             <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">GCSE Grade Mapping</div>
             <div style="font-size:.7rem;color:var(--mu);margin-bottom:.3rem;line-height:1.4">From Y10 onwards, ability is reported as an <em>On Track to Achieve</em> GCSE grade (1-9). The dashboard also stores a B-E ability code for consistency with KS3 reporting. This panel sets how each GCSE grade maps to that internal code.</div>
