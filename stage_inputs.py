@@ -23,9 +23,12 @@ import pandas as pd
 ATT_COLS = ['Name', 'Reg', 'Mark', 'Date', 'Subject', 'Teacher', 'Period Description']
 BEH_COLS = ['Name', 'Date', 'Subject', 'Lesson - Period', 'Incident', 'Teacher']
 
-# Grade resultset -> engine Term label (AY labelled by its START year). Both current cohorts sit
-# in AY 2025-26, so a "Year 10/11 Summer" resultset is its T3. Configurable for future imports.
-DEFAULT_GRADE_TERM = 'T3 2025'
+# Grade term resolution: the report's "Resultset" (e.g. "*Year 10 Summer") carries the SEASON
+# (Autumn/Spring/Summer -> T1/T2/T3) and the YEAR GROUP it was collected in, but NOT a calendar
+# year. The academic year is recovered per pupil from their intake: AY = intake + (resultYG - 7).
+# So "Year 10 Summer" for an intake-2022 pupil -> AY 2025 -> "T3 2025", and the same label for an
+# intake-2021 (now Year 11) pupil -> AY 2024. No hard-coded default term: if a row can't be
+# resolved it is left blank for the engine to flag, never silently stamped with a guessed term.
 
 
 def _read(path):
@@ -72,9 +75,38 @@ def _beh_norm(df, historic):
     return d[BEH_COLS]
 
 
-def _parse_grades(attain_paths, effort_paths, term):
+def _parse_grades(attain_paths, effort_paths, pid_intake=None, fallback_term=None):
+    pid_intake = pid_intake or {}
+    stats = {'rows': 0, 'unresolved_term': 0}
     def pidnum(n):
         m = re.match(r'(\d+)', str(n));  return str(int(m.group(1))) if m else None
+    def term_of(resultset, pidn):
+        # Season from the resultset; academic year from (resultset year group + pupil intake).
+        s = str(resultset or '').strip(); low = s.lower()
+        if 'aut' in low:   season = 'T1'
+        elif 'spr' in low: season = 'T2'
+        elif 'sum' in low: season = 'T3'
+        else:
+            tm = re.search(r'\bt\s*([1-3])\b', low) or re.search(r'term\s*([1-3])', low)
+            season = 'T' + tm.group(1) if tm else None
+        if season is None:
+            return fallback_term
+        ay = None
+        # Preferred: a "Year N" group in the resultset, resolved to an AY via the pupil's intake.
+        ygm = re.search(r'year\s*(\d{1,2})\b', low) or re.search(r'\byr?\s*(\d{1,2})\b', low)
+        yg = int(ygm.group(1)) if ygm else None
+        intake = pid_intake.get(pidn) if pidn else None
+        if yg is not None and 7 <= yg <= 13 and intake is not None:
+            ay = intake + (yg - 7)
+        else:
+            # Fallback: an explicit calendar year in the resultset. AY is labelled by its START
+            # year, so an autumn-term calendar year IS the AY; spring/summer is AY+1.
+            ym = re.search(r'(20\d{2})', s)
+            if ym:
+                cal = int(ym.group(1)); ay = cal if season == 'T1' else cal - 1
+        if ay is None:
+            return fallback_term
+        return f"{season} {ay}"
     def parse(paths, rx, valcol):
         rows = []
         for p in paths:
@@ -83,22 +115,31 @@ def _parse_grades(attain_paths, effort_paths, term):
                 m = re.match(rx, bd)
                 if not m:
                     continue
-                rows.append({'pid': pidnum(r.get('Name')), 'Name': r.get('Name'),
-                             'Subject': m.group(1).strip(), valcol: r.get('Result')})
-        return pd.DataFrame(rows, columns=['pid', 'Name', 'Subject', valcol])
-    ot = parse(attain_paths, r'(?:On track for|Predicted|Target)\s+(.*)$', 'Ability Value')
-    ef = parse(effort_paths, r'(.*)\s+Effort$', 'Effort Value')
+                pidn = pidnum(r.get('Name'))
+                tm = term_of(r.get('Resultset'), pidn)
+                if tm is None:
+                    stats['unresolved_term'] += 1
+                rows.append({'pid': pidn, 'Name': r.get('Name'),
+                             'Subject': m.group(1).strip(), valcol: r.get('Result'),
+                             'Term': tm})
+        return pd.DataFrame(rows, columns=['pid', 'Name', 'Subject', valcol, 'Term'])
+    # Both metrics can live in ONE file (a single grades export) or in separate attainment/
+    # effort files — so parse each metric from the union of all grade files.
+    all_paths = list(dict.fromkeys(list(attain_paths) + list(effort_paths)))
+    ot = parse(all_paths, r'(?:On track for|Predicted|Target)\s+(.*)$', 'Ability Value')
+    ef = parse(all_paths, r'(.*)\s+Effort$', 'Effort Value')
     if ot.empty and ef.empty:
-        return pd.DataFrame(columns=['Name', 'Subject', 'Term', 'Ability Value', 'Effort Value'])
-    m = pd.merge(ot[['pid', 'Name', 'Subject', 'Ability Value']],
-                 ef[['pid', 'Subject', 'Effort Value']], on=['pid', 'Subject'], how='outer')
+        return pd.DataFrame(columns=['Name', 'Subject', 'Term', 'Ability Value', 'Effort Value']), stats
+    m = pd.merge(ot[['pid', 'Name', 'Subject', 'Term', 'Ability Value']],
+                 ef[['pid', 'Subject', 'Term', 'Effort Value']],
+                 on=['pid', 'Subject', 'Term'], how='outer')
     nm = dict(zip(ef['pid'], ef['Name'])) if not ef.empty else {}
     m['Name'] = m.apply(lambda r: r['Name'] if isinstance(r['Name'], str) else nm.get(r['pid'], r['pid']), axis=1)
-    m['Term'] = term
-    return m[['Name', 'Subject', 'Term', 'Ability Value', 'Effort Value']]
+    stats['rows'] = len(m)
+    return m[['Name', 'Subject', 'Term', 'Ability Value', 'Effort Value']], stats
 
 
-def stage(upload_dir, out_dir, grade_term=DEFAULT_GRADE_TERM, current_acad_year=None, verbose=True):
+def stage(upload_dir, out_dir, grade_term=None, current_acad_year=None, verbose=True):
     os.makedirs(out_dir, exist_ok=True)
     buckets = {}
     for fn in sorted(os.listdir(upload_dir)):
@@ -188,9 +229,25 @@ def stage(upload_dir, out_dir, grade_term=DEFAULT_GRADE_TERM, current_acad_year=
     attain = [p for (role, _), ps in buckets.items() if role == 'grade_attain' for p in ps]
     effort = [p for (role, _), ps in buckets.items() if role == 'grade_effort' for p in ps]
     if attain or effort:
-        rep = _parse_grades(attain, effort, grade_term)
+        # Pupil -> intake, read from the roster we just derived, so each grade's term can be
+        # resolved from its Resultset year group (see _parse_grades). No roster -> no map; rows
+        # whose term can't be resolved are left blank for the engine to flag.
+        pid_intake = {}
+        _rpath = os.path.join(out_dir, 'Roster.csv')
+        if os.path.exists(_rpath):
+            try:
+                _rdf = pd.read_csv(_rpath, dtype=str)
+                for _, _rr in _rdf.iterrows():
+                    _m = re.match(r'(\d+)', str(_rr.get('pid', '')))
+                    if _m and pd.notna(_rr.get('Intake')) and str(_rr.get('Intake')).strip():
+                        pid_intake[str(int(_m.group(1)))] = int(float(_rr['Intake']))
+            except Exception as e:
+                log(f"  grades: roster intake map unavailable ({e})")
+        rep, gsum = _parse_grades(attain, effort, pid_intake, fallback_term=grade_term)
         rep.to_csv(os.path.join(out_dir, 'Reports.csv'), index=False)
         summary['report_rows'] = len(rep)
+        if gsum.get('unresolved_term'):
+            log(f"  grades: {gsum['unresolved_term']} rows with unresolvable term (left blank for Admin)")
 
     for k, v in summary.items():
         log(f"  {k}: {v}")
