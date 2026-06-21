@@ -82,7 +82,7 @@ INCIDENT_CATEGORIES = {
 }
 
 # ── REPORTS / GRADES (progress scores) ──
-# The dashboard stores, per pupil × term × subject:  sc[subject] = [abilityLetter, effort, OTE]
+# The dashboard stores, per pupil × term × subject:  sc[subject] = [abilityLetter, effort, OTE, abilityRank]  (rank on reference ladder, 1=best; Option 2)
 #   abilityLetter : 7-point B/D/W/M/C/S/E   (Below -> Excellent)
 #   effort        : 1..4                     (1 = Excellent .. 4 = Low; INVERTED vs ability)
 #   OTE           : optional GCSE target 1..9 (from "OTA Grade")
@@ -282,10 +282,12 @@ def get_term(date_str):
     return f"T{t} {ay}"
 
 def get_periods(intake, cay):
-    """Period labels for a cohort: intake (Y7 start year) .. cay, capped at Y11."""
+    """Period labels for a cohort: intake (Y7 start year) .. cay, capped at Y13 (end of KS5).
+    The cap reaches Year 13 so sixth-form cohorts and the GCSE→A-Level transition are charted;
+    cohorts not yet that old simply stop at the current year."""
     out = []
     for ay in range(intake, cay + 1):
-        if (ay - intake + 7) > 11:   # past Year 11
+        if (ay - intake + 7) > 13:   # past Year 13
             break
         for t in (1, 2, 3):
             out.append(f"T{t} {ay}")
@@ -656,8 +658,75 @@ print(f"Timetables: {sum(len(v) for v in tt_out.values())} pupil-years across {l
 # Cross-scale longitudinal lines use the key's transitions at chart time, not a storage-time rewrite.
 _SCALE_DEFS   = (KEY or {}).get('scales', {}).get('definitions', {})
 _ATTAIN_BY_YG = {int(k): v for k, v in (KEY or {}).get('scales', {}).get('attainmentByYearGroup', {}).items()}
-_REF_SCALE    = (KEY or {}).get('scales', {}).get('referenceScale')
-_TRANSITIONS  = (KEY or {}).get('transitions', {})
+# Built-in reference ladder + transition maps. National-ish TEMPLATES so a fresh school charts across
+# key stages with no setup; the school's key overrides per-scale on first login (KS3 schemes vary).
+# Reference is best-first (E best). Transitions pin each qualification grade onto a reference band.
+_BUILTIN_REF = ['E', 'S', 'C', 'M', 'W', 'D', 'B']
+_BUILTIN_TRANSITIONS = {
+    'gcse91': {'9':'E','8':'S','7':'C','6':'C','5':'M','4':'W','3':'D','2':'D','1':'B'},
+    'alevel': {'A*':'E','A':'S','B':'C','C':'W','D':'D','E':'B'},
+}
+_REF_SCALE    = (KEY or {}).get('scales', {}).get('referenceScale') or _BUILTIN_REF
+_TRANSITIONS  = dict(_BUILTIN_TRANSITIONS); _TRANSITIONS.update((KEY or {}).get('transitions', {}) or {})
+# ── OPTION 2: resolve each grade to a RANK on the reference ladder AT IMPORT, using the grade's
+# year group to pick the right scale. This is what lets a KS3 'E' (top) and an A-Level 'E' (bottom)
+# coexist: they are the SAME STRING but are resolved through different scales, so they never collide.
+# The rank (1 = best) is stored alongside the raw grade; the dashboard plots the rank for a
+# continuous cross-key-stage line and shows the raw grade in tables.
+def _build_ref_rank(ref):
+    """Reference ladder (best-first) -> {token: rank}, rank 1 = best. Accepts a plain best-first list,
+    a {'order': [...]}, or a {'levels': [{'raw': [...]}, ...]} structure."""
+    order = []
+    if isinstance(ref, list):
+        order = [[t] for t in ref]
+    elif isinstance(ref, dict):
+        lv = ref.get('levels')
+        if isinstance(lv, list):
+            for l in lv:
+                raws = l.get('raw') or ([l.get('code')] if l.get('code') else [])
+                order.append([str(x) for x in raws])
+        elif isinstance(ref.get('order'), list):
+            order = [[t] for t in ref['order']]
+    rank = {}
+    for i, toks in enumerate(order):
+        for t in toks:
+            rank[str(t)] = i + 1
+            rank[str(t).upper()] = i + 1
+    return rank
+_REF_RANK = _build_ref_rank(_REF_SCALE)
+def _ref_order_tokens(ref):
+    """Reference ladder as an ordered best-first token list, for the dashboard's ability axis."""
+    if isinstance(ref, list):
+        return [str(t) for t in ref]
+    if isinstance(ref, dict):
+        lv = ref.get('levels')
+        if isinstance(lv, list):
+            out = []
+            for l in lv:
+                raws = l.get('raw') or ([l.get('code')] if l.get('code') else [])
+                if raws:
+                    out.append(str(raws[0]))
+            return out
+        if isinstance(ref.get('order'), list):
+            return [str(t) for t in ref['order']]
+    return []
+_REF_ORDER = _ref_order_tokens(_REF_SCALE)
+def map_attainment_rank(canon, year_group):
+    """Validated attainment token -> RANK on the reference ladder (1 = best), using the YEAR GROUP to
+    pick the scale. KS3/reference grades rank directly (the token IS a reference band). KS4/KS5 grades
+    map through the key's transitions onto a reference band first, then to its rank. A token with no
+    reference assignment returns None and is flagged for the Admin to calibrate."""
+    if not _REF_RANK or canon is None:
+        return None
+    s = str(canon)
+    scale_id = _ATTAIN_BY_YG.get(year_group) or _default_scale_for_yg(year_group)
+    if scale_id is None:                                    # reference/KS3 grade
+        return _REF_RANK.get(s) or _REF_RANK.get(s.upper())
+    tmap = _TRANSITIONS.get(scale_id) or {}                 # KS4/KS5 grade -> reference band
+    refband = tmap.get(s) or tmap.get(s.upper())
+    if refband is None:
+        return None
+    return _REF_RANK.get(str(refband)) or _REF_RANK.get(str(refband).upper())
 def _scale_token_map(scale_id):
     out = {}
     for lvl in _SCALE_DEFS.get(scale_id, {}).get('levels', []):
@@ -709,11 +778,12 @@ def map_attainment_scaled(raw, year_group, flagset):
     return canon
 
 # ── PARSE REPORTS (grades) -> per pupil × term × subject score lookup ──
-# report_scores[pid][period_label][subject] = [abilityLetter, effort, OTE]
+# report_scores[pid][period_label][subject] = [abilityLetter, effort, OTE, abilityRank]
 print("Parsing reports (grades)...")
 report_scores = defaultdict(lambda: defaultdict(dict))
 _rep_subject_set = set()
 _unmapped_ability, _unmapped_effort = set(), set()
+_unmapped_rank = set()   # tokens that validate but have no reference-band assignment (transition gap)
 _rep_rows_used = _rep_no_subject = _rep_no_term = _rep_no_pupil = _rep_empty = 0
 
 if len(reports):
@@ -758,7 +828,12 @@ if len(reports):
         if ability is None and effort is None and ote is None:
             _rep_empty += 1
             continue
-        report_scores[p][term][subj] = [ability, effort, ote]
+        # Option 2: resolve the rank now, with the year group, so it's collision-free and the
+        # dashboard just plots it. None if the school hasn't calibrated this grade's reference band.
+        ability_rank = map_attainment_rank(ability, _yg)
+        if ability is not None and ability_rank is None and _REF_RANK:
+            _unmapped_rank.add(f"{_norm_raw(ability)}@Y{_yg}")
+        report_scores[p][term][subj] = [ability, effort, ote, ability_rank]
         _rep_subject_set.add(subj)
         _rep_rows_used += 1
 
@@ -775,6 +850,10 @@ if _unmapped_ability:
 if _unmapped_effort:
     print(f"⚠ UNMAPPED EFFORT VALUES ({len(_unmapped_effort)}) — add to EFFORT_VALUE_MAP: "
           f"{sorted(_unmapped_effort)}")
+if _unmapped_rank:
+    print(f"⚠ UNCALIBRATED GRADE→REFERENCE ({len(_unmapped_rank)}) — these grades validated but have "
+          f"no reference band in the school's transitions, so they won't chart on the shared ladder. "
+          f"Set them in Admin (Grade Mapping): {sorted(_unmapped_rank)}")
 
 # ── COLLECT ALL SUBJECTS ──
 all_subjects = sorted(_all_subject_set)
@@ -1371,6 +1450,8 @@ output = {
     "config": {
         "subjects": all_subjects,
         "ability_map": ABILITY_MAP,
+        "reference_scale": _REF_ORDER,
+        "transitions": _TRANSITIONS,
         "periods": periods_list,
         "period_labels": period_labels,
         "intakes": sorted(INTAKES, reverse=True),
@@ -1448,6 +1529,7 @@ _flag_sources = {
     "unmapped_incident":       _flat(_g.get("unmapped")),
     "unmapped_ability_value":  _flat(_g.get("_unmapped_ability")),
     "unmapped_effort_value":   _flat(_g.get("_unmapped_effort")),
+    "uncalibrated_grade":      _flat(_g.get("_unmapped_rank")),
 }
 _flags_path = os.environ.get("FLAGS_PATH", "/home/claude/flags.json")
 _emitted = dump_flags(_flags_path, _flag_sources)
