@@ -1799,19 +1799,64 @@ function applySW(){
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   saveThresholds();
 }
-// Apply changes from the Grade Mapping panel — re-reads the per-grade dropdown
-// values and refreshes any currently-displayed pupil view.
-function applyGM(){
+// ── Write calibration into the school's KEY (the engine's source of truth), not the per-school
+// settings store, so the next rebuild picks it up. Read-modify-write so the rest of the key
+// (academic year, scale definitions, …) is never clobbered; a read failure aborts WITHOUT writing.
+async function _keySave(mutate){
+  const sid=schoolId();
+  if(!SB_ON||!sid) throw new Error('Sign in with a school account to save calibration.');
+  const path=sid+'/key.json';
+  const r=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+encodeURI(path),
+    { headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken() } });
+  if(!r.ok) throw new Error('Could not read the school key (HTTP '+r.status+') — nothing saved.');
+  let key; try{ key=JSON.parse(await r.text()); }catch(e){ throw new Error('The school key is unreadable — nothing saved.'); }
+  if(!key||typeof key!=='object') throw new Error('The school key is empty — nothing saved.');
+  mutate(key);
+  const body=new Blob([JSON.stringify(key,null,2)],{type:'application/json'});
+  const w=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
+    { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
+  if(!w.ok) throw new Error('Could not save to the school key (HTTP '+w.status+').');
+  return true;
+}
+function _calMsg(id,text,isErr){
+  const el=document.getElementById(id);
+  if(el){ el.textContent=text; el.style.color=isErr?PAL.red:PAL.green; }
+  else if(isErr){ alert(text); }
+}
+function sancWeight(type){return type===2?SW_DET:type===1?SW_ONCALL:SW_CODE}
+function applySW(){
+  SW_CODE=parseInt(document.getElementById('sw-code').value)||1;
+  SW_ONCALL=parseInt(document.getElementById('sw-oncall').value)||3;
+  SW_DET=parseInt(document.getElementById('sw-det').value)||5;
+  document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
+  saveThresholds();
+}
+// Save the GCSE→reference calibration into the key's transitions. The engine re-resolves ranks from
+// it on the next rebuild; until then the dashboard keeps showing the last rebuilt values.
+async function applyGM(){
   const newMap={};
   ['1','2','3','4','5','6','7','8','9','U'].forEach(g=>{
     const el=document.getElementById('gm-'+g);
     if(el&&el.value) newMap[g]=el.value;
   });
-  GCSE_TO_LETTER=newMap;
-  // Persist alongside thresholds (separate key so we don't conflate concerns)
-  try{saveCfg('gcseMap','pupilDashboard.gcseMap.v1',newMap);}catch(e){}
-  // Re-render Pupil tab if active so changes show immediately
-  try{rP()}catch(e){}
+  _calMsg('gm-msg','Saving…',false);
+  try{
+    await _keySave(k=>{ k.transitions=k.transitions||{}; k.transitions.gcse91=newMap; });
+    _calMsg('gm-msg','Saved to the school key. Rebuild to apply.',false);
+  }catch(e){ _calMsg('gm-msg',e.message,true); }
+}
+// Same for A-Level grades (KS5).
+async function applyAL(){
+  const newMap={};
+  ['A*','A','B','C','D','E','U'].forEach(g=>{
+    const el=document.getElementById('al-'+g);
+    if(el&&el.value) newMap[g]=el.value;
+  });
+  _calMsg('al-msg','Saving…',false);
+  try{
+    await _keySave(k=>{ k.transitions=k.transitions||{}; k.transitions.alevel=newMap; });
+    _calMsg('al-msg','Saved to the school key. Rebuild to apply.',false);
+  }catch(e){ _calMsg('al-msg',e.message,true); }
 }
 function showSWModal(){}
 function hideSWModal(){}
@@ -10494,26 +10539,39 @@ function rPeer(){
     };
     
     // GCSE Grade Mapping panel — defined here, rendered with the Grading Scales section below.
-    const gradeMapHtml=(()=>{
-      // Options come from the school's CONFIGURED ability scale, not a hardcoded B-E set.
+    const _refMapPanel=(title,grades,idPrefix,scaleId,applyFn,msgId,intro)=>{
+      // Pin each qualification grade to a reference band. Current values come from the engine-echoed
+      // key (CFG.transitions[scaleId]); the dropdown options are the reference bands themselves.
       const _abLv=(typeof ABILITY!=='undefined'&&ABILITY.levels)?ABILITY.levels:[];
-      const letterOptions=_abLv.map(l=>(l.csv&&l.csv[0])).filter(Boolean);
-      const letterNames={};_abLv.forEach(l=>{if(l.csv&&l.csv[0])letterNames[l.csv[0]]=l.label||l.csv[0];});
+      const bandOptions=_abLv.map(l=>(l.csv&&l.csv[0])).filter(Boolean);
+      const bandNames={};_abLv.forEach(l=>{if(l.csv&&l.csv[0])bandNames[l.csv[0]]=l.label||l.csv[0];});
+      const curMap=(typeof CFG!=='undefined'&&CFG.transitions&&CFG.transitions[scaleId])?CFG.transitions[scaleId]:{};
+      if(!_USE_REF){
+        return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.85rem 1rem;background:var(--sf);margin-bottom:1rem">
+          <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">${title}</div>
+          <div style="font-size:.72rem;color:var(--mu);line-height:1.4">Grade calibration becomes available once you have deployed the reference-ladder engine and rebuilt. After that, this panel will let you pin each grade to a reference band.</div></div>`;
+      }
       const gradeRow=(g)=>{
-        const cur=GCSE_TO_LETTER[g]||'';
-        const opts=['<option value="">— not set —</option>'].concat(letterOptions.map(l=>`<option value="${l}"${l===cur?' selected':''}>${l}${letterNames[l]?' ('+letterNames[l]+')':''}</option>`)).join('');
+        const cur=curMap[g]||'';
+        const opts=['<option value="">— not set —</option>'].concat(bandOptions.map(l=>`<option value="${l}"${l===cur?' selected':''}>${l}${(bandNames[l]&&bandNames[l]!==l)?' ('+bandNames[l]+')':''}</option>`)).join('');
         const label=g==='U'?'Ungraded (U)':`Grade ${g}`;
-        return `<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem"><label style="font-size:.74rem;color:var(--tx);min-width:9rem;margin:0">${label}</label><select id="gm-${g}" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'Hanken Grotesk',sans-serif;font-size:.78rem;padding:.35rem .5rem;border-radius:6px;flex:1;max-width:14rem">${opts}</select></div>`;
+        return `<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem"><label style="font-size:.74rem;color:var(--tx);min-width:9rem;margin:0">${label}</label><select id="${idPrefix}-${g}" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'Hanken Grotesk',sans-serif;font-size:.78rem;padding:.35rem .5rem;border-radius:6px;flex:1;max-width:14rem">${opts}</select></div>`;
       };
-      const rows=letterOptions.length?['1','2','3','4','5','6','7','8','9','U'].map(gradeRow).join(''):'<div style="font-size:.72rem;color:var(--red);padding:.4rem 0;line-height:1.4">Define your Ability grading scale above first, then map each GCSE grade to it.</div>';
       return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.85rem 1rem;background:var(--sf);margin-bottom:1rem">
-        <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">GCSE Grade Mapping</div>
-        <div style="font-size:.7rem;color:var(--mu);margin-bottom:.3rem;line-height:1.4">From Y10 onwards, ability is reported as an <em>On Track to Achieve</em> GCSE grade (1-9). The dashboard also stores a B-E ability code for consistency with KS3 reporting. This panel sets how each GCSE grade maps to that internal code.</div>
-        <div style="font-size:.65rem;color:var(--ac);margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.05em">Affects: Pupil tab, Subject tab, all grade displays</div>
-        ${rows}
-        <button onclick="applyGM()" style="margin-top:.6rem;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save grade mapping</button>
+        <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">${title}</div>
+        <div style="font-size:.7rem;color:var(--mu);margin-bottom:.3rem;line-height:1.4">${intro}</div>
+        <div style="font-size:.65rem;color:var(--ac);margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.05em">Saved into the school key · applies on next rebuild</div>
+        ${grades.map(gradeRow).join('')}
+        <div style="display:flex;align-items:center;gap:.8rem;margin-top:.6rem;flex-wrap:wrap">
+          <button onclick="${applyFn}()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save to key</button>
+          <span id="${msgId}" style="font-size:.7rem;color:var(--mu)"></span>
+        </div>
       </div>`;
-    })();
+    };
+    const gradeMapHtml=_refMapPanel('GCSE Grade Mapping',['9','8','7','6','5','4','3','2','1','U'],'gm','gcse91','applyGM','gm-msg',
+      'Pin each GCSE grade (Y10\u2013Y11) to a reference band \u2014 the school\u2019s calibration of how a GCSE grade compares to a KS3 level. The engine uses it to place GCSE grades on the shared ladder, so a pupil\u2019s line runs smoothly from KS3 into GCSE.');
+    const aLevelMapHtml=_refMapPanel('A-Level Grade Mapping',['A*','A','B','C','D','E','U'],'al','alevel','applyAL','al-msg',
+      'Pin each A-Level grade (Y12\u2013Y13) to a reference band, so KS5 grades sit on the same ladder as KS3 and GCSE and a pupil\u2019s line continues across the GCSE \u2192 A-Level transition.');
     const threshHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Concern Thresholds &amp; Weightings</div>
       <div style="font-size:.72rem;color:var(--mu);margin-bottom:.85rem;line-height:1.5">These settings control how the dashboard decides when a pupil, class or tutor group is flagged as a concern. Each section below describes a single type of concern, lists the settings that affect it, and notes which tabs you'll see the change reflected in. Hover any value box for additional detail. After making changes, click <b style="color:var(--tx)">Save thresholds</b> at the foot of this panel.</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem">
@@ -10657,7 +10715,8 @@ function rPeer(){
       +_scaleEditor('Ability','ability',ABILITY)
       +_scaleEditor('Effort','effort',EFFORT)
       +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save scales</button><button onclick="window._resetScales()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer">↺ Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads the page to apply the new scale.</span></div>`
-      +gradeMapHtml;
+      +gradeMapHtml
+      +aLevelMapHtml;
     out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml+subjHtml+scalesHtml;
   }
 
