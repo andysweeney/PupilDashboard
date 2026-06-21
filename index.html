@@ -8131,14 +8131,22 @@ function rCC(){
   const ps=document.getElementById('p-sel');
   const pupils=Object.values(REG).sort((a,b)=>{if(a.left!==b.left)return a.left?1:-1;return a.id.localeCompare(b.id)});
   pupils.forEach(p=>{const o=document.createElement('option');o.value=p.index;const yg2=atSchool(p.intake)?'Y'+curYG(p.intake):'LEFT';o.textContent=`${p.id} (${yg2} · Intake ${p.intake})`;ps.appendChild(o)});
+  // Current-teaching subjects only: subjects with at least one class this year. Historical
+  // subjects (taught in earlier years, no current class) stay in the data and in the Admin
+  // Subjects table (for renaming/aliasing), but are excluded from these analysis pickers so
+  // they don't show up with no pupils or classes. Falls back to the full list if no current
+  // classes are detected at all, so the dropdowns are never left empty.
+  const _curSubjSet=new Set();
+  Object.values(DD.enrolments||{}).forEach(recs=>{(recs||[]).forEach(r=>{if(r&&r.t==='cls'&&r.s!=null)_curSubjSet.add(r.s);});});
+  const curSubs=(()=>{const f=SUBS.filter(s=>_curSubjSet.has(s));return f.length?f:SUBS;})();
   const sf=document.getElementById('p-sf');
-  SUBS.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sf.appendChild(o)});
+  curSubs.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sf.appendChild(o)});
   sf.onchange=rP;
   // Populate all subject dropdowns
   ['cmp-sub','sv-sub','cl-sub','cc-sub'].forEach(id=>{
     const sel=document.getElementById(id);
     if(id==='cmp-sub'){const ao2=document.createElement('option');ao2.value='all';ao2.textContent='All Subjects';sel.appendChild(ao2)}
-    SUBS.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sel.appendChild(o)});
+    curSubs.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sel.appendChild(o)});
   });
   popCL();
 
