@@ -332,11 +332,20 @@ def _read_glob(pattern, rename=None):
 
 att_frames = _read_glob('*attend_updated.csv')
 if not att_frames:
-    raise SystemExit("No attendance files (*attend_updated.csv) found in staging.")
+    # A cohort can be established from its roster alone — e.g. a school setting up a year group
+    # before term has started. With no attendance yet, build from the roster and leave the
+    # attendance-derived views empty until data arrives. A rebuild is never blocked.
+    print("No attendance files yet — building from the roster alone "
+          "(attendance views stay empty until attendance data is uploaded).")
+    att_frames = [pd.DataFrame(columns=['Name', 'Date', 'Mark', 'Subject', 'Teacher',
+                                        'Period Description', 'Reg'])]
 codes_list = _read_glob('Behave*.csv',
                         rename={'Teacher Name': 'Teacher', 'Lesson - Period': 'Period', 'Pupil name': 'Name'})
 dets_list = _read_glob('Detention*.csv')
-fsm_y10 = _req_csv('FSM.csv'); fsm_y11 = fsm_y10
+# FSM now rides in on the roster (captured into Roster.csv's 'FSM' column, alongside SEN and
+# gender). A legacy whole-school FSM.csv is still read if present, but it is OPTIONAL now —
+# a missing FSM file can never block a rebuild.
+fsm_y10 = _opt_csv('FSM.csv', ['Name', 'Eligible for free meals']); fsm_y11 = fsm_y10
 sen_y10 = (pd.read_excel(f'{UP}/SEN.xlsx') if os.path.exists(f'{UP}/SEN.xlsx')
            else pd.DataFrame(columns=['Name', 'SEN Status Code']))
 sen_y11 = _opt_csv('SEN.csv', ['Name', 'SEN Status'])
@@ -470,8 +479,10 @@ if os.path.exists(_roster_path):
         try: _ik = int(_r['Intake'])
         except (ValueError, TypeError, KeyError): _ik = None
         _g = str(_r.get('Gender', '')).strip().upper()[:1]
+        _rf = str(_r.get('FSM', '')).strip().upper()[:1]
         roster_map[_p] = {'intake': _ik, 'gender': _g if _g in ('M', 'F') else 'U',
-                          'name': str(_r.get('Name', '')).strip()}
+                          'name': str(_r.get('Name', '')).strip(),
+                          'fsm': 'Y' if _rf == 'Y' else ''}
     print(f"Roster: {len(roster_map)} pupils (authoritative cohort source)")
 else:
     print("Roster: none found — falling back to cohort tags in pupil names")
@@ -538,9 +549,17 @@ if _CURRENT_ROSTER:
 # ── FSM & SEN FLAGS ──
 print("Processing FSM and SEN flags...")
 fsm_set = set()
+# FSM is a pupil attribute carried on the roster (alongside SEN and gender), so current
+# on-roll FSM comes straight from the roster.
+for _p, _r in roster_map.items():
+    if _p in registry and _r.get('fsm') == 'Y':
+        fsm_set.add(_p)
+# A legacy whole-school FSM.csv export is still honoured if one is present (additive, optional).
 for _, row in fsm_y10.iterrows():
-    p = pid(row['Name'])
-    if p in registry and row.get('Eligible for free meals') == 'T':
+    p = pid(row['Name']) if pd.notna(row.get('Name')) else None
+    _elig = str(row.get('Eligible for free meals', '')).strip().upper()[:1]
+    _flag = str(row.get('FSM', '')).strip().upper()[:1]
+    if p in registry and (_elig in ('T', 'Y') or _flag in ('Y', 'T', 'E')):
         fsm_set.add(p)
 
 # Leaver FSM: keep last-known FSM for pupils no longer on the roster. Current pupils
