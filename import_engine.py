@@ -385,7 +385,8 @@ print("\nParsing attendance data...")
 att_all = pd.concat(att_frames, ignore_index=True)
 att_all = att_all.dropna(subset=['Period Description'])
 att_all['pid'] = att_all['Name'].apply(pid)
-att_all['Day'] = att_all['Period Description'].str.split(':').str[0]
+att_all['Day'] = (att_all['Period Description'].astype(str).str.split(':').str[0]
+                  .str.strip().str[:3].str.title())   # 'Monday'/'MON'/'mon' -> 'Mon' (matches DAY_MAP)
 att_all['Per'] = att_all['Period Description'].apply(
     lambda x: int(str(x).split(':')[1]) if ':' in str(x) and str(x).split(':')[1].isdigit() else 0)
 att_all['DateISO'] = att_all['Date'].apply(parse_date_flex)
@@ -1022,9 +1023,10 @@ _hp_unknown_types = set()
 for df_hp in hp_dfs:
     for _, row in df_hp.iterrows():
         atype = str(row.get('Achievement Type', '')).strip()
+        if not atype:
+            atype = HP_TYPES[0] if HP_TYPES else 'House Point'   # a plain HP export (no type column) = a standard house point
         if atype not in HP_TYPES:
-            if atype:
-                _hp_unknown_types.add(atype)
+            _hp_unknown_types.add(atype)
             continue
         p = pid(row['Name'])
         if p not in registry:
@@ -1150,14 +1152,27 @@ for subj, clusters in subj_classes.items():
 
 # Number classes per (intake, subject): clusters are cohort-pure (one teacher can't teach two
 # cohorts in one slot). Order by descending size then teacher id for a stable 1..N numbering.
+# Only clusters that actually keep pupils are numbered: slot clustering can detect candidate
+# classes that, once every pupil is assigned to their primary class above, end up with zero
+# pupils. Numbering those phantoms would consume numbers and leave gaps in the displayed
+# classes (e.g. Class 3/9/10 missing). Count assigned pupils per cluster and skip the empties
+# so the numbering is contiguous 1..N and reflects the sizes shown in the dashboard.
+_assigned_count = defaultdict(int)     # (subject, cluster_index) -> assigned pupil count
+for _p, _subs in class_assign.items():
+    for _subj, (_ci, _tch) in _subs.items():
+        _assigned_count[(_subj, _ci)] += 1
+
 class_number = {}                      # (subject, cluster_index) -> class_num
 _by_is = defaultdict(list)
 for subj, clusters in subj_classes.items():
     for ci, cl in enumerate(clusters):
+        n_assigned = _assigned_count[(subj, ci)]
+        if n_assigned == 0:
+            continue                   # phantom cluster: detected, but no pupil calls it home
         any_pid = next(iter(cl['roster']))
         intk = registry[any_pid]['intake'] if any_pid in registry else None
         if intk is not None:
-            _by_is[(intk, subj)].append((ci, len(cl['roster']), cl['teacher']))
+            _by_is[(intk, subj)].append((ci, n_assigned, cl['teacher']))
 for (intk, subj), lst in _by_is.items():
     lst.sort(key=lambda t: (-t[1], t[2]))
     for num, (ci, _sz, _tch) in enumerate(lst, start=1):
