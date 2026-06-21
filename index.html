@@ -1195,6 +1195,17 @@ function _defaultScales(){
     : _builtinAbilityLevels(ab);
   return {ability, effort:_builtinEffortLevels(ef)};
 }
+// Reference ladder emitted by the engine (config.reference_scale): the single best-first attainment
+// axis that every key stage's grades have been resolved onto (Option 2). When present, it IS the
+// ability axis, so the engine-stored ranks line up with the labels. Absent (pre-rebuild data) -> null
+// and the dashboard keeps its existing per-scale behaviour unchanged.
+const _REF_GRAD=[PAL.green,PAL.lilac,PAL.blue,PAL.sky,PAL.gold,PAL.orange,PAL.red];
+function _refLevels(){
+  const ref=(CFG&&Array.isArray(CFG.reference_scale))?CFG.reference_scale:null;
+  if(!ref||!ref.length)return null;
+  return ref.map((tok,i)=>({csv:[String(tok)],label:String(tok),colour:_REF_GRAD[Math.min(i,_REF_GRAD.length-1)]}));
+}
+const _USE_REF=!!_refLevels();
 function _sanitiseScales(cfg){
   const clean=k=>(cfg&&Array.isArray(cfg[k])?cfg[k]:[]).map(r=>({
     csv:(Array.isArray(r.csv)?r.csv:String(r.csv==null?'':r.csv).split(',')).map(x=>String(x).trim()).filter(Boolean),
@@ -1209,6 +1220,11 @@ async function _resolveScales(){
   let cfg=_defaultScales();
   // No global scales.json — a school's scale comes only from its own (per-school) config.
   try{const ls=loadCfg('scales',SCALES_LS_KEY);if(ls){const s=_sanitiseScales(ls);if(s)cfg=s;}}catch(e){}
+  // When the engine has resolved grades onto a reference ladder, that ladder IS the ability axis so
+  // the stored ranks line up with the labels. It overrides any saved/auto ability scale; effort is
+  // left as resolved above.
+  const rl=_refLevels();
+  if(rl)cfg={ability:rl,effort:cfg.effort};
   return cfg;
 }
 // ── Login gate now runs at the top of boot, before any data is fetched. ──
@@ -1256,6 +1272,19 @@ const GC={};ABILITY.levels.forEach(lv=>{GC[lv.label]=lv.colour||PAL.slate;});
 // AN keeps the legacy grade-distribution ordering. Lets data.json omit ability_map entirely.
 const AM={};ABILITY.levels.slice().reverse().forEach(lv=>{(lv.csv||[]).forEach(c=>{AM[c]=lv.label;});});
 const AG=Object.keys(AM),AN=Object.values(AM);
+// Option 2 display support: with the reference ladder as the axis, raw GCSE/A-Level grades are not
+// reference tokens, so add them to the DISPLAY map (each shows as itself) and give them a colour, so
+// tables still render "7"/"B". RANKS come from the engine (cell[3]) via abRk, never from these — so
+// there is no token collision. Only active once the rebuilt data carries a reference ladder.
+if(_USE_REF){
+  const _qual=[['9',PAL.green],['8',PAL.green],['7',PAL.blue],['6',PAL.blue],['5',PAL.sky],['4',PAL.gold],['3',PAL.orange],['2',PAL.red],['1',PAL.red],
+               ['A*',PAL.green],['A',PAL.green],['B',PAL.blue],['C',PAL.sky],['D',PAL.orange],['E',PAL.red],['U',PAL.red]];
+  _qual.forEach(function(q){ if(AM[q[0]]==null)AM[q[0]]=q[0]; if(GC[q[0]]==null)GC[q[0]]=q[1]; });
+}
+// Ability RANK for a stored grade cell. Option 2: the engine resolved the rank with the grade's year
+// group and stored it at cell[3], so cross-key-stage lines are collision-free — use it. Pre-rebuild
+// data has no cell[3], so fall back to the legacy single-scale lookup (identical to before).
+function abRk(c){ if(c==null)return 0; if(_USE_REF)return (c[3]!=null?c[3]:0); var _l=AM[c[0]]; return AS[_l]||0; }
 // ── Admin "data-key" settings (att/sen/incident) live OUTSIDE the export. Resolution:
 //    code default <- legacy data.json.config <- ./data_key_config.json <- localStorage.
 //    Edits persist immediately via _persistDataKeys(); the export can carry none of these. ──
@@ -1790,7 +1819,7 @@ function fN(v,d=1){return v!=null?v.toFixed(d):'No Data'}
 function aC(v){return v==null?'var(--mu)':v<=4?PAL.green:v>=6?PAL.red:'var(--mu)'}
 function eC(v){return v==null?'var(--mu)':v<=1.5?PAL.green:v>=3?PAL.red:'var(--mu)'}
 function chB(v,l){if(v===null)return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span style="font-family:'IBM Plex Mono',monospace;color:var(--mu)">No Data</span></div>`;const c=v>0?'pos':v<0?'neg':'flat';return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span class="chg ${c}">${v>0?'+':''}${v.toFixed(2)}</span></div>`}
-function abAvg(row,subs){if(!row)return null;const s=subs.map(s2=>row.sc[s2]?AS[AM[row.sc[s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
+function abAvg(row,subs){if(!row)return null;const s=subs.map(s2=>row.sc[s2]?abRk(row.sc[s2])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
 function abDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(ABILITY.n,Math.max(1,Math.round(v)));const lv=ABILITY.levels[r-1];return lv?lv.label:'';}
 function abGrade(v){if(v==null||isNaN(v))return '—';var n=ABILITY.n;var r=Math.min(n,Math.max(1,v));var lo=Math.floor(r),hi=Math.ceil(r);var a=ABILITY.levels[lo-1],b=ABILITY.levels[hi-1];var na=a?parseFloat(a.label):NaN,nb=b?parseFloat(b.label):NaN;if(!isNaN(na)&&!isNaN(nb)){var g=na+(r-lo)*(nb-na);return String(Math.round(g*10)/10);}return abDesc(v);}
 function scaleKeyHTML(){var sep='<span style="color:var(--bd);margin:0 .2rem">·</span>';var ab=ABILITY.levels.map(function(lv){return '<span style="display:inline-flex;align-items:center;gap:.25rem"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+(lv.colour||PAL.slate)+'"></span>'+lv.label+'</span>';}).join(sep);var ef=EFFORT.levels.map(function(lv){return '<span>'+lv.label+(lv.note?' '+lv.note:'')+'</span>';}).join(sep);return '<div class="crd" style="grid-column:1/-1"><div class="ct2">Scale key <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">'+ABILITY.bestLabel+' = best ability · '+EFFORT.bestLabel+' = highest effort</span></div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Ability</b>'+ab+'</div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Effort</b>'+ef+'</div></div>';}
@@ -3009,7 +3038,7 @@ function rP(){
     // Filter to the fixed set of pupils who are currently in this TG
     const tgRows=allPRows.filter(r=>curTGPupils.has(r[0]));
     if(metric==='ab'){
-      return tgRows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return{x:r[0],v:s.length?s.reduce((a,b)=>a+b,0)/s.length:0}}).sort((a,b)=>a.v-b.v);
+      return tgRows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(v=>v>0);return{x:r[0],v:s.length?s.reduce((a,b)=>a+b,0)/s.length:0}}).sort((a,b)=>a.v-b.v);
     }else{
       return tgRows.map(r=>{const v=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:null).filter(e=>e!=null&&e>0);return{x:r[0],v:v.length?v.reduce((a,b)=>a+b,0)/v.length:0}}).sort((a,b)=>a.v-b.v);
     }
@@ -3062,7 +3091,7 @@ function rP(){
       const clsPups=new Set((ENR[inkKey(ink)]||[]).filter(r=>r.t==='cls'&&r.s===sf&&r.c===cls.c&&r.u===null).map(r=>r.x));
       const pRows=allR(ink,p).filter(r=>clsPups.has(r[0]));
       if(metric==='ab'){
-        const ranked=pRows.map(r=>({x:r[0],v:r[3][sf]?AS[AM[r[3][sf][0]]]||0:0})).filter(r=>r.v>0).sort((a,b)=>a.v-b.v);
+        const ranked=pRows.map(r=>({x:r[0],v:r[3][sf]?abRk(r[3][sf])||0:0})).filter(r=>r.v>0).sort((a,b)=>a.v-b.v);
         const ri=ranked.findIndex(r=>r.x===x)+1;
         return ri?`${ord(ri)}/${ranked.length}`:'—';
       }else{
@@ -3091,7 +3120,7 @@ function rP(){
   if(isA){
     const no='<span style="font-size:.7rem;color:var(--mu);font-style:italic">None</span>';
     function dgCalc(cur,prev,mode){
-      return SUBS.filter(s=>{if(!cur.sc[s]||!prev.sc[s])return false;if(mode==='ab'){const c2=AS[AM[cur.sc[s][0]]]||0,p2=AS[AM[prev.sc[s][0]]]||0;return p2>0&&c2>0}else{const c2=cur.sc[s]?cur.sc[s][1]:null,p2=prev.sc[s]?prev.sc[s][1]:null;return c2!=null&&c2>0&&p2!=null&&p2>0}}).map(s=>{let c2,p2;if(mode==='ab'){c2=AS[AM[cur.sc[s][0]]];p2=AS[AM[prev.sc[s][0]]]}else{c2=cur.sc[s][1];p2=prev.sc[s][1]}return{s,diff:c2-p2}});
+      return SUBS.filter(s=>{if(!cur.sc[s]||!prev.sc[s])return false;if(mode==='ab'){const c2=abRk(cur.sc[s])||0,p2=abRk(prev.sc[s])||0;return p2>0&&c2>0}else{const c2=cur.sc[s]?cur.sc[s][1]:null,p2=prev.sc[s]?prev.sc[s][1]:null;return c2!=null&&c2>0&&p2!=null&&p2>0}}).map(s=>{let c2,p2;if(mode==='ab'){c2=abRk(cur.sc[s]);p2=abRk(prev.sc[s])}else{c2=cur.sc[s][1];p2=prev.sc[s][1]}return{s,diff:c2-p2}});
     }
     function dgBadges(items,dir,thresh,isEffort){
       const f2=items.filter(x=>{
@@ -3302,7 +3331,7 @@ function rP(){
       const clsPups=new Set((ENR[inkKey(ink)]||[]).filter(r=>r.t==='cls'&&r.s===sf&&r.c===curCls.c&&r.u===null).map(r=>r.x));
       const clsRows=allR(ink,lp).filter(r=>clsPups.has(r[0]));
       // Ability rank
-      const abRanked=clsRows.map(r=>({x:r[0],v:r[3][sf]?AS[AM[r[3][sf][0]]]||0:0})).filter(r=>r.v>0).sort((a,b)=>a.v-b.v);
+      const abRanked=clsRows.map(r=>({x:r[0],v:r[3][sf]?abRk(r[3][sf])||0:0})).filter(r=>r.v>0).sort((a,b)=>a.v-b.v);
       const abRi=abRanked.findIndex(r=>r.x===x)+1;
       abClsRkStr=abRi?`${ord(abRi)}/${abRanked.length}`:'—';
       // Effort rank
@@ -3335,8 +3364,8 @@ function rP(){
   if(hasGrades){
   const labs=pp.map(p=>PL[PER.indexOf(p)]);
   document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
-  const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?AS[AM[data[p].sc[s][0]]]||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
-  if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?AS[AM[r[3][sf][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
+  const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?abRk(data[p].sc[s])||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
+  if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?abRk(r[3][sf])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay: subject-specific when single subject, overall when all
   const pAtt=ABP[String(x)];
   const pAttS=ABPS[String(x)];
@@ -4225,14 +4254,14 @@ function rCmp(){
       if(!rows.length){continue}
       let avg,avgE,gb;
       if(isAll){
-        const pA=rows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);
+        const pA=rows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);
         avg=pA.length?pA.reduce((a,b)=>a+b,0)/pA.length:null;
         const pE=rows.map(r=>{const e=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:null).filter(e2=>e2!=null&&e2>0);return e.length?e.reduce((a,b)=>a+b,0)/e.length:null}).filter(v=>v!=null);
         avgE=pE.length?pE.reduce((a,b)=>a+b,0)/pE.length:null;
         const ag={};rows.forEach(r=>{SUBS.forEach(s2=>{if(r[3][s2]){const g=AM[r[3][s2][0]];ag[g]=(ag[g]||0)+1}})});
         gb=AN.map(g=>({g,n:ag[g]||0})).filter(x=>x.n>0);
       }else{
-        const sc=rows.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);
+        const sc=rows.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
         avg=sc.length?sc.reduce((a,b)=>a+b,0)/sc.length:null;
         const ev=rows.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);
         avgE=ev.length?ev.reduce((a,b)=>a+b,0)/ev.length:null;
@@ -4255,8 +4284,8 @@ function rCmp(){
       function subAvg(rs,metric){
         if(!rs.length)return null;
         if(metric==='ab'){
-          if(isAll){const p=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);return p.length?(p.reduce((a,b)=>a+b,0)/p.length):null}
-          else{const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
+          if(isAll){const p=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);return p.length?(p.reduce((a,b)=>a+b,0)/p.length):null}
+          else{const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
         }else{
           if(isAll){const p=rs.map(r=>{const e=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:null).filter(e2=>e2!=null&&e2>0);return e.length?e.reduce((a,b)=>a+b,0)/e.length:null}).filter(v=>v!=null);return p.length?(p.reduce((a,b)=>a+b,0)/p.length):null}
           else{const e=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e2=>e2!=null&&e2>0);return e.length?e.reduce((a,b)=>a+b,0)/e.length:null}
@@ -4353,8 +4382,8 @@ function rCmp(){
 
       // Helper to compute avg ability/effort for a subset of rows
       function calcAb(rs){
-        if(isAll){const pA=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);return pA.length?parseFloat((pA.reduce((a,b)=>a+b,0)/pA.length).toFixed(2)):null}
-        else{const sc=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return sc.length?parseFloat((sc.reduce((a,b)=>a+b,0)/sc.length).toFixed(2)):null}
+        if(isAll){const pA=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);return pA.length?parseFloat((pA.reduce((a,b)=>a+b,0)/pA.length).toFixed(2)):null}
+        else{const sc=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return sc.length?parseFloat((sc.reduce((a,b)=>a+b,0)/sc.length).toFixed(2)):null}
       }
       function calcEf(rs){
         if(isAll){const pE=rs.map(r=>{const e=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:null).filter(e2=>e2!=null&&e2>0);return e.length?e.reduce((a,b)=>a+b,0)/e.length:null}).filter(v=>v!=null);return pE.length?parseFloat((pE.reduce((a,b)=>a+b,0)/pE.length).toFixed(2)):null}
@@ -4441,14 +4470,14 @@ function rPrg(){
 
     let avg,avgE,gb;
     if(isAll){
-      const pA=rows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);
+      const pA=rows.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);
       avg=pA.length?pA.reduce((a,b)=>a+b,0)/pA.length:null;
       const pE=rows.map(r=>{const e=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:null).filter(e2=>e2!=null&&e2>0);return e.length?e.reduce((a,b)=>a+b,0)/e.length:null}).filter(v=>v!=null);
       avgE=pE.length?pE.reduce((a,b)=>a+b,0)/pE.length:null;
       const ag={};rows.forEach(r=>{SUBS.forEach(s2=>{if(r[3][s2]){const g=AM[r[3][s2][0]];ag[g]=(ag[g]||0)+1}})});
       gb=AN.map(g=>({g,n:ag[g]||0})).filter(x=>x.n>0);
     }else{
-      const sc=rows.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);
+      const sc=rows.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
       avg=sc.length?sc.reduce((a,b)=>a+b,0)/sc.length:null;
       const ev=rows.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);
       avgE=ev.length?ev.reduce((a,b)=>a+b,0)/ev.length:null;
@@ -4471,8 +4500,8 @@ function rPrg(){
     function subAvg(rs,metric){
       if(!rs.length)return null;
       if(metric==='ab'){
-        if(isAll){const p=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);return p.length?(p.reduce((a,b)=>a+b,0)/p.length):null}
-        else{const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
+        if(isAll){const p=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);return p.length?(p.reduce((a,b)=>a+b,0)/p.length):null}
+        else{const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
       }else{
         if(isAll){const p=rs.map(r=>{const e=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:null).filter(e2=>e2!=null&&e2>0);return e.length?e.reduce((a,b)=>a+b,0)/e.length:null}).filter(v=>v!=null);return p.length?(p.reduce((a,b)=>a+b,0)/p.length):null}
         else{const e=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e2=>e2!=null&&e2>0);return e.length?e.reduce((a,b)=>a+b,0)/e.length:null}
@@ -4564,8 +4593,8 @@ function rPrg(){
     if(!rows||!rows.length){abPoints.push(null);efPoints.push(null);abMeta.push(null);efMeta.push(null);return}
 
     function calcAb(rs){
-      if(isAll){const pA=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?AS[AM[r[3][s2][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);return pA.length?parseFloat((pA.reduce((a,b)=>a+b,0)/pA.length).toFixed(2)):null}
-      else{const sc=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return sc.length?parseFloat((sc.reduce((a,b)=>a+b,0)/sc.length).toFixed(2)):null}
+      if(isAll){const pA=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(v=>v!=null);return pA.length?parseFloat((pA.reduce((a,b)=>a+b,0)/pA.length).toFixed(2)):null}
+      else{const sc=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return sc.length?parseFloat((sc.reduce((a,b)=>a+b,0)/sc.length).toFixed(2)):null}
     }
     function calcEf(rs){
       if(isAll){const pE=rs.map(r=>{const e=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:null).filter(e2=>e2!=null&&e2>0);return e.length?e.reduce((a,b)=>a+b,0)/e.length:null}).filter(v=>v!=null);return pE.length?parseFloat((pE.reduce((a,b)=>a+b,0)/pE.length).toFixed(2)):null}
@@ -4814,7 +4843,7 @@ function rTV(){
       const afterCandidates=allP.filter(p=>{const y=parseInt(p.split(' ')[1]);return y===ayYear+1});
       const afterP=afterCandidates.length?afterCandidates[0]:null;
 
-      const avgF=(period)=>{if(!period)return null;const rs=(PRG[inkKey(r.ink)]||{})[period]||[];const f=rs.filter(row=>r.pups.has(row[0]));const s=f.map(row=>row[3][r.s]?AS[AM[row[3][r.s][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null};
+      const avgF=(period)=>{if(!period)return null;const rs=(PRG[inkKey(r.ink)]||{})[period]||[];const f=rs.filter(row=>r.pups.has(row[0]));const s=f.map(row=>row[3][r.s]?abRk(row[3][r.s])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null};
       const efF=(period)=>{if(!period)return null;const rs=(PRG[inkKey(r.ink)]||{})[period]||[];const f=rs.filter(row=>r.pups.has(row[0]));const v=f.map(row=>row[3][r.s]?row[3][r.s][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
 
       let dA=null,dE=null;ayP.forEach(p=>{const a=avgF(p),e=efF(p);if(a!=null)dA=(dA||0)+a;if(e!=null)dE=(dE||0)+e});
@@ -5132,7 +5161,7 @@ function rSEND(){
       const tgEfRanks={};
       lr.forEach(r2=>{
         const px2=r2[0],tg2=r2[2];
-        const sc2=SUBS.map(s=>r2[3][s]?AS[AM[r2[3][s][0]]]||0:0).filter(v=>v>0);
+        const sc2=SUBS.map(s=>r2[3][s]?abRk(r2[3][s])||0:0).filter(v=>v>0);
         const ef2=SUBS.map(s=>r2[3][s]?r2[3][s][1]:null).filter(v=>v!=null&&v>0);
         const ab2=sc2.length?sc2.reduce((a,b)=>a+b,0)/sc2.length:null;
         const ef2a=ef2.length?ef2.reduce((a,b)=>a+b,0)/ef2.length:null;
@@ -5155,7 +5184,7 @@ function rSEND(){
           const clsRec=enrols.find(e=>e.t==='cls'&&e.x===px2&&e.s===s&&e.u===null);
           if(!clsRec) return;
           const key=`${s}|${clsRec.c}`;
-          const ab2=AS[AM[r2[3][s][0]]]||0;
+          const ab2=abRk(r2[3][s])||0;
           const ef2=r2[3][s][1]||0;
           if(!clsAbRanks[key])clsAbRanks[key]=[];
           if(!clsEfRanks[key])clsEfRanks[key]=[];
@@ -5223,7 +5252,7 @@ function rSEND(){
         const ttdAttPct=ttdTotalLessons>0?((ttdTotalLessons-ttdAbs)/ttdTotalLessons*100).toFixed(1):'—';
 
         // Overall averages
-        const curScores=SUBS.map(s=>r[3][s]?AS[AM[r[3][s][0]]]||0:0).filter(v=>v>0);
+        const curScores=SUBS.map(s=>r[3][s]?abRk(r[3][s])||0:0).filter(v=>v>0);
         const curEffort=SUBS.map(s=>r[3][s]?r[3][s][1]:null).filter(v=>v!=null&&v>0);
         const avgAb=curScores.length?curScores.reduce((a,b)=>a+b,0)/curScores.length:null;
         const avgEf=curEffort.length?curEffort.reduce((a,b)=>a+b,0)/curEffort.length:null;
@@ -5233,7 +5262,7 @@ function rSEND(){
           const ltRows=(PRG[ik]||{})[prevTermP]||[];
           const ltR=ltRows.find(row=>row[0]===px);
           if(ltR){
-            const ltS=SUBS.map(s=>ltR[3][s]?AS[AM[ltR[3][s][0]]]||0:0).filter(v=>v>0);
+            const ltS=SUBS.map(s=>ltR[3][s]?abRk(ltR[3][s])||0:0).filter(v=>v>0);
             const ltE=SUBS.map(s=>ltR[3][s]?ltR[3][s][1]:null).filter(v=>v!=null&&v>0);
             avgAbLT=ltS.length?ltS.reduce((a,b)=>a+b,0)/ltS.length:null;
             avgEfLT=ltE.length?ltE.reduce((a,b)=>a+b,0)/ltE.length:null;
@@ -5245,7 +5274,7 @@ function rSEND(){
           const lyRows=(PRG[ik]||{})[prevYearP]||[];
           const lyR=lyRows.find(row=>row[0]===px);
           if(lyR){
-            const lyS=SUBS.map(s=>lyR[3][s]?AS[AM[lyR[3][s][0]]]||0:0).filter(v=>v>0);
+            const lyS=SUBS.map(s=>lyR[3][s]?abRk(lyR[3][s])||0:0).filter(v=>v>0);
             const lyE=SUBS.map(s=>lyR[3][s]?lyR[3][s][1]:null).filter(v=>v!=null&&v>0);
             avgAbLY=lyS.length?lyS.reduce((a,b)=>a+b,0)/lyS.length:null;
             avgEfLY=lyE.length?lyE.reduce((a,b)=>a+b,0)/lyE.length:null;
@@ -5256,7 +5285,7 @@ function rSEND(){
         const subjAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
         const subjRows=SUBS.map(s=>{
           const cur=r[3][s];
-          const curA=cur?AS[AM[cur[0]]]||null:null;
+          const curA=cur?abRk(cur)||null:null;
           const curE=cur?cur[1]:null;
 
           // Class ranking for this subject
@@ -5294,12 +5323,12 @@ function rSEND(){
           if(prevTermP){
             const ltRows2=(PRG[ik]||{})[prevTermP]||[];
             const ltR2=ltRows2.find(row=>row[0]===px);
-            if(ltR2&&ltR2[3][s]){ltA=AS[AM[ltR2[3][s][0]]]||null;ltE2=ltR2[3][s][1]||null}
+            if(ltR2&&ltR2[3][s]){ltA=abRk(ltR2[3][s])||null;ltE2=ltR2[3][s][1]||null}
           }
           if(prevYearP){
             const lyRows2=(PRG[ik]||{})[prevYearP]||[];
             const lyR2=lyRows2.find(row=>row[0]===px);
-            if(lyR2&&lyR2[3][s]){lyA=AS[AM[lyR2[3][s][0]]]||null;lyE2=lyR2[3][s][1]||null}
+            if(lyR2&&lyR2[3][s]){lyA=abRk(lyR2[3][s])||null;lyE2=lyR2[3][s][1]||null}
           }
           return{s,curA,curE,ltA,ltE:ltE2,lyA,lyE:lyE2,clsAbRk,clsEfRk,sYtdAtt,sTtdAtt};
         }).filter(s=>s.curA!=null||s.curE!=null||s.sYtdAtt!=='—'||s.sTtdAtt!=='—');
@@ -7432,7 +7461,7 @@ function rSV(){
   const lr=ygRows(yearGroup,lp);
 
   // Helper: avg ability for a set of rows
-  function avgAb(rs){const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
+  function avgAb(rs){const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
   function avgEf(rs){const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 
   // Comparison periods — 2 back from current display period (YoY) and 1 back (term-on-term)
@@ -7480,7 +7509,7 @@ function rSV(){
   // Flags for each pupil in current period
   const flagBadge2=(r)=>[r[4]?senPillShort(r[0]):'',r[6]?'<span style="font-size:.6rem;font-weight:600;color:var(--blue);padding:.05rem .2rem;border-radius:3px;background:#6488ff18;border:1px solid #6488ff44;margin-left:.1rem">FSM</span>':''].filter(Boolean).join(' ');
 
-  function abVal(r){return r&&r[3][sub]?AS[AM[r[3][sub][0]]]||0:0}
+  function abVal(r){return r&&r[3][sub]?abRk(r[3][sub])||0:0}
   function efVal(r){return r&&r[3][sub]?r[3][sub][1]||0:0}
 
   // Term-on-term: compare lp vs p5 (1 period back)
@@ -7587,7 +7616,7 @@ function rSV(){
     </div>`;
 
   // Grade breakdown with bar chart
-  const sc2r=lr.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);
+  const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
   const maxGradeCount=Math.max(...[...AN].map(g=>lr.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length),1);
   const gradeRows=[...AN].reverse().map(g=>{const c=lr.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length;const p=sc2r.length?(c/sc2r.length*100).toFixed(0):0;const barW=Math.round(c/maxGradeCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${GC[g]}"></span><span style="color:var(--mu);min-width:3.5rem">${g}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${GC[g]}44;border-left:2px solid ${GC[g]}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
 
@@ -7640,7 +7669,7 @@ function rSV(){
   document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
 
   // Build per-period data points for all pupils and each sub-group
-  function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
+  function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
   function ptEf(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}
 
   const abAll=pp.map(p=>ptAb(p,null));
@@ -7728,7 +7757,7 @@ function rCL(){
   const clRows=(p)=>ygRows(yearGroup,p).filter(r=>classPups.has(r[0]));
   const lr=clRows(lp);
 
-  function avgAb(rs){const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
+  function avgAb(rs){const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
   function avgEf(rs){const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 
   const p3=nP>=3?pp[nP-3]:null,p5=nP>=2?pp[nP-2]:null;
@@ -7771,7 +7800,7 @@ function rCL(){
     const tgRec=enrols.filter(r=>r.t==='tg'&&r.x===idx&&r.u===null);
     return tgRec.length?tgRec[tgRec.length-1].v:'—';
   }
-  function abVal(r){return r&&r[3][sub]?AS[AM[r[3][sub][0]]]||0:0}
+  function abVal(r){return r&&r[3][sub]?abRk(r[3][sub])||0:0}
   function efVal(r){return r&&r[3][sub]?r[3][sub][1]||0:0}
   function concerns(metric,cur,prevP2,threshold){
     if(!prevP2)return[];
@@ -8021,7 +8050,7 @@ function rCL(){
   window._netCtx={classPupilList:[...classPups],sub,cl};
   renderNet();
 
-  const sc2r=lr.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);
+  const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
   const gradeRows=[...AN].reverse().map(g=>{const c=lr.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length;const p=sc2r.length?(c/sc2r.length*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${GC[g]}"></span><span style="color:var(--mu);min-width:4.5rem">${g}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join('');
 
   if(hasGradesCL){
@@ -8049,7 +8078,7 @@ function rCL(){
   if(hasGradesCL){
   document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
 
-  function ptAb(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
+  function ptAb(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
   function ptEf(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}
 
   const abAll=pp.map(p=>ptAb(p,null));
@@ -8102,11 +8131,11 @@ function rCC(){
     const _ccExpected=_ccTotalL*info.pups.size;
     const ytdAttCC=_ccExpected>0?parseFloat(((_ccExpected-_ccTotalAbs)/_ccExpected*100).toFixed(1)):null;
     const ytdAttCol=ytdAttCC==null?'color:var(--mu)':ytdAttCC>=95?'color:var(--green);font-weight:600':ytdAttCC>=90?'':'color:var(--red);font-weight:600';
-    const sc2r=lr.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);
+    const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
     const avg=sc2r.length?sc2r.reduce((a,b)=>a+b,0)/sc2r.length:null;
     const ev=lr.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);
     const avgE=ev.length?ev.reduce((a,b)=>a+b,0)/ev.length:null;
-    let pAvg=null,pAvgE=null;if(p3){const pr=ygRows(yearGroup,p3).filter(r=>info.pups.has(r[0]));const ps2=pr.map(r=>r[3][sub]?AS[AM[r[3][sub][0]]]||0:0).filter(v=>v>0);pAvg=ps2.length?ps2.reduce((a,b)=>a+b,0)/ps2.length:null;const pe2=pr.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);pAvgE=pe2.length?pe2.reduce((a,b)=>a+b,0)/pe2.length:null}
+    let pAvg=null,pAvgE=null;if(p3){const pr=ygRows(yearGroup,p3).filter(r=>info.pups.has(r[0]));const ps2=pr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);pAvg=ps2.length?ps2.reduce((a,b)=>a+b,0)/ps2.length:null;const pe2=pr.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);pAvgE=pe2.length?pe2.reduce((a,b)=>a+b,0)/pe2.length:null}
     const chg=avg!=null&&pAvg!=null?avg-pAvg:null;
     const chgS=chg===null?'color:var(--mu)':chg>0?'color:var(--green)':chg<=-1?'color:var(--red);font-weight:600':chg<0?'color:var(--red)':'';
     const chgE=avgE!=null&&pAvgE!=null?avgE-pAvgE:null;
@@ -8370,13 +8399,13 @@ function peerComputeSeries(result){
       if(subject==='all'){
         SUBS.forEach(s=>{
           if(r[3][s]){
-            const a=AS[AM[r[3][s][0]]]||0;if(a>0){abSum+=a;abN++}
+            const a=abRk(r[3][s])||0;if(a>0){abSum+=a;abN++}
             const e=r[3][s][1];if(e>0){efSum+=e;efN++}
           }
         });
       }else{
         if(r[3][subject]){
-          const a=AS[AM[r[3][subject][0]]]||0;if(a>0){abSum+=a;abN++}
+          const a=abRk(r[3][subject])||0;if(a>0){abSum+=a;abN++}
           const e=r[3][subject][1];if(e>0){efSum+=e;efN++}
         }
       }
@@ -8563,7 +8592,7 @@ function rPeer(){
   const AS2=CFG.ability_map||{};
   const AM2={};Object.entries(AS2).forEach(([k,v],i)=>{AM2[k]=i+1});
   function avgAb(rs){
-    const vals=rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?AS[AM[r[3][s][0]]]||0:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null);
+    const vals=rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?abRk(r[3][s])||0:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null);
     return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
   }
   function avgEf(rs){
@@ -8653,7 +8682,7 @@ function rPeer(){
     const attCol=pAttPct==='—'?'color:var(--mu)':parseFloat(pAttPct)>=95?'color:var(--green)':parseFloat(pAttPct)>=90?'':'color:var(--red);font-weight:600';
 
     // Ability/Effort
-    const curScores=SUBS.map(s=>r[3][s]?AS[AM[r[3][s][0]]]||0:0).filter(v=>v>0);
+    const curScores=SUBS.map(s=>r[3][s]?abRk(r[3][s])||0:0).filter(v=>v>0);
     const curEffort=SUBS.map(s=>r[3][s]?r[3][s][1]:null).filter(v=>v!=null&&v>0);
     const pAvgAb=curScores.length?(curScores.reduce((a,b)=>a+b,0)/curScores.length).toFixed(1):'—';
     const pAvgEf=curEffort.length?(curEffort.reduce((a,b)=>a+b,0)/curEffort.length).toFixed(1):'—';
@@ -10464,30 +10493,30 @@ function rPeer(){
       </div>`;
     };
     
+    // GCSE Grade Mapping panel — defined here, rendered with the Grading Scales section below.
+    const gradeMapHtml=(()=>{
+      // Options come from the school's CONFIGURED ability scale, not a hardcoded B-E set.
+      const _abLv=(typeof ABILITY!=='undefined'&&ABILITY.levels)?ABILITY.levels:[];
+      const letterOptions=_abLv.map(l=>(l.csv&&l.csv[0])).filter(Boolean);
+      const letterNames={};_abLv.forEach(l=>{if(l.csv&&l.csv[0])letterNames[l.csv[0]]=l.label||l.csv[0];});
+      const gradeRow=(g)=>{
+        const cur=GCSE_TO_LETTER[g]||'';
+        const opts=['<option value="">— not set —</option>'].concat(letterOptions.map(l=>`<option value="${l}"${l===cur?' selected':''}>${l}${letterNames[l]?' ('+letterNames[l]+')':''}</option>`)).join('');
+        const label=g==='U'?'Ungraded (U)':`Grade ${g}`;
+        return `<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem"><label style="font-size:.74rem;color:var(--tx);min-width:9rem;margin:0">${label}</label><select id="gm-${g}" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'Hanken Grotesk',sans-serif;font-size:.78rem;padding:.35rem .5rem;border-radius:6px;flex:1;max-width:14rem">${opts}</select></div>`;
+      };
+      const rows=letterOptions.length?['1','2','3','4','5','6','7','8','9','U'].map(gradeRow).join(''):'<div style="font-size:.72rem;color:var(--red);padding:.4rem 0;line-height:1.4">Define your Ability grading scale above first, then map each GCSE grade to it.</div>';
+      return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.85rem 1rem;background:var(--sf);margin-bottom:1rem">
+        <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">GCSE Grade Mapping</div>
+        <div style="font-size:.7rem;color:var(--mu);margin-bottom:.3rem;line-height:1.4">From Y10 onwards, ability is reported as an <em>On Track to Achieve</em> GCSE grade (1-9). The dashboard also stores a B-E ability code for consistency with KS3 reporting. This panel sets how each GCSE grade maps to that internal code.</div>
+        <div style="font-size:.65rem;color:var(--ac);margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.05em">Affects: Pupil tab, Subject tab, all grade displays</div>
+        ${rows}
+        <button onclick="applyGM()" style="margin-top:.6rem;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save grade mapping</button>
+      </div>`;
+    })();
     const threshHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Concern Thresholds &amp; Weightings</div>
       <div style="font-size:.72rem;color:var(--mu);margin-bottom:.85rem;line-height:1.5">These settings control how the dashboard decides when a pupil, class or tutor group is flagged as a concern. Each section below describes a single type of concern, lists the settings that affect it, and notes which tabs you'll see the change reflected in. Hover any value box for additional detail. After making changes, click <b style="color:var(--tx)">Save thresholds</b> at the foot of this panel.</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem">
-        ${(()=>{
-          // Build the Grade Mapping panel inline
-          // Options come from the school's CONFIGURED ability scale, not a hardcoded B-E set.
-          const _abLv=(typeof ABILITY!=='undefined'&&ABILITY.levels)?ABILITY.levels:[];
-          const letterOptions=_abLv.map(l=>(l.csv&&l.csv[0])).filter(Boolean);
-          const letterNames={};_abLv.forEach(l=>{if(l.csv&&l.csv[0])letterNames[l.csv[0]]=l.label||l.csv[0];});
-          const gradeRow=(g)=>{
-            const cur=GCSE_TO_LETTER[g]||'';
-            const opts=['<option value="">— not set —</option>'].concat(letterOptions.map(l=>`<option value="${l}"${l===cur?' selected':''}>${l}${letterNames[l]?' ('+letterNames[l]+')':''}</option>`)).join('');
-            const label=g==='U'?'Ungraded (U)':`Grade ${g}`;
-            return `<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem"><label style="font-size:.74rem;color:var(--tx);min-width:9rem;margin:0">${label}</label><select id="gm-${g}" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'Hanken Grotesk',sans-serif;font-size:.78rem;padding:.35rem .5rem;border-radius:6px;flex:1;max-width:14rem">${opts}</select></div>`;
-          };
-          const rows=letterOptions.length?['1','2','3','4','5','6','7','8','9','U'].map(gradeRow).join(''):'<div style="font-size:.72rem;color:var(--red);padding:.4rem 0;line-height:1.4">Define your Ability grading scale first (in <b>Grading Scales</b> below), then return here to map each GCSE grade to it.</div>';
-          return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.85rem 1rem;background:var(--sf)">
-            <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">GCSE Grade Mapping</div>
-            <div style="font-size:.7rem;color:var(--mu);margin-bottom:.3rem;line-height:1.4">From Y10 onwards, ability is reported as an <em>On Track to Achieve</em> GCSE grade (1-9). The dashboard also stores a B-E ability code for consistency with KS3 reporting. This panel sets how each GCSE grade maps to that internal code.</div>
-            <div style="font-size:.65rem;color:var(--ac);margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.05em">Affects: Pupil tab, Subject tab, all grade displays</div>
-            ${rows}
-            <button onclick="applyGM()" style="margin-top:.6rem;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save grade mapping</button>
-          </div>`;
-        })()}
         ${groupPanel(
           'Sanction Weightings',
           'These weights are used to convert behaviour incidents into a single weighted score. Used by every sanction-based concern (Sanctions Acceleration, Sanctions Concentration, Subject Engagement) plus pupil and class summary cards.',
@@ -10627,7 +10656,8 @@ function rPeer(){
       +_warnHtml
       +_scaleEditor('Ability','ability',ABILITY)
       +_scaleEditor('Effort','effort',EFFORT)
-      +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save scales</button><button onclick="window._resetScales()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer">↺ Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads the page to apply the new scale.</span></div>`;
+      +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save scales</button><button onclick="window._resetScales()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer">↺ Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads the page to apply the new scale.</span></div>`
+      +gradeMapHtml;
     out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml+subjHtml+scalesHtml;
   }
 
