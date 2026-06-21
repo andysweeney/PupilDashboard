@@ -6758,7 +6758,7 @@ function _upSlotRole(slot){
 // (no Date.now, no admin filename) — a slot can never accumulate duplicate files.
 function _upRoleFilename(role,yg){
   const tag={attendance:'in_year_attendance',behave_current:'behaviour_data',detention:'detention',
-    housepoints:'housepoints',fsm:'fsm',sen:'sen',grade_attain:'on_track_for'}[role]||'data';
+    housepoints:'housepoints',fsm:'fsm',sen:'sen',grade_attain:'on_track_for',grade_effort:'effort'}[role]||'data';
   return tag+(yg?('_Y'+yg):'')+'.csv';
 }
 function _upSlotStoreName(slot){ const r=_upSlotRole(slot); return _upRoleFilename(r.role, r.yg); }
@@ -7124,6 +7124,26 @@ window._upSaveTag=async function(){
   _upIdGateThenStage(slot, tag.slotId, tag.role, tag.rows, mp, ()=>_upApplyMappedFile(slot, tag.slotId, tag.role, tag.yg, tag.rows, mp, tag.origName));
   rUpload();
 };
+// A grades export carries EITHER attainment ("On track for X") OR effort ("X Effort") rows in its
+// "Basic details" column, and both share ONE upload slot. Detect which metric a file holds from its
+// content and stage attainment + effort under SEPARATE keys/names, so the second never overwrites the
+// first (they'd otherwise collide on the slot's single key — the bug that silently dropped attainment).
+function _upGradeMetric(rows, map){
+  const bi=(map&&map['Basic details']!=null)?map['Basic details']:-1;
+  if(bi<0) return null;
+  let at=0, ef=0;
+  for(let i=1;i<rows.length&&i<400;i++){
+    const v=String((rows[i]&&rows[i][bi]!=null)?rows[i][bi]:'');
+    if(/^\s*(on track for|predicted|target)\b/i.test(v)) at++;
+    else if(/effort\s*$/i.test(v)) ef++;
+  }
+  return (ef>at&&ef>0)?'grade_effort':(at>0?'grade_attain':null);
+}
+function _upStageGrade(slotId, metric, fileOrBlob, name, slot, count){
+  delete _UP.staged[slotId];                                 // drop any stale single-key grade staging
+  _UP.staged[slotId+'|'+metric]={ file:fileOrBlob, name };   // key by metric -> attain & effort coexist
+  _upMsg('Checked and ready: '+count+' '+(metric==='grade_effort'?'effort':'on-track')+' rows for '+_upEsc(slot.title)+'.', true);
+}
 // build a normalised CSV (canonical headers) and stage it; derive roster if applicable
 function _upApplyMappedFile(slot, slotId, role, yg, rows, map, origName){
   const fields=(_UP_ROLE_FIELDS[role]||[]).map(f=>f[0]).filter(c=>map[c]!=null);
@@ -7132,7 +7152,14 @@ function _upApplyMappedFile(slot, slotId, role, yg, rows, map, origName){
   if(_upIsDatedRole(role)){ _upStageByAY(slotId, role, _upSlotRole(slot).yg, fields, dataRows, slot.title); return; }
   const lines=[fields.map(_upCsvCell).join(',')];
   dataRows.forEach(row=>lines.push(row.map(_upCsvCell).join(',')));
-  const csv=lines.join('\n')+'\n', name=_upSlotStoreName(slot);
+  const csv=lines.join('\n')+'\n';
+  const gm=(role==='grade_attain'||role==='grade_effort')?(_upGradeMetric(rows,map)||role):null;
+  if(gm){
+    const gname=_upRoleFilename(gm,_upSlotRole(slot).yg);
+    const gblob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name:gname };
+    _upStageGrade(slotId, gm, gblob, gname, slot, dataRows.length); return;
+  }
+  const name=_upSlotStoreName(slot);
   const blob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name };
   _UP.staged[slotId]={ file:blob, name };
   _upMsg('Checked and ready: '+dataRows.length+' rows for '+_upEsc(slot.title)+'.', true);
@@ -7142,6 +7169,8 @@ function _upApplyMappedFile(slot, slotId, role, yg, rows, map, origName){
 function _upStagePristine(slot, slotId, role, rows, map, file){
   if(role==='sen'){ _upDeriveRoster(rows, map); }
   if(_upIsDatedRole(role)){ _upStageByAY(slotId, role, _upSlotRole(slot).yg, rows[0].map(h=>String(h)), rows.slice(1), slot.title); return; }
+  const gm=(role==='grade_attain'||role==='grade_effort')?(_upGradeMetric(rows,map)||role):null;
+  if(gm){ _upStageGrade(slotId, gm, file, _upRoleFilename(gm,_upSlotRole(slot).yg), slot, rows.length-1); return; }
   _UP.staged[slotId]={ file, name:_upSlotStoreName(slot) };
   _upMsg('Checked and ready: '+(rows.length-1)+' rows for '+_upEsc(slot.title)+'.', true);
 }
