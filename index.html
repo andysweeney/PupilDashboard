@@ -543,10 +543,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   async function dsmBootstrap(){
     console.log('[dsm] build dsm-29 (On-Call now has its own bar in pupil Sanctions-by-Type; On-Call-categorised codes reclassified to On-Call type at ingest; Admin editing restricted to users in the Supabase admins table; non-admins never see the Admin tab; dismissals stay open to all)');
     let baseline={};
-    try{
-      const r=await fetch('./dismissals.json',{cache:'no-store'});
-      if(r.ok){const j=await r.json();if(j&&typeof j==='object')baseline=j.dismissals||j;}
-    }catch(e){/* no shared file yet — that's fine */}
+    // No global dismissals.json — dismissals are per-school (Supabase, scoped) + local cache, pulled on boot via dsmServerPush.
     DSM=dsmMerge(baseline,dsmLoadLocal());
     dsmPersist();
   }
@@ -1120,19 +1117,19 @@ async function sbPrefetch(ids){
 function loadCfg(id,lsKey){
   if(SB_ON&&(id in _SBCACHE)){
     if(_SBCACHE[id]!=null) return _SBCACHE[id];
-    try{const ls=localStorage.getItem(lsKey);if(ls){const v=JSON.parse(ls);sbSet(id,v).then(()=>{_SBCACHE[id]=v;}).catch(()=>{});return v;}}catch(e){}
+    try{const ls=localStorage.getItem(_cfgKey(lsKey));if(ls){const v=JSON.parse(ls);sbSet(id,v).then(()=>{_SBCACHE[id]=v;}).catch(()=>{});return v;}}catch(e){}
     return null;
   }
-  try{const ls=localStorage.getItem(lsKey);return ls?JSON.parse(ls):null;}catch(e){return null;}
+  try{const ls=localStorage.getItem(_cfgKey(lsKey));return ls?JSON.parse(ls):null;}catch(e){return null;}
 }
 // Persist a group: localStorage cache + server (authoritative). await before any reload.
 async function saveCfg(id,lsKey,value){
-  try{localStorage.setItem(lsKey,JSON.stringify(value));}catch(e){}
+  try{localStorage.setItem(_cfgKey(lsKey),JSON.stringify(value));}catch(e){}
   if(SB_ON){try{await sbSet(id,value);_SBCACHE[id]=value;}catch(e){console.warn('[cfg] server save failed for',id,e.message);return false;}}
   return true;
 }
 async function resetCfg(id,lsKey){
-  try{localStorage.removeItem(lsKey);}catch(e){}
+  try{localStorage.removeItem(_cfgKey(lsKey));}catch(e){}
   if(SB_ON){try{await sbDel(id);delete _SBCACHE[id];}catch(e){console.warn('[cfg] server reset failed for',id,e.message);}}
 }
 function _defaultScales(){
@@ -1156,7 +1153,7 @@ function _sanitiseScales(cfg){
 }
 async function _resolveScales(){
   let cfg=_defaultScales();
-  try{const r=await fetch('./scales.json',{cache:'no-store'});if(r&&r.ok){const s=_sanitiseScales(await r.json());if(s)cfg=s;}}catch(e){}
+  // No global scales.json — a school's scale comes only from its own (per-school) config.
   try{const ls=loadCfg('scales',SCALES_LS_KEY);if(ls){const s=_sanitiseScales(ls);if(s)cfg=s;}}catch(e){}
   return cfg;
 }
@@ -1226,7 +1223,7 @@ async function _resolveDataKeys(){
     subject_map:{aliases:Object.assign({},_DATAKEY_DEFAULTS.subject_map.aliases),canonical:Object.assign({},_DATAKEY_DEFAULTS.subject_map.canonical)}
   };
   const apply=src=>{if(src&&typeof src==='object'){['att_codes','sen_codes','incident_codes'].forEach(k=>{if(src[k]&&typeof src[k]==='object')out[k]=src[k];});if(src.subject_map&&typeof src.subject_map==='object'){if(src.subject_map.aliases&&typeof src.subject_map.aliases==='object')out.subject_map.aliases=src.subject_map.aliases;if(src.subject_map.canonical&&typeof src.subject_map.canonical==='object')out.subject_map.canonical=src.subject_map.canonical;}}};
-  try{const r=await fetch('./data_key_config.json',{cache:'no-store'});if(r&&r.ok)apply(await r.json());}catch(e){}
+  // No global data_key_config.json — att/SEN/incident/subject codes are per-school (loadCfg, scoped).
   try{const ls=loadCfg('dataKeys',DATAKEYS_LS_KEY);if(ls)apply(ls);}catch(e){}
   return out;
 }
