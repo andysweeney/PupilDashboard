@@ -7666,13 +7666,13 @@ window._upRebuild=async function(){
     if(!r.ok) throw new Error('HTTP '+r.status);
   }catch(e){ _upMsg('Could not start the rebuild: '+_upEsc(e.message)); return; }
   // poll the store for the freshly-written data.json, then refresh the page automatically
-  const started=Date.now(), MAX=5*60*1000;
-  _upMsg('Rebuilding… this usually takes about a minute. You can leave this page open — it refreshes itself when done.', true);
+  const started=Date.now(), MAX=30*60*1000;
+  _upMsg('Rebuilding… this usually takes a minute or two (a first build with a lot of data can take several). You can leave this page open — it refreshes itself when done.', true);
   const tick=async()=>{
     let now=null; try{ now=await _upDataJsonFingerprint(); }catch(e){}
     const done = now && now!==baseline;
     if(done){ _upMsg('✓ Rebuild complete — refreshing the dashboard…', true); setTimeout(function(){ location.reload(); }, 1300); return; }
-    if(Date.now()-started > MAX){ _upMsg('The rebuild is taking longer than usual. Give it another moment, then refresh this page to see the result. If it never appears, the build may have hit an error.', true); return; }
+    if(Date.now()-started > MAX){ _upMsg('The rebuild is taking unusually long. It may still be finishing in the background — refresh this page in a few minutes to check. If it never appears, the build may have hit an error.', true); return; }
     const secs=Math.round((Date.now()-started)/1000);
     _upMsg('Rebuilding… ('+secs+'s) — the dashboard refreshes automatically when it\'s ready.', true);
     setTimeout(tick, 6000);
