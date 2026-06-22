@@ -7129,15 +7129,16 @@ function rUpload(){
   const stagedNames=(slotId)=>{ const pre=slotId+'|'; return Object.keys(_UP.staged).filter(k=>k===slotId||k.indexOf(pre)===0).map(k=>_UP.staged[k]&&_UP.staged[k].name).filter(Boolean); };
   const slotRow=(s,locked)=>{
     const st=_upSlotStatus(s), sn=stagedNames(s.id);
+    const multi=['attendance','behave_current','detention','housepoints','grade_attain','grade_effort'].indexOf(_upSlotRole(s).role)>=0;
     return '<div style="display:flex;align-items:center;gap:.8rem;padding:.5rem .1rem;border-bottom:1px solid var(--bd);'+(locked?'opacity:.45':'')+'">'
       +'<span style="width:9px;height:9px;border-radius:50%;background:'+st.col+';flex:0 0 auto"></span>'
       +'<div style="flex:1"><div style="font-size:.82rem;font-weight:600;color:var(--tx)">'+_upEsc(s.title)+'</div>'
-        +'<div style="font-size:.66rem;color:var(--mu)">'+(s.hint?_upEsc(s.hint)+' · ':'')+st.label+' · '+s.lifecycle+'</div>'
+        +'<div style="font-size:.66rem;color:var(--mu)">'+(s.hint?_upEsc(s.hint)+' · ':'')+st.label+' · '+s.lifecycle+(multi?' · several at once OK':'')+'</div>'
         +(sn.length?'<div style="font-size:.68rem;color:var(--tx);margin-top:.15rem">📄 '+sn.map(_upEsc).join(', ')+'</div>':'')
       +'</div>'
       +(locked?'<span style="font-size:.7rem;color:var(--mu)">🔒</span>'
-        :'<label style="font-size:.72rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:.3rem .6rem;cursor:pointer;background:var(--sf2)">Choose file'
-          +'<input type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="window._upChoose(\''+s.id+'\',this)"></label>')
+        :'<label style="font-size:.72rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:.3rem .6rem;cursor:pointer;background:var(--sf2)">'+(multi?'Choose files':'Choose file')
+          +'<input type="file" accept=".csv,.tsv,.txt"'+(multi?' multiple':'')+' style="display:none" onchange="window._upChoose(\''+s.id+'\',this)"></label>')
       +'</div>';
   };
   const rosterInput=(label,editIntake)=>'<label style="font-family:inherit;font-size:.76rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:.35rem .7rem;cursor:pointer;background:var(--sf2);white-space:nowrap">'+label
@@ -7531,15 +7532,16 @@ window._upDelYes=async function(){
   }catch(e){ _UP.serverLoaded=false; await _upRefreshServer(); rUpload(); _upMsg('Could not delete: '+_upEsc(e.message)); }
 };
 
-window._upChoose=async function(slotId, input, editIntake){
-  const file=input.files&&input.files[0]; if(!file) return;
-  const slot=_upChecklist().find(s=>s.id===slotId); if(!slot) return;
+// Stage ONE file into a slot. Returns 'staged' | 'interactive' (a confirm/tag/cohort panel is now
+// showing) | 'error' (a message was shown). The caller renders.
+async function _upChooseFile(slotId, file, editIntake){
+  const slot=_upChecklist().find(s=>s.id===slotId); if(!slot) return 'error';
   const want=_upSlotRole(slot);
-
-  if(/\.xlsx?$/i.test(file.name)){ _upMsg('Please export as CSV (or tab-separated text) so the data can be checked before it\'s uploaded.'); input.value=''; return; }
-  if(!/\.(csv|tsv|txt)$/i.test(file.name)){ _upMsg('Please upload a CSV or tab-separated text export.'); input.value=''; return; }
-  let rows; try{ rows=_upParseCSV(await _upReadFile(file)); }catch(e){ _upMsg('Could not read that file.'); input.value=''; return; }
-  if(rows.length<2){ _upMsg('That file has no data rows.'); input.value=''; return; }
+  const nm=(file&&file.name)?file.name:'file';
+  if(/\.xlsx?$/i.test(nm)){ _upMsg('Please export <b>'+_upEsc(nm)+'</b> as CSV (or tab-separated text) so it can be checked before upload.'); return 'error'; }
+  if(!/\.(csv|tsv|txt)$/i.test(nm)){ _upMsg('<b>'+_upEsc(nm)+'</b> isn\'t a CSV — please upload CSV or tab-separated text.'); return 'error'; }
+  let rows; try{ rows=_upParseCSV(await _upReadFile(file)); }catch(e){ _upMsg('Could not read <b>'+_upEsc(nm)+'</b>.'); return 'error'; }
+  if(rows.length<2){ _upMsg('<b>'+_upEsc(nm)+'</b> has no data rows.'); return 'error'; }
   const headers=rows[0].map(h=>String(h).trim()), sig=_upSig(headers);
 
   // Risk 2 — judge the file by its DATA, not its headers.
@@ -7547,20 +7549,73 @@ window._upChoose=async function(slotId, input, editIntake){
   if(m.problems.length){
     await _upLoadColmaps();
     const known=_UP.colmaps[want.role]&&_UP.colmaps[want.role][sig];
-    if(known){ if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, known, editIntake); return; } _upIdGateThenStage(slot, slotId, want.role, rows, known, ()=>_upApplyMappedFile(slot, slotId, want.role, want.yg, rows, known, file.name)); rUpload(); return; }
-    if(!m.hasName){ _upMsg('This doesn\'t look like data for <b>'+_upEsc(slot.title)+'</b> — '+_upEsc(m.problems[0])+'. Check you picked the right export.'); input.value=''; return; }
-    _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:file.name, map:m.map }; rUpload(); return;
+    if(known){ if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, known, editIntake); return 'interactive'; } _upIdGateThenStage(slot, slotId, want.role, rows, known, ()=>_upApplyMappedFile(slot, slotId, want.role, want.yg, rows, known, nm)); return _UP.confirm?'interactive':'staged'; }
+    if(!m.hasName){ _upMsg('<b>'+_upEsc(nm)+'</b> doesn\'t look like data for <b>'+_upEsc(slot.title)+'</b> — '+_upEsc(m.problems[0])+'. Check you picked the right export.'); return 'error'; }
+    _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:nm, map:m.map }; return 'interactive';
   }
 
   // data looks right. Recognised columns -> keep file pristine; unfamiliar -> normalise via tag panel.
-  if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, m.map, editIntake); return; }
+  if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, m.map, editIntake); return 'interactive'; }
   if(_upHeadersRecognised(headers, want.role)){
-    _upIdGateThenStage(slot, slotId, want.role, rows, m.map, ()=>_upStagePristine(slot, slotId, want.role, rows, m.map, file)); rUpload(); return;
+    _upIdGateThenStage(slot, slotId, want.role, rows, m.map, ()=>_upStagePristine(slot, slotId, want.role, rows, m.map, file)); return _UP.confirm?'interactive':'staged';
   }
   await _upLoadColmaps();
   const known=_UP.colmaps[want.role]&&_UP.colmaps[want.role][sig];
-  if(known){ _upIdGateThenStage(slot, slotId, want.role, rows, known, ()=>_upApplyMappedFile(slot, slotId, want.role, want.yg, rows, known, file.name)); rUpload(); return; }
-  _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:file.name, map:m.map }; rUpload();
+  if(known){ _upIdGateThenStage(slot, slotId, want.role, rows, known, ()=>_upApplyMappedFile(slot, slotId, want.role, want.yg, rows, known, nm)); return _UP.confirm?'interactive':'staged'; }
+  _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:nm, map:m.map }; return 'interactive';
+}
+
+// Combine several files of ONE category into a single aligned CSV (columns matched by header name).
+// Used for multi-select on the dated categories, whose staging splits by academic year and merges
+// by date window — so the files must be seen together, as one dataset, rather than one replacing
+// the next. Returns {file} (a synthetic CSV File) or {error}.
+async function _upCombineFiles(files){
+  const norm=s=>String(s).trim().toLowerCase();
+  let header=null; const pos={}; const out=[];
+  for(const f of files){
+    let rows; try{ rows=_upParseCSV(await _upReadFile(f)); }catch(e){ return {error:'Could not read <b>'+_upEsc(f.name)+'</b>.'}; }
+    if(rows.length<2) continue;
+    const hdr=rows[0].map(h=>String(h).trim());
+    if(!header){ header=hdr.slice(); header.forEach((h,i)=>pos[norm(h)]=i); }
+    else hdr.forEach(h=>{ if(pos[norm(h)]==null){ pos[norm(h)]=header.length; header.push(h); } });
+    for(let r=1;r<rows.length;r++){ const row=new Array(header.length).fill(''); hdr.forEach((h,i)=>{ row[pos[norm(h)]]=rows[r][i]; }); out.push(row); }
+  }
+  if(!header||!out.length) return {error:'No data rows found in the selected files.'};
+  const lines=[header.map(_upCsvCell).join(',')]; out.forEach(r=>lines.push(r.map(_upCsvCell).join(',')));
+  const csv=lines.join('\n')+'\n';
+  let file; try{ file=new File([csv],'combined.csv',{type:'text/csv'}); }
+  catch(e){ file={ name:'combined.csv', _text:csv }; }
+  return { file, count:out.length };
+}
+
+window._upChoose=async function(slotId, input, editIntake){
+  const files=(input&&input.files)?Array.from(input.files):[];
+  if(input) input.value='';                 // allow re-selecting the same file(s)
+  if(!files.length) return;
+  const slot=_upChecklist().find(s=>s.id===slotId);
+  const role=slot?_upSlotRole(slot).role:null;
+  if(files.length===1){ await _upChooseFile(slotId, files[0], editIntake); rUpload(); return; }
+
+  // MULTI-SELECT. Dated categories (attendance/behaviour/detentions/house points) are combined into
+  // one dataset first, so the per-year split + date-window merge see all the files together. Grades
+  // stage per file (each term filed separately under its own term-tagged name).
+  if(_upIsDatedRole(role)){
+    const c=await _upCombineFiles(files);
+    if(c.error){ _upMsg(c.error); rUpload(); return; }
+    const r=await _upChooseFile(slotId, c.file, editIntake);
+    if(r==='staged') _upMsg('Checked and ready: '+files.length+' files combined for <b>'+_upEsc(slot.title)+'</b>.', true);
+    rUpload(); return;
+  }
+  // Grades (and any other multi category): one at a time; pause if a file needs a decision.
+  let staged=0; const names=[];
+  for(const f of files){
+    const r=await _upChooseFile(slotId, f, editIntake);
+    if(r==='staged'){ staged++; names.push(f.name); }
+    else if(r==='interactive'){ _upMsg('Staged '+staged+(names.length?' ('+names.map(_upEsc).join(', ')+')':'')+'. <b>'+_upEsc(f.name)+'</b> needs a quick check below — sort that, then re-add any others.'); rUpload(); return; }
+    else { rUpload(); return; }   // error message already shown
+  }
+  _upMsg('Checked and ready: '+staged+' file'+(staged!==1?'s':'')+' for <b>'+_upEsc(slot.title)+'</b> — '+names.map(_upEsc).join(', ')+'.', true);
+  rUpload();
 };
 
 window._upUploadAll=async function(){
