@@ -1235,6 +1235,59 @@ async function _loadPendingAbility(){
   }catch(e){}
 }
 await _loadPendingAbility();
+// ── Per-school term-label map (Admin "unknown term" mapper) ──
+// Grade term labels the rebuild couldn't place (config.unresolved_terms) are mapped here to a
+// period. Stored as _term_map.json in the school's uploads (same ride-along route as the ability
+// scale / calibration), applied on the NEXT rebuild. Keys are the raw labels; stage_inputs.py
+// normalises both sides when it matches.
+let _TERM_MAP={};
+async function _loadTermMap(){
+  if(typeof SB_ON==='undefined'||!SB_ON) return;
+  let sid=null; try{ sid=schoolId(); }catch(e){}
+  if(!sid) return;
+  try{
+    const path=sid+'/uploads/raw/_term_map.json';
+    const r=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+encodeURI(path),
+      {headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()},cache:'no-store'});
+    if(r.ok){ const j=JSON.parse(await r.text()); if(j&&typeof j==='object'&&!Array.isArray(j)) _TERM_MAP=j; }
+  }catch(e){}
+}
+await _loadTermMap();
+window._setTermMap=async function(label,season){
+  try{
+    if(season){ _TERM_MAP[label]=season; } else { delete _TERM_MAP[label]; }
+    let sid=null; try{ sid=schoolId(); }catch(e){}
+    if(typeof SB_ON==='undefined'||!SB_ON||!sid){ alert('Sign in with a school account to save term mappings.'); return; }
+    const path=sid+'/uploads/raw/_term_map.json';
+    const body=new Blob([JSON.stringify(_TERM_MAP,null,2)],{type:'application/json'});
+    const w=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
+      { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
+    if(!w.ok) throw new Error('HTTP '+w.status);
+    if(typeof rAdmin==='function') rAdmin();
+  }catch(e){ alert('Could not save the term mapping: '+(e&&e.message?e.message:e)); }
+};
+// Panel HTML — only rendered when there's something to map (hidden otherwise).
+function _termMapperHtml(){
+  const unresolved=(DD&&DD.config&&Array.isArray(DD.config.unresolved_terms))?DD.config.unresolved_terms:[];
+  const mapKeys=Object.keys(_TERM_MAP||{});
+  const all=[...new Set([...unresolved,...mapKeys])].sort();
+  if(!all.length) return '';
+  const opts=[['','— Select —'],['T1','Autumn (T1)'],['T2','Spring (T2)'],['T3','Summer (T3)']];
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const escJs=s=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const pending=mapKeys.filter(k=>unresolved.indexOf(k)>=0).length;
+  let h=`<div class="dw" style="margin-top:.85rem"><div class="dwt">Unrecognised Terms <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— map each grade term label to a period</span></div>`;
+  h+=`<div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.45">These grade term labels weren't recognised automatically. Tell the dashboard which period each one is and those grades will be placed on the next rebuild. Standard wordings (Autumn/Spring/Summer, Michaelmas/Lent/Hilary/Trinity) and dates are handled for you.</div>`;
+  if(pending){ h+=`<div style="background:rgba(212,165,43,.12);border:1px solid rgba(212,165,43,.4);border-radius:6px;padding:.45rem .7rem;margin-bottom:.55rem;font-size:.72rem"><span style="font-weight:600">⏳ Saved — waiting for rebuild.</span> Your choices are stored and take effect when you next rebuild.</div>`; }
+  h+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Term label</th><th>Period</th></tr></thead><tbody>`;
+  all.forEach(lab=>{
+    const cur=(_TERM_MAP&&_TERM_MAP[lab])||'';
+    const badge=(cur&&unresolved.indexOf(lab)>=0)?' <span style="color:var(--gold);font-size:.62rem">⏳</span>':'';
+    h+=`<tr><td style="font-weight:500;font-size:.72rem">${esc(lab)}${badge}</td><td><select onchange="window._setTermMap('${escJs(lab)}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px">${opts.map(([v,t])=>`<option value="${v}"${v===cur?' selected':''}>${t}</option>`).join('')}</select></td></tr>`;
+  });
+  h+=`</tbody></table></div></div>`;
+  return h;
+}
 function _sanitiseScales(cfg){
   const clean=k=>(cfg&&Array.isArray(cfg[k])?cfg[k]:[]).map(r=>({
     csv:(Array.isArray(r.csv)?r.csv:String(r.csv==null?'':r.csv).split(',')).map(x=>String(x).trim()).filter(Boolean),
@@ -7174,6 +7227,22 @@ function _upStageGrade(slotId, metric, fileOrBlob, name, slot, count){
   _UP.staged[slotId+'|'+metric]={ file:fileOrBlob, name };   // key by metric -> attain & effort coexist
   _upMsg('Checked and ready: '+count+' '+(metric==='grade_effort'?'effort':'on-track')+' rows for '+_upEsc(slot.title)+'.', true);
 }
+// Locate the Resultset column (the term marker) in a parsed grades file, and build a filename-safe
+// slug from its distinct values. This is how grade files get term-bucketed in the store so a new
+// term ADDS alongside existing ones instead of overwriting them (mirrors the _ay{year} suffix the
+// dated roles use). Same term re-uploaded -> same slug -> clean overwrite; new term -> new file.
+function _upResultsetCol(rows){
+  if(!rows||!rows.length) return -1;
+  const hdr=rows[0].map(h=>String(h==null?'':h).trim().toLowerCase().replace(/[^a-z0-9]/g,''));
+  return hdr.indexOf('resultset');
+}
+function _upResultsetSlug(rows){
+  const ix=_upResultsetCol(rows); if(ix<0) return '';
+  const set=new Set();
+  for(let r=1;r<rows.length;r++){ const v=String((rows[r]&&rows[r][ix]!=null)?rows[r][ix]:'').trim(); if(v) set.add(v); }
+  if(!set.size) return '';
+  return [...set].sort().map(v=>v.toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,40)).filter(Boolean).join('-').slice(0,90);
+}
 // build a normalised CSV (canonical headers) and stage it; derive roster if applicable
 function _upApplyMappedFile(slot, slotId, role, yg, rows, map, origName){
   const fields=(_UP_ROLE_FIELDS[role]||[]).map(f=>f[0]).filter(c=>map[c]!=null);
@@ -7185,8 +7254,16 @@ function _upApplyMappedFile(slot, slotId, role, yg, rows, map, origName){
   const csv=lines.join('\n')+'\n';
   const gm=(role==='grade_attain'||role==='grade_effort')?(_upGradeMetric(rows,map)||role):null;
   if(gm){
-    const gname=_upRoleFilename(gm,_upSlotRole(slot).yg);
-    const gblob=(typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{ _text:csv, name:gname };
+    const slug=_upResultsetSlug(rows);
+    if(!slug){ _upMsg('Could not read a term ("Resultset") from <b>'+_upEsc(origName||slot.title)+'</b>, so I can\'t file it by term without risking overwriting another term\'s grades. Make sure the export keeps its Resultset column (e.g. "Year 10 Summer") and re-upload.'); return; }
+    // Include Resultset in the staged CSV (the canonical field set omits it) so the rebuild can resolve the term.
+    const rsx=_upResultsetCol(rows);
+    const gfields=fields.concat(rsx>=0?['Resultset']:[]);
+    const glines=[gfields.map(_upCsvCell).join(',')];
+    for(let r=1;r<rows.length;r++){ const base=fields.map(c=>rows[r][map[c]]); if(rsx>=0) base.push(rows[r][rsx]); glines.push(base.map(_upCsvCell).join(',')); }
+    const gcsv=glines.join('\n')+'\n';
+    const gname=_upRoleFilename(gm,_upSlotRole(slot).yg).replace(/\.csv$/,'_'+slug+'.csv');
+    const gblob=(typeof Blob!=='undefined')?new Blob([gcsv],{type:'text/csv'}):{ _text:gcsv, name:gname };
     _upStageGrade(slotId, gm, gblob, gname, slot, dataRows.length); return;
   }
   const name=_upSlotStoreName(slot);
@@ -7200,7 +7277,11 @@ function _upStagePristine(slot, slotId, role, rows, map, file){
   if(role==='sen'){ _upDeriveRoster(rows, map); }
   if(_upIsDatedRole(role)){ _upStageByAY(slotId, role, _upSlotRole(slot).yg, rows[0].map(h=>String(h)), rows.slice(1), slot.title); return; }
   const gm=(role==='grade_attain'||role==='grade_effort')?(_upGradeMetric(rows,map)||role):null;
-  if(gm){ _upStageGrade(slotId, gm, file, _upRoleFilename(gm,_upSlotRole(slot).yg), slot, rows.length-1); return; }
+  if(gm){
+    const slug=_upResultsetSlug(rows);
+    if(!slug){ _upMsg('Could not read a term ("Resultset") from this grades file, so I can\'t file it by term without risking overwriting another term\'s grades. Make sure the export keeps its Resultset column (e.g. "Year 10 Summer") and re-upload.'); return; }
+    _upStageGrade(slotId, gm, file, _upRoleFilename(gm,_upSlotRole(slot).yg).replace(/\.csv$/,'_'+slug+'.csv'), slot, rows.length-1); return;
+  }
   _UP.staged[slotId]={ file, name:_upSlotStoreName(slot) };
   _upMsg('Checked and ready: '+(rows.length-1)+' rows for '+_upEsc(slot.title)+'.', true);
 }
@@ -7485,11 +7566,24 @@ async function _upDataJsonUpdatedAt(){
     return dj ? (dj.updated_at||(dj.metadata&&dj.metadata.lastModified)||null) : null;
   }catch(e){ return null; }
 }
+// More reliable "has the rebuild landed?" signal: fetch the actual data.json the same fresh,
+// no-cache way the dashboard loads it (the folder-listing timestamp above can lag or be cached),
+// and fingerprint its content. A completed rebuild changes the file, so the fingerprint changes.
+async function _upDataJsonFingerprint(){
+  try{
+    const url=SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+(_UP.schoolId?_UP.schoolId+'/':'')+'data.json?_cb='+Date.now();
+    const r=await fetch(url,{ headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken() }, cache:'no-store' });
+    if(!r.ok) return null;
+    const t=await r.text();
+    let h=0x811c9dc5; for(let i=0;i<t.length;i++){ h^=t.charCodeAt(i); h=Math.imul(h,0x01000193); }
+    return (h>>>0).toString(16)+':'+t.length;
+  }catch(e){ return null; }
+}
 window._upRebuild=async function(){
   if(!_UP.schoolId){ _upMsg('Rebuild is switched on with the Part-2 go-live.'); return; }
   _upMsg('Starting rebuild…', true);
   // remember the current dashboard file so we can tell when the new one lands
-  let baseline=null; try{ baseline=await _upDataJsonUpdatedAt(); }catch(e){}
+  let baseline=null; try{ baseline=await _upDataJsonFingerprint(); }catch(e){}
   try{ const r=await fetch(SB_URL+'/functions/v1/rebuild',
       { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'Content-Type':'application/json' }, body:JSON.stringify({}) });
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -7498,8 +7592,8 @@ window._upRebuild=async function(){
   const started=Date.now(), MAX=5*60*1000;
   _upMsg('Rebuilding… this usually takes about a minute. You can leave this page open — it refreshes itself when done.', true);
   const tick=async()=>{
-    let now=null; try{ now=await _upDataJsonUpdatedAt(); }catch(e){}
-    const done = now && (!baseline || new Date(now) > new Date(baseline));
+    let now=null; try{ now=await _upDataJsonFingerprint(); }catch(e){}
+    const done = now && now!==baseline;
     if(done){ _upMsg('✓ Rebuild complete — refreshing the dashboard…', true); setTimeout(function(){ location.reload(); }, 1300); return; }
     if(Date.now()-started > MAX){ _upMsg('The rebuild is taking longer than usual. Give it another moment, then refresh this page to see the result. If it never appears, the build may have hit an error.', true); return; }
     const secs=Math.round((Date.now()-started)/1000);
@@ -10807,7 +10901,8 @@ function rPeer(){
       +_scaleEditor('Effort','effort',EFFORT)
       +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save scales</button><button onclick="window._resetScales()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer">↺ Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads the page to apply the new scale.</span></div>`
       +gradeMapHtml
-      +aLevelMapHtml;
+      +aLevelMapHtml
+      +_termMapperHtml();
     // Group the admin blocks into collapsible sections. Open/closed state is remembered across
     // re-renders (rAdmin runs again after e.g. classifying a code) so a section you're working in
     // doesn't snap shut. _noTitle strips a single block's own title where the section header repeats it.
