@@ -1183,7 +1183,10 @@ for df_codes in codes_list:
                 except ValueError: pass
         incident = row.get(inc_col, '')
         if pd.isna(incident): incident = ''
-        category = INCIDENT_CATEGORIES.get(incident, 'Other')
+        # Recognised wordings keep their head-start category; anything we don't recognise is left as
+        # 'Category Needed' (a sentinel, never a real category) so the Admin panel surfaces it for
+        # classification rather than silently filing it as a real "Other".
+        category = INCIDENT_CATEGORIES.get(incident, 'Category Needed')
         sanctions.append([int(p), 0, date_iso, subj, period_num, incident, category])
 
 # Process detentions
