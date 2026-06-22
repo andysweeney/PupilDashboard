@@ -762,6 +762,49 @@ def _default_scale_for_yg(yg):
     if yg in (12, 13): return 'alevel'
     return None
 
+# ── OPTION 2 calibration overlay. The Admin "Grade Mapping" panels save a key-stage grade->reference
+# map as _calibration_ks4.json / _calibration_ks5.json into the school's uploads (browsers may write
+# there; the key file itself is not browser-writable). Staging carries those files across next to the
+# raw exports, and here we fold each onto WHATEVER transition key this school's scales actually use
+# (e.g. 'gcse:ks3' when the key sets attainmentByYearGroup={10:'gcse'}), so a saved map takes effect on
+# the next rebuild no matter how the key names its KS4/KS5 scale. We also keep the effective map per
+# key stage so the dashboard panel can show the values currently in force rather than a built-in guess.
+def _ks_scale_ids(ygs):
+    ids = []
+    for yg in ygs:
+        sid = _ATTAIN_BY_YG.get(yg) or _default_scale_for_yg(yg)
+        if sid and sid != _REF_ID and sid not in ids:
+            ids.append(sid)
+    return ids
+def _read_calibration(name):
+    p = os.path.join(UP, name)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, encoding='utf-8') as fh:
+            m = json.load(fh)
+        return m if (isinstance(m, dict) and m) else None
+    except Exception:
+        return None
+_CALIBRATION_EFF = {}
+for _ksname, _ygs in (('ks4', (10, 11)), ('ks5', (12, 13))):
+    _sids = _ks_scale_ids(_ygs)
+    _cal = _read_calibration('_calibration_' + _ksname + '.json')
+    if _cal:                                               # admin just set/changed this map
+        for _sid in _sids:
+            if _REF_ID:
+                _TRANSITIONS[_sid + ':' + _REF_ID] = _cal
+            _TRANSITIONS[_sid] = _cal
+    _eff = _cal
+    if _eff is None:                                       # nothing saved -> show what's in force now
+        for _sid in _sids:
+            _eff = (_TRANSITIONS.get((_sid + ':' + _REF_ID) if _REF_ID else _sid)
+                    or _TRANSITIONS.get(_sid))
+            if _eff:
+                break
+    if _eff:
+        _CALIBRATION_EFF[_ksname] = _eff
+
 def map_attainment_scaled(raw, year_group, flagset):
     """Validated raw attainment token, read through the scale the year group uses. Stored AS-IS so the
     dashboard derives rank (1..n, 1=best) and labels from that scale — a GCSE grade stays a GCSE grade,
@@ -1455,6 +1498,7 @@ output = {
         "ability_map": ABILITY_MAP,
         "reference_scale": _REF_ORDER,
         "transitions": _TRANSITIONS,
+        "calibration": _CALIBRATION_EFF,
         "periods": periods_list,
         "period_labels": period_labels,
         "intakes": sorted(INTAKES, reverse=True),
