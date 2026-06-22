@@ -10911,7 +10911,7 @@ function rPeer(){
     DD.config.subject_map=DD.config.subject_map||{aliases:{},canonical:{}};
     const A=DD.config.subject_map.aliases=DD.config.subject_map.aliases||{};
     const C=DD.config.subject_map.canonical=DD.config.subject_map.canonical||{};
-    const _prune=id=>{if(C[id]&&!C[id].display&&!C[id].continuesFrom&&!Object.values(A).includes(id))delete C[id];};
+    const _prune=id=>{if(C[id]&&!C[id].created&&!C[id].display&&!C[id].continuesFrom&&!Object.values(A).includes(id))delete C[id];};
     if(kind==='alias'){
       if(!value||value===key){const had=A[key];delete A[key];if(had)_prune(had);}
       else{A[key]=value;C[value]=C[value]||{};}
@@ -10925,7 +10925,7 @@ function rPeer(){
       _prune(key);
     }else if(kind==='create'){
       const nm=String(value==null?'':value).trim();
-      if(nm)C[nm]=C[nm]||{};   // a brand-new canonical the admin can fold raw spellings into
+      if(nm){C[nm]=C[nm]||{};C[nm].created=true;}   // explicit "Add subject" — sticky until removed via ✕
     }else if(kind==='remove'){
       delete C[key];                                   // drop an unused created subject
       Object.keys(A).forEach(r=>{if(A[r]===key)delete A[r];});  // defensive: clear any stray aliases to it
