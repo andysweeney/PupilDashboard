@@ -977,56 +977,51 @@ for date_str in sorted(real_att['DateISO'].unique()):
     week_lessons[mon] = week_lessons.get(mon, 0) + real_periods
 
 # Per-pupil absence dates
+# Per-pupil attendance roll-ups. ONE groupby pass (was four), Term computed once up front, and no
+# per-row iteration — produces the same structures as before but far cheaper on large attendance
+# files (validated equal to the original loops). real_att is left untouched for any later use.
+_ra = real_att.copy()
+_ra['Term'] = _ra['DateISO'].map(get_term)              # lru_cached -> one cheap pass, not 2× per pupil
+_ra['_isAbsent'] = _ra['Mark'].isin(ALL_ABSENT_CODES)
+_ra['_isPresent'] = _ra['Mark'].isin(PRESENT_CODES)
+
 attendance = {}
 attendance_marks = {}
-for pupil, group in real_att.groupby('pid'):
-    absent_rows = group[group['Mark'].isin(ALL_ABSENT_CODES)]
-    attendance[pupil] = sorted(set(absent_rows['DateISO'].tolist()))
-    # Store marks per date for auth/unauth classification
+att_abs_subj = {}
+att_by_period_subj = {}
+att_by_period = {}
+for pupil, group in _ra.groupby('pid'):
+    absent_rows = group[group['_isAbsent']]
+    a_dates = absent_rows['DateISO'].tolist()
+    a_marks = absent_rows['Mark'].tolist()
+    a_subj  = absent_rows['Subject'].tolist()
+    a_per   = absent_rows['Per'].tolist()
+    attendance[pupil] = sorted(set(a_dates))
+    # marks per date (row order preserved) for auth/unauth classification
     marks_by_date = {}
-    for _, row in absent_rows.iterrows():
-        d = row['DateISO']
+    for d, mk in zip(a_dates, a_marks):
         if d not in marks_by_date:
             marks_by_date[d] = []
-        marks_by_date[d].append(row['Mark'])
+        marks_by_date[d].append(mk)
     attendance_marks[pupil] = marks_by_date
-
-# Per-pupil per-subject absences WITH MARK CODES
-att_abs_subj = {}
-for pupil, group in real_att.groupby('pid'):
-    absent_rows = group[group['Mark'].isin(ALL_ABSENT_CODES)]
-    records = []
-    for _, row in absent_rows.iterrows():
-        records.append([row['DateISO'], row['Subject'], int(row['Per']), row['Mark']])
-    att_abs_subj[pupil] = records
-
-# Per-period attendance by subject (year-aware terms via get_term above)
-
-att_by_period_subj = {}
-for pupil, group in real_att.groupby('pid'):
+    # per-subject absences WITH MARK CODES (row order preserved)
+    att_abs_subj[pupil] = [[a_dates[i], a_subj[i], int(a_per[i]), a_marks[i]]
+                           for i in range(len(a_dates))]
+    # per-period attendance %, term-level and per-subject (year-aware terms via get_term)
+    periods_subj = {}
     periods = {}
-    group_c = group.copy()
-    group_c['Term'] = group_c['DateISO'].apply(get_term)
-    for term, tgroup in group_c.groupby('Term'):
+    for term, tgroup in group.groupby('Term'):
         if not term: continue
         subj_att = {}
         for subj, sgroup in tgroup.groupby('Subject'):
             total = len(sgroup)
-            present = len(sgroup[sgroup['Mark'].isin(PRESENT_CODES)])
+            present = int(sgroup['_isPresent'].sum())
             subj_att[subj] = round(present / total * 100) if total > 0 else 100
-        periods[term] = subj_att
-    att_by_period_subj[pupil] = periods
-
-att_by_period = {}
-for pupil, group in real_att.groupby('pid'):
-    group_c = group.copy()
-    group_c['Term'] = group_c['DateISO'].apply(get_term)
-    periods = {}
-    for term, tgroup in group_c.groupby('Term'):
-        if not term: continue
+        periods_subj[term] = subj_att
         total = len(tgroup)
-        present = len(tgroup[tgroup['Mark'].isin(PRESENT_CODES)])
+        present = int(tgroup['_isPresent'].sum())
         periods[term] = round(present / total * 100) if total > 0 else 100
+    att_by_period_subj[pupil] = periods_subj
     att_by_period[pupil] = periods
 
 print(f"Attendance records: {len(attendance)} pupils")
@@ -1130,33 +1125,28 @@ for ay_str, pupils in tt_out.items():
 print(f"Split-slot metadata: {_split_count} changed slots across "
       f"{sum(len(v) for v in split_slot_meta.values())} pupil-years")
 
-# ── ENRICHMENT: suppressedAbsences ──
-print("Detecting mixed present+absent slots...")
+# ── ENRICHMENT: suppressedAbsences + duplicate registrations (one pass) ──
+print("Detecting mixed present+absent slots and duplicate registrations...")
 suppressed_absences = {}
-for px, grp in att_all[att_all['Per'].between(1,5)].groupby('pid'):
-    slots = grp.groupby(['DateISO', 'Per']).agg(marks=('Mark', list)).reset_index()
+dup_pupils = 0
+dup_slots = 0
+for px, grp in att_all[att_all['Per'].between(1, 5)].groupby('pid'):
+    slot_marks = grp.groupby(['DateISO', 'Per'])['Mark'].apply(list)
     px_suppressed = []
-    for _, row in slots.iterrows():
-        has_present = any(m in PRESENT_CODES for m in row['marks'])
-        has_absent = any(m in ALL_ABSENT_CODES for m in row['marks'])
-        if has_present and has_absent:
-            px_suppressed.append(f"{row['DateISO']}|{row['Per']}")
+    n_dup = 0
+    for (d, per), marks in slot_marks.items():
+        if len(marks) > 1:
+            n_dup += 1
+        if any(m in PRESENT_CODES for m in marks) and any(m in ALL_ABSENT_CODES for m in marks):
+            px_suppressed.append(f"{d}|{per}")
     if px_suppressed:
         suppressed_absences[px] = px_suppressed
+    if n_dup:
+        dup_pupils += 1
+        dup_slots += n_dup
 
 supp_count = sum(len(v) for v in suppressed_absences.values())
 print(f"Suppressed absences: {len(suppressed_absences)} pupils, {supp_count} slots")
-
-# ── ENRICHMENT: Duplicate detection ──
-print("Detecting duplicate registrations...")
-dup_pupils = 0
-dup_slots = 0
-for px, grp in att_all[att_all['Per'].between(1,5)].groupby('pid'):
-    slots = grp.groupby(['DateISO', 'Per']).size()
-    multi = slots[slots > 1]
-    if len(multi):
-        dup_pupils += 1
-        dup_slots += len(multi)
 print(f"Duplicate registrations: {dup_pupils} pupils, {dup_slots} duplicate slots")
 
 # ── BUILD SANCTIONS ──
