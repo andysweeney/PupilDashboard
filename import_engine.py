@@ -1547,6 +1547,21 @@ for s in sanctions:
     if s[1] == 0 and s[5]:
         incident_config[s[5]] = s[6]
 
+def _read_unresolved_terms():
+    """Distinct grade Resultset labels that staging couldn't place (written by stage_inputs.py).
+    Surfaced to the dashboard's Admin 'unknown term' mapper. An empty/missing file clears the list."""
+    try:
+        p = os.path.join(UP, 'unresolved_terms.json')
+        if os.path.exists(p):
+            with open(p, encoding='utf-8') as f:
+                v = json.load(f)
+            if isinstance(v, list):
+                return [str(x) for x in v if str(x).strip()]
+    except Exception:
+        pass
+    return []
+_UNRESOLVED_TERMS = _read_unresolved_terms()
+
 output = {
     "config": {
         "subjects": all_subjects,
@@ -1564,6 +1579,7 @@ output = {
         "att_codes": att_code_config,
         "sen_codes": SEN_CODES,
         "incident_codes": incident_config,
+        "unresolved_terms": _UNRESOLVED_TERMS,
         "house_point_weights": HOUSE_POINT_WEIGHTS,
         "house_point_types": HP_TYPES,
     },
