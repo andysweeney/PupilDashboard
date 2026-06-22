@@ -100,7 +100,8 @@ table.d tr:hover td{background:var(--sf2)}
   #p-sanc [style*="height:clamp"], #p-sanc-subj [style*="height:clamp"] { height:150px !important; }
   #p-pupil-net svg { max-height:390px !important; }
   #cl-network svg { max-height:300px !important; }
-  #cl-network .disc-box>div { max-height:none !important; height:100%; }
+  #cl-network .disc-box, #sv-charts-bottom .disc-box { display:flex; }
+  #cl-network .disc-box>div, #sv-charts-bottom .disc-box>div { max-height:none !important; height:100%; width:100%; flex:1 1 auto; }
 
   /* fit wide content to portrait width */
   /* no scrollbars / clipping in print — show full range */
@@ -1267,24 +1268,35 @@ window._setTermMap=async function(label,season){
     if(typeof rAdmin==='function') rAdmin();
   }catch(e){ alert('Could not save the term mapping: '+(e&&e.message?e.message:e)); }
 };
-// Panel HTML — only rendered when there's something to map (hidden otherwise).
+// Panel HTML — term labels the auto-recogniser couldn't place, each shown with its real state
+// (needs a period / saved-pending-rebuild / already applied) so a finished mapping never reads as an
+// outstanding task. Hidden when there's nothing at all to show.
 function _termMapperHtml(){
   const unresolved=(DD&&DD.config&&Array.isArray(DD.config.unresolved_terms))?DD.config.unresolved_terms:[];
   const mapKeys=Object.keys(_TERM_MAP||{});
-  const all=[...new Set([...unresolved,...mapKeys])].sort();
+  const all=[...new Set([...unresolved,...mapKeys])];
   if(!all.length) return '';
   const opts=[['','— Select —'],['T1','Autumn (T1)'],['T2','Spring (T2)'],['T3','Summer (T3)']];
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const escJs=s=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  const pending=mapKeys.filter(k=>unresolved.indexOf(k)>=0).length;
-  let h=`<div class="dw" style="margin-top:.85rem"><div class="dwt">Unrecognised Terms <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— map each grade term label to a period</span></div>`;
-  h+=`<div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.45">These grade term labels weren't recognised automatically. Tell the dashboard which period each one is and those grades will be placed on the next rebuild. Standard wordings (Autumn/Spring/Summer, Michaelmas/Lent/Hilary/Trinity) and dates are handled for you.</div>`;
-  if(pending){ h+=`<div style="background:rgba(212,165,43,.12);border:1px solid rgba(212,165,43,.4);border-radius:6px;padding:.45rem .7rem;margin-bottom:.55rem;font-size:.72rem"><span style="font-weight:600">⏳ Saved — waiting for rebuild.</span> Your choices are stored and take effect when you next rebuild.</div>`; }
-  h+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Term label</th><th>Period</th></tr></thead><tbody>`;
+  // State: 'need' = unresolved & unmapped (the to-do); 'pending' = mapped but still unresolved (waiting
+  // on a rebuild); 'applied' = mapped and no longer unresolved (a past rebuild already placed it).
+  const stateOf=lab=>{const cur=(_TERM_MAP&&_TERM_MAP[lab])||'';const un=unresolved.indexOf(lab)>=0;return un?(cur?'pending':'need'):'applied';};
+  const ord={need:0,pending:1,applied:2};
+  all.sort((a,b)=>(ord[stateOf(a)]-ord[stateOf(b)])||String(a).localeCompare(String(b)));
+  const nNeed=all.filter(l=>stateOf(l)==='need').length, nPending=all.filter(l=>stateOf(l)==='pending').length;
+  const pill=(txt,bg,fg)=>`<span style="display:inline-block;font-size:.6rem;font-weight:600;padding:.12rem .5rem;border-radius:10px;background:${bg};color:${fg};white-space:nowrap">${txt}</span>`;
+  const pillFor=st=>st==='need'?pill('● Needs a period','rgba(181,72,59,.12)','var(--red)')
+    :st==='pending'?pill('⏳ Saved · applies next rebuild','rgba(212,165,43,.18)','#a87f1e')
+    :pill('✓ Applied','rgba(52,211,153,.15)','#1a8f63');
+  const sub=nNeed?`— ${nNeed} term label${nNeed===1?'':'s'} still need${nNeed===1?'s':''} a period`
+    :(nPending?`— saved, applies on the next rebuild`:`— all term labels mapped`);
+  let h=`<div class="dw" style="margin-top:.85rem"><div class="dwt">Term Mapping <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${sub}</span></div>`;
+  h+=`<div style="font-size:.7rem;color:var(--mu);margin-bottom:.55rem;line-height:1.5">A grade term shows here when its wording isn't one the dashboard places on its own. It recognises <b>Autumn/Spring/Summer</b> (and Michaelmas/Lent/Hilary/Trinity) plus dates, and the year-group part (e.g. "Year 10") is handled separately — but a deliberately ambiguous word like <b>"Winter"</b> is left for you to place. Pick a period and those grades go in on the next rebuild. Rows marked <b style="color:#1a8f63">✓ Applied</b> are already done; they stay listed so you can change or clear them.</div>`;
+  h+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Term label</th><th>Status</th><th>Period</th></tr></thead><tbody>`;
   all.forEach(lab=>{
-    const cur=(_TERM_MAP&&_TERM_MAP[lab])||'';
-    const badge=(cur&&unresolved.indexOf(lab)>=0)?' <span style="color:var(--gold);font-size:.62rem">⏳</span>':'';
-    h+=`<tr><td style="font-weight:500;font-size:.72rem">${esc(lab)}${badge}</td><td><select onchange="window._setTermMap('${escJs(lab)}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px">${opts.map(([v,t])=>`<option value="${v}"${v===cur?' selected':''}>${t}</option>`).join('')}</select></td></tr>`;
+    const cur=(_TERM_MAP&&_TERM_MAP[lab])||'';const st=stateOf(lab);
+    h+=`<tr><td style="font-weight:500;font-size:.72rem">${esc(lab)}</td><td>${pillFor(st)}</td><td><select onchange="window._setTermMap('${escJs(lab)}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px">${opts.map(([v,t])=>`<option value="${v}"${v===cur?' selected':''}>${t}</option>`).join('')}</select></td></tr>`;
   });
   h+=`</tbody></table></div></div>`;
   return h;
@@ -2069,6 +2081,12 @@ function _abHeadline(cells,a6){
   }
   return {levels:ABILITY.levels,valueLabel:abGrade(a6),pos:(a6!=null&&!isNaN(a6)?a6:null),colour:_levelColourAt(ABILITY.levels,a6)};
 }
+// ── Shared "Avg Ability" headline for the tab cards ──
+// In GCSE/A-Level years the headline becomes the mean NATIVE grade (decimal for 9-1, nearest letter
+// for A*-E) because a reference rank can't be inverted back to a grade; in KS3 it stays the descriptor.
+// rows are the global cohort/class/group rows (cell map at r[3]); subs the subjects to include.
+function _abCells(rows,subs){const out=[];(rows||[]).forEach(r=>{const m=r&&r[3];if(!m)return;(subs||[]).forEach(s=>{const c=m[s];if(c)out.push(c);});});return out;}
+function _abAvgLabel(cells,avgRank){return _abHeadline(cells,avgRank).valueLabel;}
 // Vertical band bar: gradient from each level's (Admin-set) colour, rungs labelled best->worst top->
 // bottom, marker line at the pupil's fractional position. levels are best-first (levels[0] = best).
 function _scaleBarHtml(levels,pos,opts){
@@ -4596,7 +4614,7 @@ function rCmp(){
       // Gender split
       let mN=0,fN_=0;
       rows.forEach(r=>{const g=REG[String(r[0])]?.gender;if(g==='M')mN++;else if(g==='F')fN_++});
-      cohorts.push({ink,ay,label:`${ay}-${ay+1}`,pupils:rows.length,male:mN,female:fN_,avg,avgE,send,ehcp,fsm,senCats2,gb,_codeTip:sancTipAttrs(gb[0],gb[2],sancCatsFor(new Set(rows.map(r=>r[0])),DD.sanctions||[],SANC_DET),'Codes'),
+      cohorts.push({ink,ay,label:`${ay}-${ay+1}`,pupils:rows.length,male:mN,female:fN_,avg,avgE,send,ehcp,fsm,senCats2,gb,abLabel:_abAvgLabel(_abCells(rows,isAll?SUBS:[sub]),avg),sendAbL:(rows.filter(r=>r[4]).length?_abAvgLabel(_abCells(rows.filter(r=>r[4]),isAll?SUBS:[sub]),sendAb):null),ehcpAbL:(rows.filter(r=>r[5]).length?_abAvgLabel(_abCells(rows.filter(r=>r[5]),isAll?SUBS:[sub]),ehcpAb):null),fsmAbL:(rows.filter(r=>r[6]).length?_abAvgLabel(_abCells(rows.filter(r=>r[6]),isAll?SUBS:[sub]),fsmAb):null),_codeTip:sancTipAttrs(gb[0],gb[2],sancCatsFor(new Set(rows.map(r=>r[0])),DD.sanctions||[],SANC_DET),'Codes'),
         sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
         nCodes,nOnCalls,nDetentions,ytdAtt,
         status:ay+1<=CAY?'complete':(ay===CAY?'current':'future'),
@@ -4610,14 +4628,14 @@ function rCmp(){
   if(!cohorts.length){out.innerHTML='<div style="color:var(--mu);padding:2rem">No data for Year '+targetYG+'</div>';return}
 
   const tblRows=cohorts.map((c,ci)=>{
-    const abTip=`All: ${abGrade(c.avg)}${c.send?`&#10;SEND (${c.send}): ${abGrade(c.sendAb)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${abGrade(c.ehcpAb)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${abGrade(c.fsmAb)}`:''}`;
+    const abTip=`All: ${c.abLabel}${c.send?`&#10;SEND (${c.send}): ${c.sendAbL!=null?c.sendAbL:'\u2014'}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${c.ehcpAbL!=null?c.ehcpAbL:'\u2014'}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${c.fsmAbL!=null?c.fsmAbL:'\u2014'}`:''}`;
     const efTip=`All: ${fV(c.avgE,2)}${c.send?`&#10;SEND (${c.send}): ${fV(c.sendEf,2)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${fV(c.ehcpEf,2)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${fV(c.fsmEf,2)}`:''}`;
     return`<tr>
       <td style="font-weight:500">${c.label}${c.left?' <span class="left-tag">LEFT</span>':c.status==='current'?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
       <td>Intake ${c.ink}</td>
       <td>${c.pupils}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${c.male}M · ${c.female}F</div></td>
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:var(--green);font-weight:600':c.ytdAtt>=90?'':'color:var(--red);font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
-      <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${abAvgD(c.avg)}</td>
+      <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${c.abLabel}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${efAvgD(c.avgE)}</td>
       <td style="text-align:center;${c.send?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
       <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.K||'\u2014'}</td>
@@ -4822,6 +4840,10 @@ function rPrg(){
     let mN=0,fN_=0;
     rows.forEach(r=>{const g=REG[String(r[0])]?.gender;if(g==='M')mN++;else if(g==='F')fN_++});
     years.push({yg,ay,ayLabel,pupils:rows.length,male:mN,female:fN_,avg,avgE,gb,
+      abLabel:_abAvgLabel(_abCells(rows,isAll?SUBS:[sub]),avg),
+      sendAbL:(rows.filter(r=>r[4]).length?_abAvgLabel(_abCells(rows.filter(r=>r[4]),isAll?SUBS:[sub]),sendAb):null),
+      ehcpAbL:(rows.filter(r=>r[5]).length?_abAvgLabel(_abCells(rows.filter(r=>r[5]),isAll?SUBS:[sub]),ehcpAb):null),
+      fsmAbL:(rows.filter(r=>r[6]).length?_abAvgLabel(_abCells(rows.filter(r=>r[6]),isAll?SUBS:[sub]),fsmAb):null),
       send,ehcp,fsm,senCats2,_codeTip:sancTipAttrs(gb[0],gb[2],sancCatsFor(new Set(rows.map(r=>r[0])),DD.sanctions||[],SANC_DET),'Codes'),sendAb,ehcpAb,fsmAb,sendEf,ehcpEf,fsmEf,
       nCodes,nOnCalls,nDetentions,ytdAtt,isCurrent,isFuture});
   }
@@ -4830,13 +4852,13 @@ function rPrg(){
   if(!years.length){out.innerHTML='<div style="color:var(--mu);padding:2rem">No data for Intake '+ink+'</div>';return}
 
   const tblRows=years.map(c=>{
-    const abTip=`All: ${abGrade(c.avg)}${c.send?`&#10;SEND (${c.send}): ${abGrade(c.sendAb)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${abGrade(c.ehcpAb)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${abGrade(c.fsmAb)}`:''}`;
+    const abTip=`All: ${c.abLabel}${c.send?`&#10;SEND (${c.send}): ${c.sendAbL!=null?c.sendAbL:'\u2014'}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${c.ehcpAbL!=null?c.ehcpAbL:'\u2014'}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${c.fsmAbL!=null?c.fsmAbL:'\u2014'}`:''}`;
     const efTip=`All: ${fV(c.avgE,2)}${c.send?`&#10;SEND (${c.send}): ${fV(c.sendEf,2)}`:''}${c.ehcp?`&#10;EHCP (${c.ehcp}): ${fV(c.ehcpEf,2)}`:''}${c.fsm?`&#10;FSM (${c.fsm}): ${fV(c.fsmEf,2)}`:''}`;
     return`<tr>
       <td style="font-weight:500">Y${c.yg} — ${c.ayLabel}${c.isCurrent?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
       <td>${c.pupils}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${c.male}M · ${c.female}F</div></td>
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:var(--green);font-weight:600':c.ytdAtt>=90?'':'color:var(--red);font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
-      <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${abAvgD(c.avg)}</td>
+      <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${c.abLabel}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${efAvgD(c.avgE)}</td>
       <td style="text-align:center;${c.send?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
       <td style="text-align:center;font-size:.6rem;color:var(--mu)">${c.senCats2?.K||'\u2014'}</td>
@@ -5613,7 +5635,7 @@ function rSEND(){
           return{s,curA,curE,ltA,ltE:ltE2,lyA,lyE:lyE2,clsAbRk,clsEfRk,sYtdAtt,sTtdAtt};
         }).filter(s=>s.curA!=null||s.curE!=null||s.sYtdAtt!=='—'||s.sTtdAtt!=='—');
 
-        pupils.push({px,pid,yg,tg,tgAbRkStr,tgEfRkStr,flagDateStr,ytdCodes,ytdOnCalls,ytdDets,ytdAttPct,ttdAttPct,avgAb,avgEf,avgAbLT,avgEfLT,avgAbLY,avgEfLY,subjRows});
+        pupils.push({px,pid,yg,tg,tgAbRkStr,tgEfRkStr,flagDateStr,ytdCodes,ytdOnCalls,ytdDets,ytdAttPct,ttdAttPct,avgAb,avgEf,avgAbLT,avgEfLT,avgAbLY,avgEfLY,subjRows,cells:_abCells([r],SUBS)});
       });
     }
     pupils.sort((a,b)=>a.yg-b.yg||a.pid.localeCompare(b.pid));
@@ -5644,13 +5666,13 @@ function rSEND(){
 
     // Summary header rows
     const hdrStyle='font-size:.62rem;font-family:"IBM Plex Mono",monospace;text-align:center;color:var(--mu);padding:.2rem .3rem';
-    const yearRow=yearAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">Year Average</td><td style="${hdrStyle}">${yearAvgs.codes}</td><td style="${hdrStyle}">${yearAvgs.oncalls}</td><td style="${hdrStyle}">${yearAvgs.dets}</td><td style="${hdrStyle};${attCol(yearAvgs.ytdAtt)}">${yearAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(yearAvgs.ttdAtt)}">${yearAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(yearAvgs.avgEf))}">${efAvgD(yearAvgs.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(yearAvgs.avgAb))}">${abAvgD(yearAvgs.avgAb)}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
+    const yearRow=yearAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">Year Average</td><td style="${hdrStyle}">${yearAvgs.codes}</td><td style="${hdrStyle}">${yearAvgs.oncalls}</td><td style="${hdrStyle}">${yearAvgs.dets}</td><td style="${hdrStyle};${attCol(yearAvgs.ytdAtt)}">${yearAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(yearAvgs.ttdAtt)}">${yearAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(yearAvgs.avgEf))}">${efAvgD(yearAvgs.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(yearAvgs.avgAb))}">${yearAvgs.abLabel}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
     const nonLabel=`Non-${flagName}`;
-    const nonRow=nonFlagAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">${nonLabel} Average</td><td style="${hdrStyle}">${nonFlagAvgs.codes}</td><td style="${hdrStyle}">${nonFlagAvgs.oncalls}</td><td style="${hdrStyle}">${nonFlagAvgs.dets}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ytdAtt)}">${nonFlagAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ttdAtt)}">${nonFlagAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(nonFlagAvgs.avgEf))}">${efAvgD(nonFlagAvgs.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(nonFlagAvgs.avgAb))}">${abAvgD(nonFlagAvgs.avgAb)}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
+    const nonRow=nonFlagAvgs?`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:var(--mu)" colspan="4">${nonLabel} Average</td><td style="${hdrStyle}">${nonFlagAvgs.codes}</td><td style="${hdrStyle}">${nonFlagAvgs.oncalls}</td><td style="${hdrStyle}">${nonFlagAvgs.dets}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ytdAtt)}">${nonFlagAvgs.ytdAtt}</td><td style="${hdrStyle};${attCol(nonFlagAvgs.ttdAtt)}">${nonFlagAvgs.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(nonFlagAvgs.avgEf))}">${efAvgD(nonFlagAvgs.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(nonFlagAvgs.avgAb))}">${nonFlagAvgs.abLabel}</td><td style="${hdrStyle}" colspan="2"></td></tr>`:'';
     const extraHtml=(extraRows||[]).map(er=>{
       const a=er.avgs;
       if(!a) return'';
-      return`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:${er.color||'var(--mu)'}" colspan="4">${er.label} Average</td><td style="${hdrStyle}">${a.codes}</td><td style="${hdrStyle}">${a.oncalls}</td><td style="${hdrStyle}">${a.dets}</td><td style="${hdrStyle};${attCol(a.ytdAtt)}">${a.ytdAtt}</td><td style="${hdrStyle};${attCol(a.ttdAtt)}">${a.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(a.avgEf))}">${efAvgD(a.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(a.avgAb))}">${abAvgD(a.avgAb)}</td><td style="${hdrStyle}" colspan="2"></td></tr>`;
+      return`<tr style="background:var(--sf2)"><td style="font-size:.62rem;font-weight:600;color:${er.color||'var(--mu)'}" colspan="4">${er.label} Average</td><td style="${hdrStyle}">${a.codes}</td><td style="${hdrStyle}">${a.oncalls}</td><td style="${hdrStyle}">${a.dets}</td><td style="${hdrStyle};${attCol(a.ytdAtt)}">${a.ytdAtt}</td><td style="${hdrStyle};${attCol(a.ttdAtt)}">${a.ttdAtt}</td><td style="${hdrStyle};${efCol(parseFloat(a.avgEf))}">${efAvgD(a.avgEf)}</td><td style="${hdrStyle}" colspan="2"></td><td style="${hdrStyle};${abCol(parseFloat(a.avgAb))}">${a.abLabel}</td><td style="${hdrStyle}" colspan="2"></td></tr>`;
     }).join('');
 
     const rows=pupils.map((p,i)=>{
@@ -5685,7 +5707,7 @@ function rSEND(){
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${efCol(p.avgEf)}">${efAvgD(p.avgEf)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:var(--mu)">${vf(p.avgEfLT)}${efChgArrow(p.avgEf,p.avgEfLT)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:var(--mu)">${vf(p.avgEfLY)}${efChgArrow(p.avgEf,p.avgEfLY)}</td>
-        <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${abCol(p.avgAb)}">${abAvgD(p.avgAb)}</td>
+        <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${abCol(p.avgAb)}">${_abAvgLabel(p.cells,p.avgAb)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:var(--mu)">${vf(p.avgAbLT)}${chgArrow(p.avgAb,p.avgAbLT)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:var(--mu)">${vf(p.avgAbLY)}${chgArrow(p.avgAb,p.avgAbLY)}</td>
       </tr>
@@ -5756,7 +5778,7 @@ function rSEND(){
       const abVals=list.map(p=>p.avgAb).filter(v=>v!=null);
       const avgEf=efVals.length?(efVals.reduce((a,b)=>a+b,0)/efVals.length).toFixed(1):'—';
       const avgAb=abVals.length?(abVals.reduce((a,b)=>a+b,0)/abVals.length).toFixed(1):'—';
-      return{codes:codes.toFixed(1),oncalls:oncalls.toFixed(1),dets:dets.toFixed(1),ytdAtt,ttdAtt,avgEf,avgAb};
+      return{codes:codes.toFixed(1),oncalls:oncalls.toFixed(1),dets:dets.toFixed(1),ytdAtt,ttdAtt,avgEf,avgAb,abLabel:_abAvgLabel(list.flatMap(p=>p.cells||[]),parseFloat(avgAb))};
     };
     const year=calc(allPupilData);
     const nonFlag=calc(allPupilData.filter(p=>!flaggedPxSet.has(p.px)));
@@ -5804,7 +5826,7 @@ function rSEND(){
       const abVals=list.map(p=>p.avgAb).filter(v=>v!=null);
       const avgEf=efVals.length?(efVals.reduce((a,b)=>a+b,0)/efVals.length).toFixed(1):'—';
       const avgAb=abVals.length?(abVals.reduce((a,b)=>a+b,0)/abVals.length).toFixed(1):'—';
-      return{codes:codes.toFixed(1),oncalls:oncalls.toFixed(1),dets:dets.toFixed(1),ytdAtt,ttdAtt,avgEf,avgAb};
+      return{codes:codes.toFixed(1),oncalls:oncalls.toFixed(1),dets:dets.toFixed(1),ytdAtt,ttdAtt,avgEf,avgAb,abLabel:_abAvgLabel(list.flatMap(p=>p.cells||[]),parseFloat(avgAb))};
     };
     return calc(pupils);
   }
@@ -8046,9 +8068,13 @@ function rSV(){
     </div>`;
 
   // Grade breakdown with bar chart
+  // Grade breakdown — on-track (OTE) grades, bucketed best-first using the national grade colours
   const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
-  const maxGradeCount=Math.max(...[...AN].map(g=>lr.filter(r=>r[3][sub]&&_abBand(r[3][sub])===g).length),1);
-  const gradeRows=[...AN].reverse().map(g=>{const c=lr.filter(r=>r[3][sub]&&_abBand(r[3][sub])===g).length;const p=sc2r.length?(c/sc2r.length*100).toFixed(0):0;const barW=Math.round(c/maxGradeCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${GC[g]}"></span><span style="color:var(--mu);min-width:3.5rem">${g}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${GC[g]}44;border-left:2px solid ${GC[g]}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
+  const _oteVals=lr.map(r=>r[3][sub]?r[3][sub][2]:null).filter(v=>v!=null&&v!=='');
+  const _oteLvls=_builtinAbilityLevels(new Set(_oteVals.map(v=>String(v).trim())));
+  const _oteTot=_oteVals.length;
+  const maxGradeCount=Math.max(..._oteLvls.map(l=>_oteVals.filter(v=>String(v).trim()===l.label).length),1);
+  const gradeRows=_oteLvls.length?_oteLvls.map(l=>{const c=_oteVals.filter(v=>String(v).trim()===l.label).length;const p=_oteTot?(c/_oteTot*100).toFixed(0):0;const barW=Math.round(c/maxGradeCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:3.5rem">${l.label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${l.colour}44;border-left:2px solid ${l.colour}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join(''):`<div style="color:var(--mu);font-size:.7rem;padding:.2rem 0">No on-track grades recorded for this group.</div>`;
 
   // Effort breakdown with bar chart
   const efLabels=['Excellent','Good','Developing','Low'];
@@ -8076,7 +8102,7 @@ function rSV(){
 
   document.getElementById('sv-cards').innerHTML=`
     <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${abGrade(avg)}</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${_abAvgLabel(_abCells(lr,[sub]),avg)}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
@@ -8087,7 +8113,7 @@ function rSV(){
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
       ${sgBlockEf}
     </div>
-    <div class="crd"><div class="ct2">Grade Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${gradeRows}</div></div>
+    <div class="crd"><div class="ct2">Grade Breakdown <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(on-track estimate)</span></div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${gradeRows}</div></div>
     <div class="crd"><div class="ct2">Effort Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${efRows}</div></div>`;
 
   dc('svab');dc('svef');dc('svst');dc('svefst');
@@ -8098,7 +8124,7 @@ function rSV(){
 
   const _abSpecs=_stageDistSpecs(yearGroup,sub);
   const _abChartsHtml=_abSpecs.map((s,i)=>{const best=(s.levels[0]&&s.levels[0].label)||ABILITY.bestLabel;const ttl=s.name?`${s.name} Ability`:'Ability Distribution Over Time';return `<div class="chc" style="flex:1 1 280px;min-width:0"><div class="cht">${ttl} (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${best} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst-${i}"></canvas></div></div>`;}).join('');
-  document.getElementById('sv-charts-bottom').innerHTML=`<div style="grid-column:1/-1;display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1fr);gap:.85rem;align-items:start"><div style="display:flex;flex-direction:column;gap:.85rem;min-width:0"><div style="display:flex;gap:.85rem;flex-wrap:wrap">${_abChartsHtml}</div><div class="chc"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div></div><div style="min-width:0">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true)}</div></div>`;
+  document.getElementById('sv-charts-bottom').innerHTML=`<div style="grid-column:1/-1"><div style="display:flex;gap:.85rem;flex-wrap:wrap;align-items:stretch"><div style="flex:2.2 1 360px;display:flex;gap:.85rem;flex-wrap:wrap;min-width:0">${_abChartsHtml}</div><div class="disc-box" style="flex:1 1 280px;min-width:0">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true)}</div></div><div class="chc" style="margin-top:.85rem"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div></div>`;
 
   // Build per-period data points for all pupils and each sub-group
   function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
@@ -8484,12 +8510,15 @@ function rCL(){
   renderNet();
 
   const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
-  const gradeRows=[...AN].reverse().map(g=>{const c=lr.filter(r=>r[3][sub]&&_abBand(r[3][sub])===g).length;const p=sc2r.length?(c/sc2r.length*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${GC[g]}"></span><span style="color:var(--mu);min-width:4.5rem">${g}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join('');
+  const _oteVals=lr.map(r=>r[3][sub]?r[3][sub][2]:null).filter(v=>v!=null&&v!=='');
+  const _oteLvls=_builtinAbilityLevels(new Set(_oteVals.map(v=>String(v).trim())));
+  const _oteTot=_oteVals.length;
+  const gradeRows=_oteLvls.length?_oteLvls.map(l=>{const c=_oteVals.filter(v=>String(v).trim()===l.label).length;const p=_oteTot?(c/_oteTot*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:4.5rem">${l.label}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join(''):`<div style="color:var(--mu);font-size:.7rem">No on-track grades recorded.</div>`;
 
   if(hasGradesCL){
   document.getElementById('cl-cards').innerHTML=`
     <div class="crd"><div class="ct2">${sub} Class ${cl} Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${abGrade(avg)}</span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${_abAvgLabel(_abCells(lr,[sub]),avg)}</span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
@@ -8500,7 +8529,7 @@ function rCL(){
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
       ${sgBlockEf}
     </div>
-    <div class="crd"><div class="ct2">Grade Breakdown</div><div style="display:flex;flex-direction:column;gap:.15rem;margin-top:.25rem">${gradeRows}</div></div>
+    <div class="crd"><div class="ct2">Grade Breakdown <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(on-track estimate)</span></div><div style="display:flex;flex-direction:column;gap:.15rem;margin-top:.25rem">${gradeRows}</div></div>
     <div class="crd"><div class="ct2">Flags</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lr)}</div></div>`;
   }else{
     document.getElementById('cl-cards').innerHTML=`
@@ -8624,7 +8653,7 @@ function rCC(){
     const dotD=clsDetentions>eDets?PAL.red:clsDetentions<eDets?PAL.green:'var(--mu)';
     const dot=(col)=>`<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${col};vertical-align:middle;margin-left:.3rem"></span>`;
 
-    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${(()=>{let m=0,f=0;info.pups.forEach(px=>{const g=REG[String(px)]?.gender;if(g==='M')m++;else if(g==='F')f++});return`${m}M · ${f}F`})()}</div></td><td style="text-align:center;font-family:'IBM Plex Mono',monospace;${ytdAttCol}">${ytdAttCC!=null?ytdAttCC+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${abAvgD(avg)}</td><td style="font-weight:600;color:${eC(avgE)}">${efAvgD(avgE)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:var(--blue);font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:var(--orange);font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:var(--red);font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
+    return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${(()=>{let m=0,f=0;info.pups.forEach(px=>{const g=REG[String(px)]?.gender;if(g==='M')m++;else if(g==='F')f++});return`${m}M · ${f}F`})()}</div></td><td style="text-align:center;font-family:'IBM Plex Mono',monospace;${ytdAttCol}">${ytdAttCC!=null?ytdAttCC+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${_abAvgLabel(_abCells(lr,[sub]),avg)}</td><td style="font-weight:600;color:${eC(avgE)}">${efAvgD(avgE)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:var(--blue);font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:var(--orange);font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:var(--red);font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
 
   document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--orange)">Exp.</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--red)">Exp.</th><th style="color:var(--violet)">Det.</th><th style="color:var(--violet)">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -9097,7 +9126,7 @@ function rPeer(){
       <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?PAL.green:parseFloat(tgYtdAtt)>=90?'var(--tx)':PAL.red}">${tgYtdAtt}%</div>
       <div style="font-size:.72rem;color:var(--mu)">Codes: <span style="color:var(--orange);font-weight:600">${tgCodes}</span> · Detentions: <span style="color:var(--violet);font-weight:600">${tgDets}</span></div>
     </div>
-    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.bestLabel} = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${abGrade(avg)}</div></div>
+    ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.bestLabel} = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${_abAvgLabel(_abCells(tgRows,SUBS),avg)}</div></div>
     <div class="crd"><div class="ct2">Avg Effort <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${EFFORT.bestLabel} = highest effort)</span></div><div style="font-size:1.5rem;font-weight:700;color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></div></div>`:''}
   </div>`;
 
