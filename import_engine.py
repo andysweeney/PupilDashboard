@@ -390,16 +390,21 @@ print(f"Report files found: {len(_report_dfs)} ({len(reports)} grade rows)")
 print("\nParsing attendance data...")
 att_all = pd.concat(att_frames, ignore_index=True)
 att_all = att_all.dropna(subset=['Period Description'])
-att_all['pid'] = att_all['Name'].apply(pid)
+# Per-row transforms evaluated once per DISTINCT value, then mapped — same functions, identical
+# output, but a few hundred calls instead of one per row (big on a 50MB+ attendance frame).
+def _vmap(series, fn):
+    lut = {v: fn(v) for v in series.dropna().unique()}
+    return series.map(lut)
+_per_of = lambda x: int(str(x).split(':')[1]) if ':' in str(x) and str(x).split(':')[1].isdigit() else 0
+att_all['pid'] = _vmap(att_all['Name'], pid)
 att_all['Day'] = (att_all['Period Description'].astype(str).str.split(':').str[0]
                   .str.strip().str[:3].str.title())   # 'Monday'/'MON'/'mon' -> 'Mon' (matches DAY_MAP)
-att_all['Per'] = att_all['Period Description'].apply(
-    lambda x: int(str(x).split(':')[1]) if ':' in str(x) and str(x).split(':')[1].isdigit() else 0)
-att_all['DateISO'] = att_all['Date'].apply(parse_date_flex)
+att_all['Per'] = _vmap(att_all['Period Description'], _per_of)
+att_all['DateISO'] = _vmap(att_all['Date'], parse_date_flex)
 att_all['Teacher'] = att_all['Teacher'].apply(lambda x: int(x) if pd.notna(x) else None)
 att_all = att_all.dropna(subset=['DateISO'])
 # Academic year (start calendar year) per row — used to build per-year snapshots.
-att_all['AY'] = att_all['DateISO'].apply(acad_year)
+att_all['AY'] = _vmap(att_all['DateISO'], acad_year)
 
 # Subject normalisation + flag case/spelling variants (e.g. 'Pe' vs 'PE') for mapping.
 _raw_subjects = set(att_all['Subject'].dropna().astype(str).str.strip())
@@ -411,7 +416,7 @@ if _subject_variants:
     print("⚠ SUBJECT SPELLING VARIANTS (add a canonical form to subject_map):")
     for _k, _v in sorted(_subject_variants.items()):
         print(f"  {sorted(_v)}")
-att_all['Subject'] = att_all['Subject'].apply(norm_subject)
+att_all['Subject'] = _vmap(att_all['Subject'], norm_subject)
 
 # Flag unknown attendance codes
 all_marks = set(att_all['Mark'].dropna().unique())
