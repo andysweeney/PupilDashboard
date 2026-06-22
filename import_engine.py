@@ -885,8 +885,18 @@ def map_attainment_scaled(raw, year_group, flagset):
 print("Parsing reports (grades)...")
 report_scores = defaultdict(lambda: defaultdict(dict))
 _rep_subject_set = set()
-_unmapped_ability, _unmapped_effort = set(), set()
-_unmapped_rank = set()   # tokens that validate but have no reference-band assignment (transition gap)
+class _FlagCount:
+    """Set-like sink that also tallies how many times each value was flagged, so the dashboard can
+    show counts (e.g. 'grade 3 - 2 pupils'). Supports the .add()/.discard() the mappers already call,
+    and stays iterable / len / bool compatible for the existing console reports below."""
+    def __init__(self): self.counts = {}
+    def add(self, s): self.counts[s] = self.counts.get(s, 0) + 1
+    def discard(self, s): self.counts.pop(s, None)
+    def __iter__(self): return iter(self.counts)
+    def __len__(self): return len(self.counts)
+    def __bool__(self): return bool(self.counts)
+_unmapped_ability, _unmapped_effort = _FlagCount(), _FlagCount()
+_unmapped_rank = _FlagCount()   # tokens that validate but have no reference-band assignment (transition gap)
 _rep_rows_used = _rep_no_subject = _rep_no_term = _rep_no_pupil = _rep_empty = 0
 
 if len(reports):
@@ -1575,6 +1585,12 @@ output = {
         "sen_codes": SEN_CODES,
         "incident_codes": incident_config,
         "unresolved_terms": _UNRESOLVED_TERMS,
+        # Grade values the rebuild couldn't place, surfaced in Admin so they stop dropping silently.
+        # {rawValue: count} of report grades that matched no ability/effort band; and
+        # {"TOKEN@Y{yg}": count} of grades that validated but have no reference-band calibration.
+        "unmapped_ability": dict(_unmapped_ability.counts),
+        "unmapped_effort": dict(_unmapped_effort.counts),
+        "uncalibrated_grades": dict(_unmapped_rank.counts),
         "house_point_weights": HOUSE_POINT_WEIGHTS,
         "house_point_types": HP_TYPES,
     },
@@ -1632,7 +1648,7 @@ def _flat(x):
     if isinstance(x, dict):
         for v in x.values():
             out |= set(v) if isinstance(v, (set, list, tuple)) else {v}
-    elif isinstance(x, (set, list, tuple)):
+    elif isinstance(x, (set, list, tuple, _FlagCount)):
         out |= set(x)
     elif x is not None:
         out.add(x)
