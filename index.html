@@ -5880,10 +5880,14 @@ function renderDistCharts(){
   document.getElementById('dist-subj').innerHTML=subjGrid;
 
   // Sanctions by Type chart
-  const _codeCats=INC_CATS.filter(c=>c.id!=='On-Call');
+  // Exclude the On-Call category by its FIXED key (not its editable name) so the bar can't be
+  // mis-dropped when a school renames slots; also drop blank/disabled slots. Bucket each code-type
+  // sanction by its category KEY (incCatKey) rather than exact-name match, so a sanction never
+  // vanishes just because its stored category name differs from the slot's current name.
+  const _codeCats=INC_CATS.filter(c=>c.key!=='oc'&&c.id);
   const typeLabels=[..._codeCats.map(c=>c.id),'On-Calls','Detentions'];
   const typeColors=[..._codeCats.map(c=>c.color),PAL.magenta,PAL.violet];
-  const typeVals=[..._codeCats.map(c=>filtered.filter(r=>r.t===0&&r.cat===c.id).length),filtered.filter(r=>r.t===1).length,filtered.filter(r=>r.t===2).length];
+  const typeVals=[..._codeCats.map(c=>filtered.filter(r=>r.t===0&&incCatKey(r.cat)===c.key).length),filtered.filter(r=>r.t===1).length,filtered.filter(r=>r.t===2).length];
   const maxType=Math.max(...typeVals,1);
   let typeGrid='<div style="display:flex;flex-direction:column;gap:.2rem">';
   typeLabels.forEach((lbl,i)=>{
@@ -10451,8 +10455,10 @@ function rPeer(){
       Object.values(byDate).forEach(marks=>{marks.forEach(m=>foundAttCodes.add(m))});
     });
     const foundSenCodes=new Set(Object.values(DD.senStatus||{}));
+    // Only Code/On-Call-type sanctions carry a classifiable incident code; detention rows (type 2)
+    // store a detention type in this slot, not a behaviour code, so they're excluded here.
     const foundIncidentCodes=new Set();
-    (DD.sanctionDetails||[]).forEach(d=>{if(d&&d[0])foundIncidentCodes.add(d[0])});
+    (DD.sanctionDetails||[]).forEach((d,i)=>{const _s=(DD.sanctions||[])[i];if(d&&d[0]&&_s&&_s[1]!==2)foundIncidentCodes.add(d[0])});
 
     // Classify attendance codes
     const allAttCategories=['present','authorised_absent','unauthorised_absent','not_counted'];
@@ -10501,26 +10507,38 @@ function rPeer(){
 
     // Build incident codes table
     let incHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Incident Codes (Behaviour Categories)</div>`;
-    incHtml+=`<div style="margin-bottom:.85rem;padding:.7rem .85rem;border:1px solid var(--bd);border-radius:8px;background:var(--sf)"><div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">Incident Categories</div><div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.4">Name the categories your school uses (up to 8 slots). These become the options you assign each incident code to below, and their names, tags and colours flow through every chart and tooltip. Leave a slot blank to disable it.</div><table class="d"><thead><tr><th>Name</th><th>Tag</th><th style="text-align:center">Colour</th></tr></thead><tbody>`+INC_CATS.map((c,i)=>{const _r=`<tr><td><input id="inccat-name-${i}" value="${(c.id||'').replace(/"/g,'&quot;')}" placeholder="(unused slot)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.74rem;padding:.3rem .4rem;border-radius:4px;width:100%;box-sizing:border-box"></td><td><input id="inccat-short-${i}" value="${(c.short||'').replace(/"/g,'&quot;')}" maxlength="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'IBM Plex Mono',monospace;font-size:.74rem;padding:.3rem .4rem;border-radius:4px;width:3.5rem;box-sizing:border-box"></td><td style="text-align:center"><input type="color" id="inccat-col-${i}" value="${/^#[0-9a-fA-F]{6}$/.test(String(c.color))?c.color:'#888888'}" style="width:34px;height:24px;border:1px solid var(--bd);border-radius:4px;background:none;cursor:pointer;padding:0"></td></tr>`;return c.key==='oc'?_r+`<tr><td colspan="3" style="padding:.1rem .4rem .55rem;font-size:.65rem;color:var(--orange);line-height:1.4">⚠ Escalated tier — incidents mapped to this slot count at the On-Call weight (currently ${SW_ONCALL}×), not the standard code weight (${SW_CODE}×). Keep it for genuine senior-staff escalations only.</td></tr>`:_r;}).join('')+`</tbody></table><button onclick="window._saveIncidentCategories()" style="margin-top:.6rem;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save categories</button></div>`;
+    incHtml+=`<div style="margin-bottom:.85rem;padding:.7rem .85rem;border:1px solid var(--bd);border-radius:8px;background:var(--sf)"><div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">Incident Categories</div><div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.4">Name the categories your school uses (up to 8 slots). These become the options you assign each incident code to below, and their names, tags and colours flow through every chart and tooltip. Leave a slot blank to disable it.</div><table class="d"><thead><tr><th>Name</th><th>Tag</th><th style="text-align:center">Colour</th></tr></thead><tbody>`+INC_CATS.map((c,i)=>{const _r=`<tr><td><input id="inccat-name-${i}" value="${(c.id||'').replace(/"/g,'&quot;')}" placeholder="(unused slot)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.74rem;padding:.3rem .4rem;border-radius:4px;width:100%;box-sizing:border-box"></td><td><input id="inccat-short-${i}" value="${(c.short||'').replace(/"/g,'&quot;')}" maxlength="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'IBM Plex Mono',monospace;font-size:.74rem;padding:.3rem .4rem;border-radius:4px;width:3.5rem;box-sizing:border-box"></td><td style="text-align:center"><input type="color" id="inccat-col-${i}" value="${/^#[0-9a-fA-F]{6}$/.test(String(c.color))?c.color:'#888888'}" style="width:34px;height:24px;border:1px solid var(--bd);border-radius:4px;background:none;cursor:pointer;padding:0"></td></tr>`;return c.key==='oc'?`<tr><td style="background:rgba(200,119,46,.09);box-shadow:inset 4px 0 0 var(--orange)"><input id="inccat-name-${i}" value="${(c.id||'').replace(/"/g,'&quot;')}" placeholder="(unused — escalated slot)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.74rem;padding:.3rem .4rem;border-radius:4px;width:100%;box-sizing:border-box"><div style="margin-top:.32rem;font-size:.58rem;font-weight:700;letter-spacing:.04em;color:var(--orange)">⚡ ON-CALL TIER · ×${SW_ONCALL} WEIGHT</div></td><td style="background:rgba(200,119,46,.09)"><input id="inccat-short-${i}" value="${(c.short||'').replace(/"/g,'&quot;')}" maxlength="3" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:'IBM Plex Mono',monospace;font-size:.74rem;padding:.3rem .4rem;border-radius:4px;width:3.5rem;box-sizing:border-box"></td><td style="background:rgba(200,119,46,.09);text-align:center"><input type="color" id="inccat-col-${i}" value="${/^#[0-9a-fA-F]{6}$/.test(String(c.color))?c.color:'#888888'}" style="width:34px;height:24px;border:1px solid var(--bd);border-radius:4px;background:none;cursor:pointer;padding:0"></td></tr><tr><td colspan="3" style="background:rgba(200,119,46,.09);box-shadow:inset 4px 0 0 var(--orange);padding:.15rem .5rem .6rem;font-size:.65rem;color:var(--orange);line-height:1.4">⚠ This is the escalated slot — it's identified by its position here, not by its name. Codes mapped to it count at the On-Call weight (currently ${SW_ONCALL}×, versus ${SW_CODE}× for standard codes) and are promoted onto the On-Call bar. Keep it for genuine senior-staff escalations only.</td></tr>`:_r;}).join('')+`</tbody></table><button onclick="window._saveIncidentCategories()" style="margin-top:.6rem;background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save categories</button></div>`;
     const incCategories=[...INC_CATS.map(c=>c.id),'Detention'];
     const incCatColors=Object.assign({Detention:PAL.violet},Object.fromEntries(INC_CATS.map(c=>[c.id,c.color])));
-    const unclassifiedInc=[...foundIncidentCodes].filter(c=>!incidentCodes[c]).sort();
-    if(unclassifiedInc.length){
-      incHtml+=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:var(--red);font-weight:600">⚠ ${unclassifiedInc.length} unclassified incident code${unclassifiedInc.length!==1?'s':''}: </span>${unclassifiedInc.map(c=>`<b>${c}</b>`).join(', ')}</div>`;
-    }
+    // Dropdown options = the live, NAMED categories only (blank/disabled slots excluded); Detention selectable too.
+    const catOptions=incCategories.filter(Boolean);
+    const liveCatNames=new Set(catOptions);
+    // A code "needs a category" when its current mapping doesn't point at a live, named category.
+    // Catches never-classified codes AND codes left on a category whose slot has since been renamed
+    // or blanked — so renaming a slot can never make codes silently vanish from this panel again.
+    const _needsCat=code=>{const cur=incidentCodes[code];return !cur||!liveCatNames.has(cur);};
+    const _escHtml=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const _escJs=s=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const _selStyle=`background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px`;
     // Count occurrences per incident code
     const incCounts={};
     (DD.sanctionDetails||[]).forEach(d=>{if(d&&d[0])incCounts[d[0]]=(incCounts[d[0]]||0)+1});
+    // Every code seen in the data OR already carrying a saved mapping — all shown, so any can be re-categorised.
+    const _allIncCodes=[...new Set([...foundIncidentCodes,...Object.keys(incidentCodes)])];
+    const pendingInc=_allIncCodes.filter(_needsCat).sort((a,b)=>(incCounts[b]||0)-(incCounts[a]||0)||a.localeCompare(b));
+    if(pendingInc.length){
+      incHtml+=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:var(--red);font-weight:600">⚠ ${pendingInc.length} code${pendingInc.length!==1?'s':''} need a category: </span>${pendingInc.map(c=>`<b>${_escHtml(c)}</b>`).join(', ')}</div>`;
+    }
     incHtml+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Incident Code</th><th>Category</th><th style="text-align:center">Count</th><th>Change</th></tr></thead><tbody>`;
-    // Unclassified first
-    unclassifiedInc.forEach(c=>{
-      incHtml+=`<tr style="background:rgba(181,72,59,.08)"><td style="font-weight:500;font-size:.72rem">${c}</td><td style="color:var(--red);font-weight:600">UNCLASSIFIED</td><td style="text-align:center">${incCounts[c]||0}</td><td><select onchange="window._adminSetInc('${c.replace(/'/g,"\\'")}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px"><option value="">— Select —</option>${incCategories.map(cat=>`<option value="${cat}">${cat}</option>`).join('')}</select></td></tr>`;
+    // Codes needing a category first
+    pendingInc.forEach(c=>{
+      incHtml+=`<tr style="background:rgba(181,72,59,.08)"><td style="font-weight:500;font-size:.72rem">${_escHtml(c)}</td><td style="color:var(--red);font-weight:600">Category Needed</td><td style="text-align:center">${incCounts[c]||0}</td><td><select onchange="window._adminSetInc('${_escJs(c)}',this.value)" style="${_selStyle}"><option value="">— Select —</option>${catOptions.map(cat=>`<option value="${_escHtml(cat)}">${_escHtml(cat)}</option>`).join('')}</select></td></tr>`;
     });
-    // Classified, grouped by category
-    incCategories.forEach(cat=>{
+    // Already categorised — grouped by their live category; every code shown so it can be re-categorised any time.
+    catOptions.forEach(cat=>{
       const codes=Object.entries(incidentCodes).filter(([c,ct])=>ct===cat).sort((a,b)=>a[0].localeCompare(b[0]));
       codes.forEach(([c,ct])=>{
-        incHtml+=`<tr><td style="font-weight:500;font-size:.72rem">${c}</td><td style="color:${incCatColors[cat]||'var(--mu)'};font-weight:500">${cat}</td><td style="text-align:center">${incCounts[c]||'—'}</td><td><select onchange="window._adminSetInc('${c.replace(/'/g,"\\'")}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px">${incCategories.map(ct2=>`<option value="${ct2}"${ct2===cat?' selected':''}>${ct2}</option>`).join('')}</select></td></tr>`;
+        incHtml+=`<tr><td style="font-weight:500;font-size:.72rem">${_escHtml(c)}</td><td style="color:${incCatColors[cat]||'var(--mu)'};font-weight:500">${_escHtml(cat)}</td><td style="text-align:center">${incCounts[c]||'—'}</td><td><select onchange="window._adminSetInc('${_escJs(c)}',this.value)" style="${_selStyle}">${catOptions.map(ct2=>`<option value="${_escHtml(ct2)}"${ct2===cat?' selected':''}>${_escHtml(ct2)}</option>`).join('')}</select></td></tr>`;
       });
     });
     incHtml+=`</tbody></table></div></div>`;
@@ -10573,7 +10591,7 @@ function rPeer(){
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.8rem;padding:.5rem 0">
         <div style="font-size:.75rem"><span style="color:var(--green);font-weight:600">${(attCodes.present||[]).length}</span> Present codes · <span style="color:var(--orange);font-weight:600">${(attCodes.authorised_absent||[]).length}</span> Auth Absent · <span style="color:var(--red);font-weight:600">${(attCodes.unauthorised_absent||[]).length}</span> Unauth · <span style="color:var(--slate);font-weight:600">${(attCodes.not_counted||[]).length}</span> Not Counted${unclassifiedAtt.length?` · <span style="color:var(--red);font-weight:700">${unclassifiedAtt.length} UNCLASSIFIED</span>`:''}</div>
         <div style="font-size:.75rem"><span style="color:var(--orange);font-weight:600">${Object.keys(senCodes).length}</span> SEN codes${unclassifiedSen.length?` · <span style="color:var(--red);font-weight:700">${unclassifiedSen.length} UNCLASSIFIED</span>`:''}</div>
-        <div style="font-size:.75rem"><span style="color:var(--violet);font-weight:600">${Object.keys(incidentCodes).length}</span> Incident codes${unclassifiedInc.length?` · <span style="color:var(--red);font-weight:700">${unclassifiedInc.length} UNCLASSIFIED</span>`:''}</div>
+        <div style="font-size:.75rem"><span style="color:var(--violet);font-weight:600">${Object.keys(incidentCodes).length}</span> Incident codes${pendingInc.length?` · <span style="color:var(--red);font-weight:700">${pendingInc.length} NEED CATEGORY</span>`:''}</div>
       </div>
       <div style="display:flex;align-items:center;gap:.8rem;margin-top:.5rem"><span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--green);font-weight:600">✓ Saved automatically</span><button onclick="window._adminExport()" style="background:transparent;color:var(--tx);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;cursor:pointer">⬇ Export backup</button><span style="font-size:.65rem;color:var(--mu)">Data-key changes save instantly. Export downloads the current config as a JSON backup for future imports.</span></div>
     </div>`;
@@ -10881,11 +10899,14 @@ function rPeer(){
         rAdmin(); return;
       }
     }
-    DD.config.incident_codes[code]=cat;
+    // Empty selection ("— Select —") clears the mapping so the code returns to the "Category Needed"
+    // list, rather than persisting a blank category.
+    if(cat){ DD.config.incident_codes[code]=cat; }
+    else { delete DD.config.incident_codes[code]; }
+    const _newCat=cat||'Category Needed';
     // Update sanctionDetails in place
-    const SAN2=DD.sanctions||[];
-    (DD.sanctionDetails||[]).forEach((d,i)=>{
-      if(d&&d[0]===code) d[1]=cat;
+    (DD.sanctionDetails||[]).forEach((d)=>{
+      if(d&&d[0]===code) d[1]=_newCat;
     });
     _persistDataKeys();
     rAdmin();
