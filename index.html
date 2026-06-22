@@ -522,8 +522,13 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   // file, so they are personal data. Keep notes minimal and factual; flag this
   // store to the school DPO. (A reminder is shown in the dismiss dialog.)
   // ════════════════════════════════════════════════════════════════════════
-  const DSM_LS_KEY  = 'pupilDashboard.dismissals.v1';
-  const DSM_WHO_KEY = 'pupilDashboard.dismissedBy.v1';
+  // Cache keys are scoped per school so one school's considered-marks (which can include notes that
+  // name children) never load against another school in the same browser, and never get merged into
+  // another school's shared row. schoolId() is null on a genuine single-school site, where the key
+  // keeps its original unscoped name — so an existing single-school cache keeps working unchanged.
+  function _dsmNs(){ try{ var s=schoolId(); return s ? '.'+s : ''; }catch(e){ return ''; } }
+  function dsmLsKey(){  return 'pupilDashboard.dismissals.v1'  + _dsmNs(); }
+  function dsmWhoKey(){ return 'pupilDashboard.dismissedBy.v1' + _dsmNs(); }
   let   DSM = {};            // merged working map: key -> {key,px,type,subkey,label,history:[...]}
   let   _dsmPendingKey = null;
   window._dsmCtx = window._dsmCtx || {};
@@ -533,8 +538,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   // teacher / slot). Once-per-pupil concern types use subkey ''.
   function dismKey(px,type,subkey){return px+'|'+type+'|'+(subkey||'');}
 
-  function dsmLoadLocal(){try{const r=localStorage.getItem(DSM_LS_KEY);return r?JSON.parse(r):{};}catch(e){return{};}}
-  function dsmPersist(){try{localStorage.setItem(DSM_LS_KEY,JSON.stringify(DSM));}catch(e){console.warn('Could not save dismissals:',e);}}
+  function dsmLoadLocal(){try{const r=localStorage.getItem(dsmLsKey());return r?JSON.parse(r):{};}catch(e){return{};}}
+  function dsmPersist(){try{localStorage.setItem(dsmLsKey(),JSON.stringify(DSM));}catch(e){console.warn('Could not save dismissals:',e);}}
 
   // Merge two dismissal maps: union keys, concatenate histories (deduped by
   // when+who+note). Lets a re-deployed dismissals.json and this browser's local
@@ -583,7 +588,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
         const merged = dsmMerge((remote&&(remote.dismissals||remote))||{}, DSM);
         DSM = merged;
         dsmPersist();
-        await sbSet('dismissals', {dismissals:merged, updatedBy:(localStorage.getItem(DSM_WHO_KEY)||''), updatedAt:new Date().toISOString()});
+        await sbSet('dismissals', {dismissals:merged, updatedBy:(localStorage.getItem(dsmWhoKey())||''), updatedAt:new Date().toISOString()});
       }catch(e){ console.warn('[dsm] shared-store sync failed:', e.message); }
     });
     return _dsmPushChain;
@@ -706,7 +711,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     _dsmPendingKey=key;
     document.getElementById('dsm-ctx').innerHTML='<b style="color:var(--tx)">'+ctx.label+'</b> — '+(ctx.pupilName||('#'+ctx.px))+(ctx.detail?('<br><span style="font-size:.66rem">'+ctx.detail+'</span>'):'');
     const who=document.getElementById('dsm-who');
-    who.value=localStorage.getItem(DSM_WHO_KEY)||'';
+    who.value=localStorage.getItem(dsmWhoKey())||'';
     const sel=document.getElementById('dsm-realert');
     const te=dsmTermEnd();
     const opts=[['42','In 6 weeks (default)'],['14','In 2 weeks'],['84','In 12 weeks']];
@@ -727,7 +732,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     const who=(document.getElementById('dsm-who').value||'').trim()||'—';
     const note=(document.getElementById('dsm-note').value||'').trim();
     const rv=document.getElementById('dsm-realert').value;
-    localStorage.setItem(DSM_WHO_KEY,who);
+    localStorage.setItem(dsmWhoKey(),who);
     const now=new Date();
     let expiresAt=null;
     if(rv.indexOf('term:')===0)expiresAt=rv.slice(5)+'T23:59:59.000Z';
@@ -748,7 +753,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     const key=decodeURIComponent(keyEnc);
     const rec=DSM[key];if(!rec)return;
     if(!confirm('Restore this concern to the active list? The dismissal record is kept for audit.'))return;
-    const who=localStorage.getItem(DSM_WHO_KEY)||'—';
+    const who=localStorage.getItem(dsmWhoKey())||'—';
     rec.history.push({who,when:new Date().toISOString(),note:'(restored to active)',expiresAt:new Date().toISOString(),restored:true});
     dsmPersist();dsmServerPush();setTimeout(dsmRefresh,0); // defer: avoid replacing the just-clicked button mid-dispatch
   }
