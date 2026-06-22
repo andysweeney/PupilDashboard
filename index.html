@@ -1208,7 +1208,15 @@ const _REF_GRAD=[PAL.green,PAL.lilac,PAL.blue,PAL.sky,PAL.gold,PAL.orange,PAL.re
 function _refLevels(){
   const ref=(CFG&&Array.isArray(CFG.reference_scale))?CFG.reference_scale:null;
   if(!ref||!ref.length)return null;
-  return ref.map((tok,i)=>({csv:[String(tok)],label:String(tok),colour:_REF_GRAD[Math.min(i,_REF_GRAD.length-1)]}));
+  const lab=(CFG&&CFG.reference_labels)||{};
+  const col=(CFG&&CFG.reference_colours)||{};
+  // label = descriptor (full, shown on hover/in tables; the axis tick uses a short form derived from it);
+  // colour = the school's band colour when set, else a position on the green->red gradient.
+  return ref.map((tok,i)=>{
+    const t=String(tok);
+    const d=(lab[t]!=null&&String(lab[t])!=='')?String(lab[t]):t;
+    return {csv:[t],label:d,colour:(col[t]||_REF_GRAD[Math.min(i,_REF_GRAD.length-1)])};
+  });
 }
 const _USE_REF=!!_refLevels();
 function _sanitiseScales(cfg){
@@ -10713,6 +10721,7 @@ function rPeer(){
     const _scaleEditor=(title,key,S)=>{
       const inp="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.72rem;padding:.25rem .35rem;border-radius:4px;width:100%;box-sizing:border-box";
       let h=`<div class="dw" style="margin-bottom:1rem"><div class="dwt">${title} Scale <span style="font-weight:400;font-size:.62rem;color:var(--mu)">(rank 1 = best · top row = best · blank rows ignored · up to 9)</span></div>`;
+      if(key==='ability'&&_USE_REF) h+=`<div style="font-size:.66rem;color:var(--mu);margin:-.3rem 0 .55rem;line-height:1.45">These are your KS3 reference bands — the ability axis itself. Add or remove rows to change how many bands you have, and edit each band's descriptor and colour. The CSV value is the code as it appears in your data (e.g. <b>E</b>). Saving applies the bands on the next rebuild.</div>`;
       h+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th style="text-align:center">Rank</th><th>Descriptor</th><th>CSV value(s)</th><th style="text-align:center">Colour</th><th>Meaning <span style="font-weight:400;color:var(--mu)">(optional)</span></th></tr></thead><tbody>`;
       for(let i=0;i<9;i++){
         const lv=S.levels[i]||{};
@@ -10733,7 +10742,7 @@ function rPeer(){
     Object.values(PRG).forEach(bp=>Object.values(bp||{}).forEach(rows=>(rows||[]).forEach(r=>{const sc=r&&r[3]||{};SUBS.forEach(s=>{const g=sc[s];if(g){if(g[0]!=null&&g[0]!=='')_useAb.add(String(g[0]));if(g[1]!=null&&g[1]!=='')_useEf.add(String(g[1]));}});})));
     const _mapAb=new Set();ABILITY.levels.forEach(l=>(l.csv||[]).forEach(c=>_mapAb.add(String(c))));
     const _mapEf=new Set();EFFORT.levels.forEach(l=>(l.csv||[]).forEach(c=>_mapEf.add(String(c))));
-    const _unAb=[..._useAb].filter(t=>!_mapAb.has(t)).sort(),_unEf=[..._useEf].filter(t=>!_mapEf.has(t)).sort();
+    const _unAb=(_USE_REF?[]:[..._useAb].filter(t=>!_mapAb.has(t)).sort()),_unEf=[..._useEf].filter(t=>!_mapEf.has(t)).sort();
     let _warnHtml='';
     if(_unAb.length||_unEf.length){
       _warnHtml=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:var(--red);font-weight:600">⚠ Unmapped grade values in the data: </span>`
@@ -10782,6 +10791,17 @@ function rPeer(){
     const em=new Set();(cfg.effort||[]).forEach(r=>(r.csv||[]).forEach(c=>em.add(String(c))));
     return {ability:[...abU].filter(t=>!am.has(t)).sort(),effort:[...efU].filter(t=>!em.has(t)).sort()};
   };
+  async function _abilityScaleSave(rows){
+    const sid=schoolId();
+    if(!SB_ON||!sid) throw new Error('Sign in with a school account to save the ability scale.');
+    const levels=(rows||[]).map(r=>({csv:(r.csv||[]).slice(),label:r.label,colour:r.colour||undefined,note:r.note||undefined}));
+    const path=sid+'/uploads/raw/_ability_scale.json';
+    const body=new Blob([JSON.stringify({levels},null,2)],{type:'application/json'});
+    const w=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
+      { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
+    if(!w.ok) throw new Error('Could not save the ability scale (HTTP '+w.status+').');
+    return true;
+  }
   window._saveScales=async function(){
     const read=key=>{const rows=[];for(let i=0;i<9;i++){
       const lab=(document.getElementById('scl-'+key+'-label-'+i)?.value||'').trim();
@@ -10796,12 +10816,23 @@ function rPeer(){
     ['ability','effort'].forEach(k=>{cfg[k].forEach((r,i)=>{if(!r.label)bad.push(k+' row '+(i+1)+': descriptor is blank');if(!r.csv.length)bad.push(k+' row '+(i+1)+' ("'+r.label+'"): no CSV value');});if(!cfg[k].length)bad.push(k+' scale has no rows');});
     if(bad.length){alert('Cannot save:\n\n- '+bad.join('\n- '));return;}
     const un=window._scaleUnmapped(cfg);
-    if(un.ability.length||un.effort.length){
+    // In reference-ladder mode the ability rows ARE the reference ladder; raw GCSE/A-Level codes resolve
+    // by rank, not via this scale, so only an unmapped EFFORT value can actually go blank.
+    const unAb=_USE_REF?[]:un.ability;
+    if(unAb.length||un.effort.length){
       const m='These grade values are in the data but no row maps them:\n'
-        +(un.ability.length?'  Ability: '+un.ability.join(', ')+'\n':'')
+        +(unAb.length?'  Ability: '+unAb.join(', ')+'\n':'')
         +(un.effort.length?'  Effort: '+un.effort.join(', ')+'\n':'')
         +'\nPupils with those values will show blank for that grade. Save anyway?';
       if(!confirm(m))return;
+    }
+    if(_USE_REF){
+      // The ability ladder sets rank positions, which only the rebuild can recompute — so it travels
+      // through the uploads store and applies on the next rebuild. Effort is saved and applied now.
+      try{ await _abilityScaleSave(cfg.ability); await saveCfg('scales',SCALES_LS_KEY,cfg); }
+      catch(e){ alert('Could not save: '+e.message); return; }
+      alert('Saved. Your ability bands take effect on the next rebuild; effort changes apply now.');
+      location.reload(); return;
     }
     try{await saveCfg('scales',SCALES_LS_KEY,cfg);}catch(e){alert('Could not save: '+e.message);return;}
     location.reload();
