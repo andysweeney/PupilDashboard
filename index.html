@@ -7224,8 +7224,11 @@ function _upGradeMetric(rows, map){
 }
 function _upStageGrade(slotId, metric, fileOrBlob, name, slot, count){
   delete _UP.staged[slotId];                                 // drop any stale single-key grade staging
-  _UP.staged[slotId+'|'+metric]={ file:fileOrBlob, name };   // key by metric -> attain & effort coexist
-  _upMsg('Checked and ready: '+count+' '+(metric==='grade_effort'?'effort':'on-track')+' rows for '+_upEsc(slot.title)+'.', true);
+  // Key by the full term-tagged filename, not just the metric: attain & effort coexist AND so do
+  // multiple terms of the same metric (Spring + Summer). Same term re-staged -> same name -> clean
+  // replace. Without the term in the key, a second term would overwrite the first before upload.
+  _UP.staged[slotId+'|'+name]={ file:fileOrBlob, name };
+  _upMsg('Checked and ready: '+count+' '+(metric==='grade_effort'?'effort':'on-track')+' rows for '+_upEsc(slot.title)+' ('+_upEsc(name)+').', true);
 }
 // Locate the Resultset column (the term marker) in a parsed grades file, and build a filename-safe
 // slug from its distinct values. This is how grade files get term-bucketed in the store so a new
