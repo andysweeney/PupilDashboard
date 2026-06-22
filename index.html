@@ -1289,6 +1289,48 @@ function _termMapperHtml(){
   h+=`</tbody></table></div></div>`;
   return h;
 }
+// Scroll to (and briefly highlight) an Admin control — used by the Unrecognised Grades "fix" buttons
+// to land the admin on the exact grade-mapping select or scale editor that resolves a flagged value.
+window._focusFix=function(id){
+  try{
+    const el=document.getElementById(id); if(!el) return;
+    el.scrollIntoView({behavior:'smooth',block:'center'});
+    const prev=el.style.boxShadow, prevT=el.style.transition;
+    el.style.transition='box-shadow .2s'; el.style.boxShadow='0 0 0 3px var(--ac)';
+    setTimeout(()=>{ el.style.boxShadow=prev||''; el.style.transition=prevT||''; },1500);
+    if(el.tagName==='SELECT'){ try{ el.focus({preventScroll:true}); }catch(e){ try{el.focus();}catch(_){} } }
+  }catch(e){}
+};
+// Panel HTML — grade values the rebuild couldn't place on the school's scales. Sourced from the
+// engine (config.uncalibrated_grades / unmapped_ability / unmapped_effort), so it covers the
+// reference-ladder case the inline scale warning skips, and points each value at the control that
+// fixes it. Hidden when there's nothing flagged (and on data.json built before the engine emitted it).
+function _gradeMapperHtml(){
+  const cfg=(typeof DD!=='undefined'&&DD&&DD.config)?DD.config:{};
+  const obj=v=>(v&&typeof v==='object'&&!Array.isArray(v))?v:{};
+  const ug=obj(cfg.uncalibrated_grades), ua=obj(cfg.unmapped_ability), ue=obj(cfg.unmapped_effort);
+  const ugK=Object.keys(ug), uaK=Object.keys(ua), ueK=Object.keys(ue);
+  if(!ugK.length&&!uaK.length&&!ueK.length) return '';
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const escJs=s=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const total=[...ugK.map(k=>+ug[k]||0),...uaK.map(k=>+ua[k]||0),...ueK.map(k=>+ue[k]||0)].reduce((a,b)=>a+b,0);
+  const btn=(id,label)=>id?`<button onclick="window._focusFix('${escJs(id)}')" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.66rem;font-weight:600;padding:.25rem .6rem;border-radius:5px;cursor:pointer;white-space:nowrap">${esc(label)} ▸</button>`:`<span style="color:var(--mu);font-size:.66rem">—</span>`;
+  const cnt=n=>`<td style="text-align:center;font-family:'IBM Plex Mono',monospace">${+n||0}</td>`;
+  const rows=[];
+  ugK.sort().forEach(tok=>{
+    const at=String(tok).split('@'), g=at[0], yg=parseInt(String(at[1]||'').replace(/\D/g,''),10);
+    const ks=!isNaN(yg)?(yg<=9?3:(yg<=11?4:5)):4;
+    const target=ks===4?('gm-'+g):(ks===5?('al-'+g):null);
+    const yrTxt=!isNaN(yg)?` · Year ${yg}`:'';
+    rows.push(`<tr><td style="font-weight:500;font-size:.72rem">${esc(g)}${yrTxt}</td><td style="font-size:.66rem;color:var(--mu)">Grade calibration</td><td style="font-size:.7rem">Validated, but no reference band set</td>${cnt(ug[tok])}<td style="text-align:right">${btn(target,'Set band')}</td></tr>`);
+  });
+  uaK.sort().forEach(v=>rows.push(`<tr><td style="font-weight:500;font-size:.72rem">${esc(v)}</td><td style="font-size:.66rem;color:var(--mu)">Ability</td><td style="font-size:.7rem">Matches no ability band or spelling</td>${cnt(ua[v])}<td style="text-align:right">${btn('scale-ed-ability','Add to scale')}</td></tr>`));
+  ueK.sort().forEach(v=>rows.push(`<tr><td style="font-weight:500;font-size:.72rem">${esc(v)}</td><td style="font-size:.66rem;color:var(--mu)">Effort</td><td style="font-size:.7rem">Matches no effort value or spelling</td>${cnt(ue[v])}<td style="text-align:right">${btn('scale-ed-effort','Add to scale')}</td></tr>`));
+  let h=`<div class="dw" style="margin-top:.85rem"><div class="dwt">Unrecognised Grades <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— grade values the last rebuild couldn't place on your scales</span></div>`;
+  h+=`<div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.45">These ${total} grade entr${total===1?'y':'ies'} came through in your exports but didn't match your scales, so they were left off the charts and counts — this is what makes a distribution bar stop short of 100%. Fix each one below and it'll be included on the next rebuild.</div>`;
+  h+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Value</th><th>Type</th><th>Why it dropped</th><th style="text-align:center">In data</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table></div></div>`;
+  return h;
+}
 function _sanitiseScales(cfg){
   const clean=k=>(cfg&&Array.isArray(cfg[k])?cfg[k]:[]).map(r=>({
     csv:(Array.isArray(r.csv)?r.csv:String(r.csv==null?'':r.csv).split(',')).map(x=>String(x).trim()).filter(Boolean),
@@ -11048,7 +11090,7 @@ function rPeer(){
     const _hexOf=c=>{c=String(c||'').trim();return /^#[0-9a-fA-F]{6}$/.test(c)?c:(/^#[0-9a-fA-F]{3}$/.test(c)?c:'#888888');};
     const _scaleEditor=(title,key,S)=>{
       const inp="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.72rem;padding:.25rem .35rem;border-radius:4px;width:100%;box-sizing:border-box";
-      let h=`<div class="dw" style="margin-bottom:1rem"><div class="dwt">${title} Scale <span style="font-weight:400;font-size:.62rem;color:var(--mu)">(rank 1 = best · top row = best · blank rows ignored · up to 9)</span></div>`;
+      let h=`<div class="dw" id="scale-ed-${key}" style="margin-bottom:1rem"><div class="dwt">${title} Scale <span style="font-weight:400;font-size:.62rem;color:var(--mu)">(rank 1 = best · top row = best · blank rows ignored · up to 9)</span></div>`;
       if(key==='ability'&&_USE_REF) h+=`<div style="font-size:.66rem;color:var(--mu);margin:-.3rem 0 .55rem;line-height:1.45">These are your KS3 reference bands — the ability axis itself. Add or remove rows to change how many bands you have, and edit each band's descriptor and colour. The CSV value is the code as it appears in your data (e.g. <b>E</b>). Saving applies the bands on the next rebuild.</div>`;
       h+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th style="text-align:center">Rank</th><th>Descriptor</th><th>CSV value(s)</th><th style="text-align:center">Colour</th><th>Meaning <span style="font-weight:400;color:var(--mu)">(optional)</span></th></tr></thead><tbody>`;
       for(let i=0;i<9;i++){
@@ -11097,6 +11139,7 @@ function rPeer(){
       +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save scales</button><button onclick="window._resetScales()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer">↺ Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads the page to apply the new scale.</span></div>`
       +gradeMapHtml
       +aLevelMapHtml
+      +_gradeMapperHtml()
       +_termMapperHtml();
     // Group the admin blocks into collapsible sections. Open/closed state is remembered across
     // re-renders (rAdmin runs again after e.g. classifying a code) so a section you're working in
