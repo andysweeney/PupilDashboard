@@ -10541,6 +10541,7 @@ function rPeer(){
     if(unmappedSubj.length){
       subjHtml+=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:var(--red);font-weight:600">⚠ ${unmappedSubj.length} unmapped subject${unmappedSubj.length!==1?'s':''}: </span>${unmappedSubj.map(c=>`<b>${_sesc(c)}</b>`).join(', ')}</div>`;
     }
+    subjHtml+=`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.2rem 0 .75rem"><input id="subj-new-name" placeholder="New subject name (e.g. Media Studies)" onkeydown="if(event.key==='Enter'){event.preventDefault();window._adminAddSubject();}" style="${_sSel};width:220px"><button onclick="window._adminAddSubject()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.7rem;font-weight:600;padding:.32rem .75rem;border-radius:5px;cursor:pointer">+ Add subject</button><span style="font-size:.64rem;color:var(--mu)">Create a clean name, then map the raw spellings into it in the table below.</span></div>`;
     subjHtml+=`<div style="font-size:.74rem;font-weight:600;color:var(--tx);margin:.3rem 0 .4rem">Raw names &rarr; subject</div><div style="overflow-x:auto"><table class="d"><thead><tr><th>Raw name (from data)</th><th>Treat as</th><th style="text-align:center">Pupils</th></tr></thead><tbody>`;
     const _canonOpt=sel=>['<option value="">&mdash; keep as-is &mdash;</option>'].concat(canonUniverse.map(c=>`<option value="${_sesc(c)}"${c===sel?' selected':''}>${_sesc(c)}</option>`)).join('');
     const _subjRow=(raw,isUn)=>{
@@ -10557,8 +10558,12 @@ function rPeer(){
       const par=(subjCanon[id]&&subjCanon[id].continuesFrom)||'';
       const childCount=canonUniverse.filter(c=>(subjCanon[c]&&subjCanon[c].continuesFrom)===id).length;
       const forkBadge=childCount>1?` <span style="color:var(--violet);font-weight:600;font-size:.62rem">FORK</span>`:'';
+      // Removable = a created name that nothing uses: not a raw subject from the data, nothing mapped
+      // into it, and not a fork parent. Lets a typo'd or abandoned "Add subject" entry be cleared.
+      const removable=(subjCanon[id]!=null)&&!foundSubjects.includes(id)&&!Object.values(subjAliases).includes(id)&&childCount===0;
+      const rmBtn=removable?` <button data-id="${_sesc(id)}" onclick="window._adminSetSubject('remove',this.getAttribute('data-id'),'')" title="Remove this unused subject" style="background:transparent;border:none;color:var(--mu);cursor:pointer;font-size:.78rem;padding:0 .15rem;line-height:1">&#10005;</button>`:'';
       const parOpts=['<option value="">&mdash; none &mdash;</option>'].concat(canonUniverse.filter(c=>c!==id).map(c=>`<option value="${_sesc(c)}"${c===par?' selected':''}>${_sesc(c)}</option>`)).join('');
-      subjHtml+=`<tr><td style="font-weight:500;font-size:.72rem">${_sesc(id)}${forkBadge}</td><td><input value="${_sesc(disp)}" placeholder="${_sesc(id)}" data-id="${_sesc(id)}" onchange="window._adminSetSubject('display',this.getAttribute('data-id'),this.value)" style="${_sSel};width:140px"></td><td><select data-id="${_sesc(id)}" onchange="window._adminSetSubject('parent',this.getAttribute('data-id'),this.value)" style="${_sSel}">${parOpts}</select></td></tr>`;
+      subjHtml+=`<tr><td style="font-weight:500;font-size:.72rem">${_sesc(id)}${forkBadge}${rmBtn}</td><td><input value="${_sesc(disp)}" placeholder="${_sesc(id)}" data-id="${_sesc(id)}" onchange="window._adminSetSubject('display',this.getAttribute('data-id'),this.value)" style="${_sSel};width:140px"></td><td><select data-id="${_sesc(id)}" onchange="window._adminSetSubject('parent',this.getAttribute('data-id'),this.value)" style="${_sSel}">${parOpts}</select></td></tr>`;
     });
     subjHtml+=`</tbody></table></div>`;
     subjHtml+=`<div style="display:flex;align-items:center;gap:.8rem;margin-top:.6rem"><span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--green);font-weight:600">✓ Saved automatically</span><span style="font-size:.65rem;color:var(--mu)">Subject choices save instantly and never change your data — only how it is read.</span></div></div>`;
@@ -10918,10 +10923,23 @@ function rPeer(){
       C[key]=C[key]||{};
       if(value)C[key].continuesFrom=value;else delete C[key].continuesFrom;
       _prune(key);
+    }else if(kind==='create'){
+      const nm=String(value==null?'':value).trim();
+      if(nm)C[nm]=C[nm]||{};   // a brand-new canonical the admin can fold raw spellings into
+    }else if(kind==='remove'){
+      delete C[key];                                   // drop an unused created subject
+      Object.keys(A).forEach(r=>{if(A[r]===key)delete A[r];});  // defensive: clear any stray aliases to it
     }
     SUBJ=_buildSUBJ(DD.config.subject_map);
     _persistDataKeys();
     rAdmin();
+  };
+
+  window._adminAddSubject=function(){
+    const el=document.getElementById('subj-new-name');
+    const v=(el&&el.value||'').trim();
+    if(!v)return;
+    window._adminSetSubject('create',null,v);
   };
 
   window._adminExport=function(){
