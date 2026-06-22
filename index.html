@@ -220,8 +220,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 </div>
 <div id="sv-title" style="margin-bottom:.5rem"></div>
 <div id="sv-summary" style="margin-bottom:1.25rem"></div>
-<div id="sv-alerts" style="margin-bottom:1.25rem"></div>
 <div class="crd-g" id="sv-cards"></div>
+<div id="sv-alerts" style="margin-bottom:1.25rem"></div>
 <div class="ch-g" id="sv-charts-top"></div>
 <div style="page-break-before:always"></div>
 <div id="sv-dist-title" style="margin-bottom:.5rem"></div>
@@ -1960,6 +1960,44 @@ function eC(v){return v==null?'var(--mu)':v<=1.5?PAL.green:v>=3?PAL.red:'var(--m
 function chB(v,l){if(v===null)return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span style="font-family:'IBM Plex Mono',monospace;color:var(--mu)">No Data</span></div>`;const c=v>0?'pos':v<0?'neg':'flat';return`<div><span style="font-size:.65rem;color:var(--mu);text-transform:uppercase">${l}</span><br><span class="chg ${c}">${v>0?'+':''}${v.toFixed(2)}</span></div>`}
 function abAvg(row,subs){if(!row)return null;const s=subs.map(s2=>row.sc[s2]?abRk(row.sc[s2])||0:0).filter(v=>v>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}
 function abDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(ABILITY.n,Math.max(1,Math.round(v)));const lv=ABILITY.levels[r-1];return lv?lv.label:'';}
+// Distribution band for a stored grade cell. Buckets by the engine-resolved reference RANK (cell[3]
+// via abRk), so GCSE/A-Level grades land in the correct band — unlike AM[native], where a GCSE "7"
+// maps to itself ("7"), not to a ladder band, leaving KS4 cohorts uncounted (all-zero, sub-100%).
+function _abBand(cell){const r=abRk(cell);return (r&&ABILITY.levels[r-1])?ABILITY.levels[r-1].label:null;}
+// Adaptive ability-distribution split. A stacked chart can carry only one scale, so for a cohort whose
+// periods span more than one key stage we render ONE chart per stage that has grade data, each on its
+// own native band set: KS3 -> reference descriptors, KS4 -> GCSE 9-1, KS5 -> A-Level A*-E. Stages with
+// no data are omitted, so a single-stage cohort just gets one (full-width) chart.
+function _stageDistSpecs(yearGroup,sub){
+  const ink=CFG.intakes.find(i=>curYG(i)===yearGroup);
+  const pp=ygPeriods(yearGroup);
+  const ksOf=yg=>yg<=9?3:(yg<=11?4:5);
+  const byKS={};
+  pp.forEach(p=>{const ay=parseInt(String(p).split(' ').pop(),10);if(isNaN(ay)||ink==null)return;const ks=ksOf(ygAt(ink,ay));(byKS[ks]=byKS[ks]||[]).push(p);});
+  const specs=[];
+  [3,4,5].forEach(ks=>{
+    const periods=byKS[ks];if(!periods||!periods.length)return;
+    const natives=new Set();
+    periods.forEach(p=>{ygRows(yearGroup,p).forEach(r=>{const c=r[3]&&r[3][sub];if(c&&c[0]!=null&&String(c[0]).trim()!=='')natives.add(String(c[0]).trim());});});
+    if(!natives.size)return;
+    const nl=_builtinAbilityLevels(natives);
+    specs.push({ks,periods,levels:nl.length?nl:ABILITY.levels,useNative:nl.length>0,name:ks===3?'KS3':ks===4?'KS4 (GCSE)':'KS5 (A-Level)'});
+  });
+  if(!specs.length)specs.push({ks:0,periods:pp,levels:ABILITY.levels,useNative:false,name:''});
+  return specs;
+}
+// Render one stage's stacked %-distribution into canvasId. Native scales (GCSE/A-Level) bucket by the
+// stored grade; the descriptor ladder buckets by resolved rank (_abBand).
+function _renderAbDist(canvasId,key,spec,yearGroup,sub){
+  const el=document.getElementById(canvasId);if(!el)return;
+  const labs=spec.periods.map(p=>PL[PER.indexOf(p)]);
+  const nmap={};if(spec.useNative)spec.levels.forEach(l=>{nmap[String(l.label).toUpperCase()]=l.label;});
+  const bandOf=spec.useNative
+    ? (cell=>{const t=(cell&&cell[0]!=null)?String(cell[0]).trim().toUpperCase():null;return t!=null?(nmap[t]||null):null;})
+    : (cell=>_abBand(cell));
+  const datasets=spec.levels.map(l=>({label:l.label,data:spec.periods.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3]&&r[3][sub]).length;return tot?parseFloat((rs.filter(r=>{const c=r[3]&&r[3][sub];return c&&bandOf(c)===l.label;}).length/tot*100).toFixed(1)):0;}),backgroundColor:(GC[l.label]||l.colour||PAL.slate),borderRadius:2,borderSkipped:false}));
+  sc2(key,new Chart(el,{type:'bar',data:{labels:labs,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
+}
 function abGrade(v){if(v==null||isNaN(v))return '—';var n=ABILITY.n;var r=Math.min(n,Math.max(1,v));var lo=Math.floor(r),hi=Math.ceil(r);var a=ABILITY.levels[lo-1],b=ABILITY.levels[hi-1];var na=a?parseFloat(a.label):NaN,nb=b?parseFloat(b.label):NaN;if(!isNaN(na)&&!isNaN(nb)){var g=na+(r-lo)*(nb-na);return String(Math.round(g*10)/10);}return abDesc(v);}
 function scaleKeyHTML(){var sep='<span style="color:var(--bd);margin:0 .2rem">·</span>';var ab=ABILITY.levels.map(function(lv){return '<span style="display:inline-flex;align-items:center;gap:.25rem"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+(lv.colour||PAL.slate)+'"></span>'+lv.label+'</span>';}).join(sep);var ef=EFFORT.levels.map(function(lv){return '<span>'+lv.label+(lv.note?' '+lv.note:'')+'</span>';}).join(sep);return '<div class="crd" style="grid-column:1/-1"><div class="ct2">Scale key <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">'+ABILITY.bestLabel+' = best ability · '+EFFORT.bestLabel+' = highest effort</span></div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Ability</b>'+ab+'</div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Effort</b>'+ef+'</div></div>';}
 function abAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return abGrade(n);}
@@ -7960,13 +7998,12 @@ function rSV(){
       ${alertBox('Year-on-Year Ability Concern',PAL.red,abYoY,i=>concernRow(i,'ab'))}
       ${alertBox('Term-on-Term Effort Concern',PAL.orange,efTT,i=>concernRow(i,'ef'))}
       ${alertBox('Year-on-Year Effort Concern',PAL.orange,efYoY,i=>concernRow(i,'ef'))}
-      ${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true)}
     </div>`;
 
   // Grade breakdown with bar chart
   const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
-  const maxGradeCount=Math.max(...[...AN].map(g=>lr.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length),1);
-  const gradeRows=[...AN].reverse().map(g=>{const c=lr.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length;const p=sc2r.length?(c/sc2r.length*100).toFixed(0):0;const barW=Math.round(c/maxGradeCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${GC[g]}"></span><span style="color:var(--mu);min-width:3.5rem">${g}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${GC[g]}44;border-left:2px solid ${GC[g]}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
+  const maxGradeCount=Math.max(...[...AN].map(g=>lr.filter(r=>r[3][sub]&&_abBand(r[3][sub])===g).length),1);
+  const gradeRows=[...AN].reverse().map(g=>{const c=lr.filter(r=>r[3][sub]&&_abBand(r[3][sub])===g).length;const p=sc2r.length?(c/sc2r.length*100).toFixed(0):0;const barW=Math.round(c/maxGradeCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${GC[g]}"></span><span style="color:var(--mu);min-width:3.5rem">${g}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${GC[g]}44;border-left:2px solid ${GC[g]}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
 
   // Effort breakdown with bar chart
   const efLabels=['Excellent','Good','Developing','Low'];
@@ -8014,7 +8051,9 @@ function rSV(){
   // Distribution section title
   document.getElementById('sv-dist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Distribution Over Time</div>`;
 
-  document.getElementById('sv-charts-bottom').innerHTML=`<div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div>`;
+  const _abSpecs=_stageDistSpecs(yearGroup,sub);
+  const _abChartsHtml=_abSpecs.map((s,i)=>{const best=(s.levels[0]&&s.levels[0].label)||ABILITY.bestLabel;const ttl=s.name?`${s.name} Ability`:'Ability Distribution Over Time';return `<div class="chc" style="flex:1 1 280px;min-width:0"><div class="cht">${ttl} (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${best} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst-${i}"></canvas></div></div>`;}).join('');
+  document.getElementById('sv-charts-bottom').innerHTML=`<div style="grid-column:1/-1;display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1fr);gap:.85rem;align-items:start"><div style="display:flex;flex-direction:column;gap:.85rem;min-width:0"><div style="display:flex;gap:.85rem;flex-wrap:wrap">${_abChartsHtml}</div><div class="chc"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div></div><div style="min-width:0">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true)}</div></div>`;
 
   // Build per-period data points for all pupils and each sub-group
   function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
@@ -8054,7 +8093,8 @@ function rSV(){
 
   sc2('svab',new Chart(document.getElementById('c-svab'),{type:'line',plugins:[_ksMarkerPlugin(pp,ink)].filter(Boolean),data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend,tooltip:{callbacks:{label:abTipLabel}}},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('svef',new Chart(document.getElementById('c-svef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
-  sc2('svst',new Chart(document.getElementById('c-svst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
+  ['svst','svst0','svst1','svst2'].forEach(dc);
+  _abSpecs.forEach((s,i)=>_renderAbDist('c-svst-'+i,'svst'+i,s,yearGroup,sub));
 
   sc2('svefst',new Chart(document.getElementById('c-svefst'),{type:'bar',data:{labels:labs,datasets:EFFORT.vals.map(e=>({label:efLeg(e),data:pp.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3][sub]&&efValid(r[3][sub][1])).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:efColor(e)+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
   } // end hasGradesSV else
