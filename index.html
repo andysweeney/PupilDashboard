@@ -6887,7 +6887,7 @@ function _upStageByAY(slotId, role, yg, header, dataRows, slotTitle){
   Object.keys(groups).forEach(ay=>{
     const name=(ay==='na')?_upRoleFilename(role,yg).replace(/\.csv$/,'_ayna.csv'):_upRoleFilenameAY(role,yg,ay);
     const group=groups[ay];
-    if(_upIsMergeRole(role) && ay!=='na'){            // behaviour/detentions/house points: time-window merge at upload
+    if(_upIsMergeRole(role) && ay!=='na'){            // attendance/behaviour/detentions/house points: time-window merge at upload
       let lo=Infinity, hi=-Infinity;
       group.forEach(row=>{ const k=_upDateKey(row[dateIdx]); if(k!=null){ if(k<lo)lo=k; if(k>hi)hi=k; } });
       _UP.staged[slotId+'|ay'+ay]={ name, file:mkBlob(name,group),
@@ -6901,7 +6901,7 @@ function _upStageByAY(slotId, role, yg, header, dataRows, slotTitle){
   _upMsg('Checked and ready: '+dataRows.length+' rows for '+_upEsc(slotTitle)+(span?' — '+span:'')+'.', true);
 }
 function _upBlob(csv,name){ return (typeof Blob!=='undefined')?new Blob([csv],{type:'text/csv'}):{_text:csv,name}; }
-function _upIsMergeRole(role){ return role==='behave_current'||role==='detention'||role==='housepoints'; }
+function _upIsMergeRole(role){ return role==='attendance'||role==='behave_current'||role==='detention'||role==='housepoints'; }
 function _upDateKey(s){ const d=_upParseDate(s); return d?(d.y*10000+d.m*100+d.d):null; }
 // Pure time-window merge: keep stored rows whose date is OUTSIDE [lo,hi], then append the new
 // rows. Columns align by header name (new header first, any stored-only columns appended), so a
@@ -7140,8 +7140,8 @@ function rUpload(){
           +'<input type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="window._upChoose(\''+s.id+'\',this)"></label>')
       +'</div>';
   };
-  const rosterInput=(label)=>'<label style="font-family:inherit;font-size:.76rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:.35rem .7rem;cursor:pointer;background:var(--sf2);white-space:nowrap">'+label
-    +'<input type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="window._upChoose(\'sen\',this)"></label>';
+  const rosterInput=(label,editIntake)=>'<label style="font-family:inherit;font-size:.76rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:.35rem .7rem;cursor:pointer;background:var(--sf2);white-space:nowrap">'+label
+    +'<input type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="window._upChoose(\'sen\',this'+(editIntake!=null?(','+editIntake):'')+')"></label>';
 
   const cohortCards=cohorts.map(c=>{
     const cs=cohortSlots.filter(s=>s.cohort && s.cohort.intake===c.intake);
@@ -7149,7 +7149,7 @@ function rUpload(){
     return '<div style="border:1px solid var(--bd);border-radius:10px;padding:.5rem .9rem;margin-top:.8rem">'
       +'<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.1rem">'
         +'<div style="flex:1;font-size:.9rem;font-weight:700;color:var(--tx)">'+c.intake+' intake <span style="font-weight:400;color:var(--mu)">· Year '+c.yg+(n?' · '+n+' pupils':'')+'</span></div>'
-        +rosterInput('Edit cohort')
+        +rosterInput('Update roster',c.intake)
       +'</div>'+cs.map(s=>slotRow(s,false)).join('')+'</div>';
   }).join('');
 
@@ -7314,7 +7314,7 @@ function _upFindDisplayNameCol(headers, rows, excludeIdx){
 // name column (if present) is folded INTO the one field the engine reads, as
 // "{enrolment} {name}" — identical in shape to the data that already works, so
 // the engine is untouched and the name then flows through to the display.
-function _upStageRoster(slot, slotId, rows, map){
+function _upStageRoster(slot, slotId, rows, map, editIntake){
   const headers=rows[0].map(h=>String(h).trim());
   const norm=s=>String(s).trim().toLowerCase();
   const find=re=>headers.findIndex(h=>re.test(norm(h)));
@@ -7354,7 +7354,7 @@ function _upStageRoster(slot, slotId, rows, map){
   const multiYG=ikKeys.length>1;
 
   // hand off to the confirm-the-intake step; nothing is staged until the Admin confirms
-  _UP.cohortPick={ out, readIdx, genIdx, count:nPupils, suggested, multiYG, combined };
+  _UP.cohortPick={ out, readIdx, genIdx, count:nPupils, suggested, multiYG, combined, editIntake:(editIntake!=null?editIntake:null) };
   _upMsg(''); rUpload();
 }
 
@@ -7375,6 +7375,21 @@ function _upAccumulateCohort(rows, iName, iGen, intake){
 
 function _upRenderCohortConfirm(out){
   const p=_UP.cohortPick; if(!p){ rUpload(); return; }
+  if(p.editIntake!=null){
+    // EDIT MODE — re-uploading the roster for an existing cohort. The intake is fixed to that
+    // cohort, so this updates it in place (replaces its membership) rather than adding a new one.
+    const yg=7+(_UP.cay-p.editIntake);
+    out.innerHTML='<div style="max-width:560px"><h2 style="margin:.2rem 0 .6rem">Update roster</h2>'
+      +'<div style="border:1px solid var(--bd);border-radius:10px;padding:1rem 1.1rem">'
+      +'<div style="font-size:.9rem;color:var(--tx);margin-bottom:.3rem"><b>'+p.count+'</b> pupils found in this roster'+(p.combined?' (names captured)':'')+'.</div>'
+      +'<div style="font-size:.78rem;color:var(--mu);margin-bottom:.8rem">This <b>replaces the '+p.editIntake+' intake</b> cohort\'s roster (Year '+yg+' this year). It updates the existing cohort — it does not add a new one. Anyone on this file is on roll; anyone missing has left.</div>'
+      +(p.multiYG?'<div style="font-size:.76rem;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:7px;padding:.5rem .7rem;margin-bottom:.8rem">This file seems to contain more than one year group. A roster update should be just this one cohort — if that\'s not right, cancel and check the export.</div>':'')
+      +'<div style="display:flex;gap:.7rem">'
+        +'<button onclick="window._upCohortConfirm()" style="font-family:inherit;font-size:.82rem;font-weight:600;padding:.5rem 1rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff)">Update '+p.editIntake+' roster</button>'
+        +'<button onclick="window._upCohortCancel()" style="font-family:inherit;font-size:.82rem;font-weight:600;padding:.5rem 1rem;border-radius:8px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx)">Cancel</button>'
+      +'</div></div></div>';
+    return;
+  }
   let opts='';
   for(let yg=7; yg<=13; yg++){ const ik=_UP.cay-(yg-7); const sel=((p.suggested!=null)?(ik===p.suggested):(yg===11))?' selected':'';
     opts+='<option value="'+ik+'"'+sel+'>'+ik+' intake — Year '+yg+' this year</option>'; }
@@ -7395,7 +7410,8 @@ function _upRenderCohortConfirm(out){
 
 window._upCohortConfirm=function(){
   const p=_UP.cohortPick; if(!p) return;
-  const sel=document.getElementById('up-intake-pick'); const intake=sel?parseInt(sel.value,10):p.suggested;
+  const sel=document.getElementById('up-intake-pick');
+  const intake=(p.editIntake!=null)?p.editIntake:(sel?parseInt(sel.value,10):p.suggested);
   if(!intake){ _upMsg('Please choose an intake year.'); return; }
   const lines=[p.out[0].map(_upCsvCell).join(',')];
   for(let r=1;r<p.out.length;r++){ if(_upPid(p.out[r][p.readIdx])) lines.push(p.out[r].map(_upCsvCell).join(',')); }
@@ -7404,8 +7420,11 @@ window._upCohortConfirm=function(){
   _UP.staged['sen|'+intake]={ file:blob, name };          // replaces any prior staged roster for this cohort
   _upAccumulateCohort(p.out, p.readIdx, p.genIdx, intake);
   const yg=7+(_UP.cay-intake);
+  const wasEdit=(p.editIntake!=null);
   _UP.cohortPick=null;
-  _upMsg('Cohort ready — '+intake+' intake (Year '+yg+'), '+p.count+' pupils. Its upload slots are below; choose files, then Upload.', true);
+  _upMsg(wasEdit
+    ? ('Roster updated — '+intake+' intake (Year '+yg+'), now '+p.count+' pupils. Press Upload to save it, then Rebuild.')
+    : ('Cohort ready — '+intake+' intake (Year '+yg+'), '+p.count+' pupils. Its upload slots are below; choose files, then Upload.'), true);
   rUpload();
 };
 window._upCohortCancel=function(){ _UP.cohortPick=null; _upMsg(''); rUpload(); };
@@ -7512,7 +7531,7 @@ window._upDelYes=async function(){
   }catch(e){ _UP.serverLoaded=false; await _upRefreshServer(); rUpload(); _upMsg('Could not delete: '+_upEsc(e.message)); }
 };
 
-window._upChoose=async function(slotId, input){
+window._upChoose=async function(slotId, input, editIntake){
   const file=input.files&&input.files[0]; if(!file) return;
   const slot=_upChecklist().find(s=>s.id===slotId); if(!slot) return;
   const want=_upSlotRole(slot);
@@ -7528,13 +7547,13 @@ window._upChoose=async function(slotId, input){
   if(m.problems.length){
     await _upLoadColmaps();
     const known=_UP.colmaps[want.role]&&_UP.colmaps[want.role][sig];
-    if(known){ if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, known); return; } _upIdGateThenStage(slot, slotId, want.role, rows, known, ()=>_upApplyMappedFile(slot, slotId, want.role, want.yg, rows, known, file.name)); rUpload(); return; }
+    if(known){ if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, known, editIntake); return; } _upIdGateThenStage(slot, slotId, want.role, rows, known, ()=>_upApplyMappedFile(slot, slotId, want.role, want.yg, rows, known, file.name)); rUpload(); return; }
     if(!m.hasName){ _upMsg('This doesn\'t look like data for <b>'+_upEsc(slot.title)+'</b> — '+_upEsc(m.problems[0])+'. Check you picked the right export.'); input.value=''; return; }
     _UP.tag={ slotId, slotTitle:slot.title, role:want.role, yg:want.yg, headers, rows, sig, origName:file.name, map:m.map }; rUpload(); return;
   }
 
   // data looks right. Recognised columns -> keep file pristine; unfamiliar -> normalise via tag panel.
-  if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, m.map); return; }
+  if(want.role==='sen'){ _upStageRoster(slot, slotId, rows, m.map, editIntake); return; }
   if(_upHeadersRecognised(headers, want.role)){
     _upIdGateThenStage(slot, slotId, want.role, rows, m.map, ()=>_upStagePristine(slot, slotId, want.role, rows, m.map, file)); rUpload(); return;
   }
