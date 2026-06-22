@@ -1802,20 +1802,17 @@ function applySW(){
 // ── Write calibration into the school's KEY (the engine's source of truth), not the per-school
 // settings store, so the next rebuild picks it up. Read-modify-write so the rest of the key
 // (academic year, scale definitions, …) is never clobbered; a read failure aborts WITHOUT writing.
-async function _keySave(mutate){
+async function _calSave(ksKey, map){
+  // The school key is not browser-writable, so calibration is saved as a small file in the school's
+  // uploads (writes there are permitted, same path the raw exports use). The engine folds it onto the
+  // right transition key at the next rebuild. One file per key stage, so the two panels never clash.
   const sid=schoolId();
   if(!SB_ON||!sid) throw new Error('Sign in with a school account to save calibration.');
-  const path=sid+'/key.json';
-  const r=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+encodeURI(path),
-    { headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken() } });
-  if(!r.ok) throw new Error('Could not read the school key (HTTP '+r.status+') — nothing saved.');
-  let key; try{ key=JSON.parse(await r.text()); }catch(e){ throw new Error('The school key is unreadable — nothing saved.'); }
-  if(!key||typeof key!=='object') throw new Error('The school key is empty — nothing saved.');
-  mutate(key);
-  const body=new Blob([JSON.stringify(key,null,2)],{type:'application/json'});
+  const path=sid+'/uploads/raw/_calibration_'+ksKey+'.json';
+  const body=new Blob([JSON.stringify(map,null,2)],{type:'application/json'});
   const w=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
     { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
-  if(!w.ok) throw new Error('Could not save to the school key (HTTP '+w.status+').');
+  if(!w.ok) throw new Error('Could not save the calibration (HTTP '+w.status+').');
   return true;
 }
 function _calMsg(id,text,isErr){
@@ -1831,8 +1828,8 @@ function applySW(){
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   saveThresholds();
 }
-// Save the GCSE→reference calibration into the key's transitions. The engine re-resolves ranks from
-// it on the next rebuild; until then the dashboard keeps showing the last rebuilt values.
+// Save the GCSE->reference calibration. It rides through the school's uploads and the engine folds it
+// onto the school's KS4 transition key on the next rebuild; until then the last rebuilt values stand.
 async function applyGM(){
   const newMap={};
   ['1','2','3','4','5','6','7','8','9','U'].forEach(g=>{
@@ -1841,8 +1838,8 @@ async function applyGM(){
   });
   _calMsg('gm-msg','Saving…',false);
   try{
-    await _keySave(k=>{ k.transitions=k.transitions||{}; k.transitions.gcse91=newMap; });
-    _calMsg('gm-msg','Saved to the school key. Rebuild to apply.',false);
+    await _calSave('ks4', newMap);
+    _calMsg('gm-msg','Saved. It takes effect on the next rebuild.',false);
   }catch(e){ _calMsg('gm-msg',e.message,true); }
 }
 // Same for A-Level grades (KS5).
@@ -1854,8 +1851,8 @@ async function applyAL(){
   });
   _calMsg('al-msg','Saving…',false);
   try{
-    await _keySave(k=>{ k.transitions=k.transitions||{}; k.transitions.alevel=newMap; });
-    _calMsg('al-msg','Saved to the school key. Rebuild to apply.',false);
+    await _calSave('ks5', newMap);
+    _calMsg('al-msg','Saved. It takes effect on the next rebuild.',false);
   }catch(e){ _calMsg('al-msg',e.message,true); }
 }
 function showSWModal(){}
@@ -10568,13 +10565,13 @@ function rPeer(){
     };
     
     // GCSE Grade Mapping panel — defined here, rendered with the Grading Scales section below.
-    const _refMapPanel=(title,grades,idPrefix,scaleId,applyFn,msgId,intro)=>{
-      // Pin each qualification grade to a reference band. Current values come from the engine-echoed
-      // key (CFG.transitions[scaleId]); the dropdown options are the reference bands themselves.
+    const _refMapPanel=(title,grades,idPrefix,ksKey,applyFn,msgId,intro)=>{
+      // Pin each qualification grade to a reference band. Current values are the map actually in force
+      // for this key stage (CFG.calibration[ksKey], echoed by the engine); options are the bands.
       const _abLv=(typeof ABILITY!=='undefined'&&ABILITY.levels)?ABILITY.levels:[];
       const bandOptions=_abLv.map(l=>(l.csv&&l.csv[0])).filter(Boolean);
       const bandNames={};_abLv.forEach(l=>{if(l.csv&&l.csv[0])bandNames[l.csv[0]]=l.label||l.csv[0];});
-      const curMap=(typeof CFG!=='undefined'&&CFG.transitions&&CFG.transitions[scaleId])?CFG.transitions[scaleId]:{};
+      const curMap=(typeof CFG!=='undefined'&&CFG.calibration&&CFG.calibration[ksKey])?CFG.calibration[ksKey]:{};
       if(!_USE_REF){
         return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.85rem 1rem;background:var(--sf);margin-bottom:1rem">
           <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">${title}</div>
@@ -10589,17 +10586,17 @@ function rPeer(){
       return `<div style="border:1px solid var(--bd);border-radius:8px;padding:.85rem 1rem;background:var(--sf);margin-bottom:1rem">
         <div style="font-size:.82rem;font-weight:600;color:var(--tx);margin-bottom:.2rem">${title}</div>
         <div style="font-size:.7rem;color:var(--mu);margin-bottom:.3rem;line-height:1.4">${intro}</div>
-        <div style="font-size:.65rem;color:var(--ac);margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.05em">Saved into the school key · applies on next rebuild</div>
+        <div style="font-size:.65rem;color:var(--ac);margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.05em">Applies on the next rebuild</div>
         ${grades.map(gradeRow).join('')}
         <div style="display:flex;align-items:center;gap:.8rem;margin-top:.6rem;flex-wrap:wrap">
-          <button onclick="${applyFn}()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save to key</button>
+          <button onclick="${applyFn}()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save</button>
           <span id="${msgId}" style="font-size:.7rem;color:var(--mu)"></span>
         </div>
       </div>`;
     };
-    const gradeMapHtml=_refMapPanel('GCSE Grade Mapping',['9','8','7','6','5','4','3','2','1','U'],'gm','gcse91','applyGM','gm-msg',
+    const gradeMapHtml=_refMapPanel('GCSE Grade Mapping',['9','8','7','6','5','4','3','2','1','U'],'gm','ks4','applyGM','gm-msg',
       'Pin each GCSE grade (Y10\u2013Y11) to a reference band \u2014 the school\u2019s calibration of how a GCSE grade compares to a KS3 level. The engine uses it to place GCSE grades on the shared ladder, so a pupil\u2019s line runs smoothly from KS3 into GCSE.');
-    const aLevelMapHtml=_refMapPanel('A-Level Grade Mapping',['A*','A','B','C','D','E','U'],'al','alevel','applyAL','al-msg',
+    const aLevelMapHtml=_refMapPanel('A-Level Grade Mapping',['A*','A','B','C','D','E','U'],'al','ks5','applyAL','al-msg',
       'Pin each A-Level grade (Y12\u2013Y13) to a reference band, so KS5 grades sit on the same ladder as KS3 and GCSE and a pupil\u2019s line continues across the GCSE \u2192 A-Level transition.');
     const threshHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Concern Thresholds &amp; Weightings</div>
       <div style="font-size:.72rem;color:var(--mu);margin-bottom:.85rem;line-height:1.5">These settings control how the dashboard decides when a pupil, class or tutor group is flagged as a concern. Each section below describes a single type of concern, lists the settings that affect it, and notes which tabs you'll see the change reflected in. Hover any value box for additional detail. After making changes, click <b style="color:var(--tx)">Save thresholds</b> at the foot of this panel.</div>
@@ -11694,6 +11691,7 @@ function rPeer(){
   window.hideCTModal=hideCTModal;
   window.applySW=applySW;
   window.applyGM=applyGM;
+  window.applyAL=applyAL;
   window.showSWModal=showSWModal;
   window.hideSWModal=hideSWModal;
   window.toggleAll=toggleAll;
