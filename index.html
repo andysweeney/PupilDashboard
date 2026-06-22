@@ -1219,6 +1219,22 @@ function _refLevels(){
   });
 }
 const _USE_REF=!!_refLevels();
+// Ability bands saved from the Admin panel land in uploads and only reshape the axis on the next
+// rebuild. We fetch that pending file here so the editor shows the admin's saved edit (with a "waiting
+// for rebuild" badge) instead of silently reverting to the in-force ladder, which looks like data loss.
+let _PENDING_AB=null;
+async function _loadPendingAbility(){
+  if(!_USE_REF||typeof SB_ON==='undefined'||!SB_ON) return;
+  let sid=null; try{ sid=schoolId(); }catch(e){}
+  if(!sid) return;
+  try{
+    const path=sid+'/uploads/raw/_ability_scale.json';
+    const r=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+encodeURI(path),
+      {headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()},cache:'no-store'});
+    if(r.ok){ const j=JSON.parse(await r.text()); if(j&&Array.isArray(j.levels)&&j.levels.length) _PENDING_AB=j.levels; }
+  }catch(e){}
+}
+await _loadPendingAbility();
 function _sanitiseScales(cfg){
   const clean=k=>(cfg&&Array.isArray(cfg[k])?cfg[k]:[]).map(r=>({
     csv:(Array.isArray(r.csv)?r.csv:String(r.csv==null?'':r.csv).split(',')).map(x=>String(x).trim()).filter(Boolean),
@@ -10750,9 +10766,21 @@ function rPeer(){
         +(_unEf.length?`Effort: ${_unEf.map(t=>`<b>${t}</b>`).join(', ')}. `:'')
         +`These show blank until a row maps them.</div>`;
     }
+    // In reference mode, show the admin's saved-but-not-yet-rebuilt bands (the pending upload) so an
+    // edit doesn't appear to vanish on reopen. A badge flags that the axis won't change until a rebuild.
+    const _abEditScale=(_USE_REF&&_PENDING_AB)?{levels:_PENDING_AB}:ABILITY;
+    let _abPendHtml='';
+    if(_USE_REF&&_PENDING_AB){
+      const _tk=a=>JSON.stringify((a||[]).map(l=>String((l.csv&&l.csv[0])||'')).filter(Boolean));
+      const _inForce=(CFG.reference_scale||[]).map(String);
+      if(JSON.stringify(_inForce)!==_tk(_PENDING_AB)){
+        _abPendHtml=`<div style="background:rgba(212,165,43,.12);border:1px solid rgba(212,165,43,.4);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem;line-height:1.45"><span style="font-weight:600">⏳ Saved — waiting for rebuild.</span> These ability bands are stored and will reshape the axis on the next rebuild. Until then the axis still shows the current ${_inForce.length} band${_inForce.length===1?'':'s'}.</div>`;
+      }
+    }
     const scalesHtml=`<div class="dwt" style="font-size:.95rem;margin:.5rem 0 .75rem">Grading Scales <span style="font-weight:400;font-size:.62rem;color:var(--mu)">(saved to the app's scale store — never written back to data.json)</span></div>`
       +_warnHtml
-      +_scaleEditor('Ability','ability',ABILITY)
+      +_abPendHtml
+      +_scaleEditor('Ability','ability',_abEditScale)
       +_scaleEditor('Effort','effort',EFFORT)
       +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save scales</button><button onclick="window._resetScales()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer">↺ Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads the page to apply the new scale.</span></div>`
       +gradeMapHtml
