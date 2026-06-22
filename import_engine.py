@@ -671,6 +671,36 @@ _BUILTIN_TRANSITIONS = {
 # is also how a year group that sits ON the reference is recognised (attainmentByYearGroup -> _REF_ID).
 _REF_SCALE_CFG = (KEY or {}).get('scales', {}).get('referenceScale')
 _REF_ID = _REF_SCALE_CFG if isinstance(_REF_SCALE_CFG, str) else None
+# A school can define its OWN KS3 ability ladder (how many bands, their codes, descriptors and colours)
+# from the Admin "Ability Scale" panel. It saves to uploads/raw/_ability_scale.json (the key itself
+# isn't browser-writable); staging carries it across, and here it REPLACES the reference definition the
+# key shipped, so rank resolution, raw KS3 validation and the dashboard axis all read the same bands.
+# Absent the file, the key's own referenceScale definition stands.
+def _read_ability_scale():
+    p = os.path.join(UP, '_ability_scale.json')
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, encoding='utf-8') as fh:
+            m = json.load(fh)
+    except Exception:
+        return None
+    raw_levels = m.get('levels') if isinstance(m, dict) else (m if isinstance(m, list) else None)
+    out = []
+    for l in (raw_levels or []):
+        if not isinstance(l, dict):
+            continue
+        codes = l.get('raw') or l.get('csv') or ([l.get('code')] if l.get('code') else [])
+        if not isinstance(codes, list):
+            codes = [codes]
+        codes = [str(x).strip() for x in codes if str(x).strip()]
+        if codes:
+            out.append({'raw': codes, 'label': l.get('label'), 'colour': l.get('colour') or l.get('color')})
+    return {'levels': out} if out else None
+_ABILITY_SCALE = _read_ability_scale()
+if _ABILITY_SCALE and _REF_ID:
+    _SCALE_DEFS[_REF_ID] = {'levels': _ABILITY_SCALE['levels']}     # raw validation + ranks read this
+_REF_LADDER_CFG = _ABILITY_SCALE if (_ABILITY_SCALE and not _REF_ID) else _REF_SCALE_CFG
 _TRANSITIONS  = dict(_BUILTIN_TRANSITIONS); _TRANSITIONS.update((KEY or {}).get('transitions', {}) or {})
 # ── OPTION 2: resolve each grade to a RANK on the reference ladder AT IMPORT, using the grade's year
 # group to pick the right scale. A KS3 'E' (top) and an A-Level 'E' (bottom) are the SAME STRING but
@@ -702,13 +732,35 @@ def _resolve_ref_groups(cfg):
         elif isinstance(cfg.get('order'), list):
             groups = [[str(t)] for t in cfg['order']]
     return groups or [[t] for t in _BUILTIN_REF]
-_REF_GROUPS = _resolve_ref_groups(_REF_SCALE_CFG)
+_REF_GROUPS = _resolve_ref_groups(_REF_LADDER_CFG)
 _REF_ORDER  = [g[0] for g in _REF_GROUPS]
 _REF_RANK   = {}
 for _ri, _rg in enumerate(_REF_GROUPS):
     for _rt in _rg:
         _REF_RANK[str(_rt)] = _ri + 1
         _REF_RANK[str(_rt).upper()] = _ri + 1
+# Descriptor + colour per band, so the dashboard axis can show "Excellent" in the school's colours
+# rather than the bare code. Falls back to the code itself when the source carries no label.
+def _ref_levels_list(cfg):
+    if isinstance(cfg, str):
+        return (_SCALE_DEFS.get(cfg) or {}).get('levels') or []
+    if isinstance(cfg, dict) and isinstance(cfg.get('levels'), list):
+        return cfg['levels']
+    return []
+_REF_LABELS, _REF_COLOURS = {}, {}
+for _lv in _ref_levels_list(_REF_LADDER_CFG):
+    _rw = _lv.get('raw') or _lv.get('csv') or ([_lv.get('code')] if _lv.get('code') else [])
+    if not isinstance(_rw, list):
+        _rw = [_rw]
+    _rw = [str(x) for x in _rw if x not in (None, '')]
+    if not _rw:
+        continue
+    _tok = _rw[0]
+    _lb = _lv.get('label')
+    _REF_LABELS[_tok] = str(_lb) if _lb not in (None, '') else _tok
+    _cl = _lv.get('colour') or _lv.get('color')
+    if _cl:
+        _REF_COLOURS[_tok] = str(_cl)
 def map_attainment_rank(canon, year_group):
     """Validated attainment token -> RANK on the reference ladder (1 = best), using the YEAR GROUP to
     pick the scale. A grade whose scale IS the reference ranks directly; any other scale maps through
@@ -1497,6 +1549,8 @@ output = {
         "subjects": all_subjects,
         "ability_map": ABILITY_MAP,
         "reference_scale": _REF_ORDER,
+        "reference_labels": {_t: _REF_LABELS.get(_t, _t) for _t in _REF_ORDER},
+        "reference_colours": {_t: _REF_COLOURS[_t] for _t in _REF_ORDER if _t in _REF_COLOURS},
         "transitions": _TRANSITIONS,
         "calibration": _CALIBRATION_EFF,
         "periods": periods_list,
