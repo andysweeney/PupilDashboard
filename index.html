@@ -100,6 +100,7 @@ table.d tr:hover td{background:var(--sf2)}
   #p-sanc [style*="height:clamp"], #p-sanc-subj [style*="height:clamp"] { height:150px !important; }
   #p-pupil-net svg { max-height:390px !important; }
   #cl-network svg { max-height:300px !important; }
+  #cl-network .disc-box>div { max-height:none !important; height:100%; }
 
   /* fit wide content to portrait width */
   /* no scrollbars / clipping in print — show full range */
@@ -237,15 +238,15 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 </div>
 <div id="cl-title" style="margin-bottom:.5rem"></div>
 <div id="cl-summary" style="margin-bottom:1.25rem"></div>
+<div id="cl-perf-title" style="margin-bottom:.5rem"></div>
+<div class="crd-g" id="cl-cards"></div>
+<div class="ch-g" id="cl-charts" style="margin-bottom:1.25rem"></div>
+<div style="page-break-before:always"></div>
 <div id="cl-alerts" style="margin-bottom:1.25rem"></div>
 <div id="cl-network" style="margin-bottom:1.25rem"></div>
 <div style="page-break-before:always"></div>
 <div id="cl-send-title" style="margin-bottom:.5rem"></div>
 <div id="cl-send" style="margin-bottom:1.25rem"></div>
-<div style="page-break-before:always"></div>
-<div id="cl-perf-title" style="margin-bottom:.5rem"></div>
-<div class="crd-g" id="cl-cards"></div>
-<div class="ch-g" id="cl-charts"></div>
 </div>
 
 <div id="vw-tutor" class="vw">
@@ -1968,7 +1969,8 @@ function _abBand(cell){const r=abRk(cell);return (r&&ABILITY.levels[r-1])?ABILIT
 // periods span more than one key stage we render ONE chart per stage that has grade data, each on its
 // own native band set: KS3 -> reference descriptors, KS4 -> GCSE 9-1, KS5 -> A-Level A*-E. Stages with
 // no data are omitted, so a single-stage cohort just gets one (full-width) chart.
-function _stageDistSpecs(yearGroup,sub){
+function _stageDistSpecs(yearGroup,sub,rowsFn){
+  rowsFn=rowsFn||(p=>ygRows(yearGroup,p));
   const ink=CFG.intakes.find(i=>curYG(i)===yearGroup);
   const pp=ygPeriods(yearGroup);
   const ksOf=yg=>yg<=9?3:(yg<=11?4:5);
@@ -1978,7 +1980,7 @@ function _stageDistSpecs(yearGroup,sub){
   [3,4,5].forEach(ks=>{
     const periods=byKS[ks];if(!periods||!periods.length)return;
     const natives=new Set();
-    periods.forEach(p=>{ygRows(yearGroup,p).forEach(r=>{const c=r[3]&&r[3][sub];if(c&&c[0]!=null&&String(c[0]).trim()!=='')natives.add(String(c[0]).trim());});});
+    periods.forEach(p=>{rowsFn(p).forEach(r=>{const c=r[3]&&r[3][sub];if(c&&c[0]!=null&&String(c[0]).trim()!=='')natives.add(String(c[0]).trim());});});
     if(!natives.size)return;
     const nl=_builtinAbilityLevels(natives);
     specs.push({ks,periods,levels:nl.length?nl:ABILITY.levels,useNative:nl.length>0,name:ks===3?'KS3':ks===4?'KS4 (GCSE)':'KS5 (A-Level)'});
@@ -1988,14 +1990,15 @@ function _stageDistSpecs(yearGroup,sub){
 }
 // Render one stage's stacked %-distribution into canvasId. Native scales (GCSE/A-Level) bucket by the
 // stored grade; the descriptor ladder buckets by resolved rank (_abBand).
-function _renderAbDist(canvasId,key,spec,yearGroup,sub){
+function _renderAbDist(canvasId,key,spec,yearGroup,sub,rowsFn){
   const el=document.getElementById(canvasId);if(!el)return;
+  rowsFn=rowsFn||(p=>ygRows(yearGroup,p));
   const labs=spec.periods.map(p=>PL[PER.indexOf(p)]);
   const nmap={};if(spec.useNative)spec.levels.forEach(l=>{nmap[String(l.label).toUpperCase()]=l.label;});
   const bandOf=spec.useNative
     ? (cell=>{const t=(cell&&cell[0]!=null)?String(cell[0]).trim().toUpperCase():null;return t!=null?(nmap[t]||null):null;})
     : (cell=>_abBand(cell));
-  const datasets=spec.levels.map(l=>({label:l.label,data:spec.periods.map(p=>{const rs=ygRows(yearGroup,p);const tot=rs.filter(r=>r[3]&&r[3][sub]).length;return tot?parseFloat((rs.filter(r=>{const c=r[3]&&r[3][sub];return c&&bandOf(c)===l.label;}).length/tot*100).toFixed(1)):0;}),backgroundColor:(GC[l.label]||l.colour||PAL.slate),borderRadius:2,borderSkipped:false}));
+  const datasets=spec.levels.map(l=>({label:l.label,data:spec.periods.map(p=>{const rs=rowsFn(p);const tot=rs.filter(r=>r[3]&&r[3][sub]).length;return tot?parseFloat((rs.filter(r=>{const c=r[3]&&r[3][sub];return c&&bandOf(c)===l.label;}).length/tot*100).toFixed(1)):0;}),backgroundColor:(GC[l.label]||l.colour||PAL.slate),borderRadius:2,borderSkipped:false}));
   sc2(key,new Chart(el,{type:'bar',data:{labels:labs,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
 }
 function abGrade(v){if(v==null||isNaN(v))return '—';var n=ABILITY.n;var r=Math.min(n,Math.max(1,v));var lo=Math.floor(r),hi=Math.ceil(r);var a=ABILITY.levels[lo-1],b=ABILITY.levels[hi-1];var na=a?parseFloat(a.label):NaN,nb=b?parseFloat(b.label):NaN;if(!isNaN(na)&&!isNaN(nb)){var g=na+(r-lo)*(nb-na);return String(Math.round(g*10)/10);}return abDesc(v);}
@@ -8413,7 +8416,7 @@ function rCL(){
   // Summary cards (population/SEN + attendance/sanctions) for the class
   document.getElementById('cl-summary').innerHTML=makeSummaryCards(lr, {titleLabel:`Y${yearGroup} ${sub} Class ${cl}`, ay:CAY});
 
-  document.getElementById('cl-alerts').innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.85rem;align-items:stretch">${alertBox('Term-on-Term Ability Concern',PAL.red,abTT,i=>concernRow(i,'ab'))}${alertBox('Year-on-Year Ability Concern',PAL.red,abYoY,i=>concernRow(i,'ab'))}${alertBox('Term-on-Term Effort Concern',PAL.orange,efTT,i=>concernRow(i,'ef'))}${alertBox('Year-on-Year Effort Concern',PAL.orange,efYoY,i=>concernRow(i,'ef'))}${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true)}</div>${expDisciplineHtml}`;
+  document.getElementById('cl-alerts').innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.85rem;align-items:stretch">${alertBox('Term-on-Term Ability Concern',PAL.red,abTT,i=>concernRow(i,'ab'))}${alertBox('Year-on-Year Ability Concern',PAL.red,abYoY,i=>concernRow(i,'ab'))}${alertBox('Term-on-Term Effort Concern',PAL.orange,efTT,i=>concernRow(i,'ef'))}${alertBox('Year-on-Year Effort Concern',PAL.orange,efYoY,i=>concernRow(i,'ef'))}</div>`;
 
   // SEND section
   document.getElementById('cl-send-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">SEND and FSM Overview</div>`;
@@ -8433,13 +8436,13 @@ function rCL(){
 
   // Render dropdown + graph container
   const netDiv=document.getElementById('cl-network');
-  netDiv.innerHTML=`<div class="dw"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Min co-occurrences <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div>`;
+  netDiv.innerHTML=`<div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:.85rem;align-items:stretch"><div class="dw" style="margin-bottom:0"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Min co-occurrences <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div><div class="disc-box" style="min-width:0;display:flex">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true)}</div></div>${expDisciplineHtml}`;
 
   window._netCtx={classPupilList:[...classPups],sub,cl};
   renderNet();
 
   const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
-  const gradeRows=[...AN].reverse().map(g=>{const c=lr.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length;const p=sc2r.length?(c/sc2r.length*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${GC[g]}"></span><span style="color:var(--mu);min-width:4.5rem">${g}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join('');
+  const gradeRows=[...AN].reverse().map(g=>{const c=lr.filter(r=>r[3][sub]&&_abBand(r[3][sub])===g).length;const p=sc2r.length?(c/sc2r.length*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${GC[g]}"></span><span style="color:var(--mu);min-width:4.5rem">${g}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join('');
 
   if(hasGradesCL){
   document.getElementById('cl-cards').innerHTML=`
@@ -8462,9 +8465,11 @@ function rCL(){
     <div class="crd"><div class="ct2">Class Summary</div><div style="font-size:.75rem;color:var(--mu)">Grade data not available. ${classPups.size} pupils · ${teacherDisplay}</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lr)}</div></div>`;
   }
 
-  dc('clab');dc('clef');dc('clst');dc('clefst');
+  dc('clab');dc('clef');['clst','clst0','clst1','clst2'].forEach(dc);dc('clefst');
   if(hasGradesCL){
-  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div class="chc full"><div class="cht">Ability Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst"></canvas></div></div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
+  const _abSpecs=_stageDistSpecs(yearGroup,sub,clRows);
+  const _abChartsHtml=_abSpecs.map((s,i)=>{const best=(s.levels[0]&&s.levels[0].label)||ABILITY.bestLabel;const ttl=s.name?`${s.name} Ability`:'Ability Distribution Over Time';return `<div class="chc" style="flex:1 1 280px;min-width:0"><div class="cht">${ttl} (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${best} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clst-${i}"></canvas></div></div>`;}).join('');
+  document.getElementById('cl-charts').innerHTML=`<div class="chc"><div class="cht">${sub} Class ${cl} Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw"><canvas id="c-clab"></canvas></div></div><div class="chc"><div class="cht">${sub} Class ${cl} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw"><canvas id="c-clef"></canvas></div></div><div style="grid-column:1/-1;display:flex;gap:.85rem;flex-wrap:wrap">${_abChartsHtml}</div><div class="chc full"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-clefst"></canvas></div></div>`;
 
   function ptAb(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
   function ptEf(p,flag){const rs=clRows(p).filter(r=>flag==null||r[flag]);const v=rs.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}
@@ -8486,7 +8491,7 @@ function rCL(){
   const showLegend={labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:8,padding:8}};
   sc2('clab',new Chart(document.getElementById('c-clab'),{type:'line',plugins:[_ksMarkerPlugin(pp,CFG.intakes.find(i=>curYG(i)===yearGroup))].filter(Boolean),data:{labels:labs,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend,tooltip:{callbacks:{label:abTipLabel}}},scales:{y:{min:abYMin,max:abYMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   sc2('clef',new Chart(document.getElementById('c-clef'),{type:'line',data:{labels:labs,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:showLegend},scales:{y:{reverse:true,min:efYMin,max:efYMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686'},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
-  sc2('clst',new Chart(document.getElementById('c-clst'),{type:'bar',data:{labels:labs,datasets:AN.map(g=>({label:g,data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&AM[r[3][sub][0]]===g).length/tot*100).toFixed(1)):0}),backgroundColor:GC[g],borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
+  _abSpecs.forEach((s,i)=>_renderAbDist('c-clst-'+i,'clst'+i,s,yearGroup,sub,clRows));
   sc2('clefst',new Chart(document.getElementById('c-clefst'),{type:'bar',data:{labels:labs,datasets:EFFORT.vals.map(e=>({label:efLeg(e),data:pp.map(p=>{const rs=clRows(p);const tot=rs.filter(r=>r[3][sub]&&efValid(r[3][sub][1])).length;return tot?parseFloat((rs.filter(r=>r[3][sub]&&r[3][sub][1]===e).length/tot*100).toFixed(1)):0}),backgroundColor:efColor(e)+'cc',borderRadius:2,borderSkipped:false}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk'},boxWidth:10,padding:8}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}%`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y:{stacked:true,max:100,ticks:{color:'#6e7686',callback:v=>v+'%'},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
   }else{
     document.getElementById('cl-charts').innerHTML='';
