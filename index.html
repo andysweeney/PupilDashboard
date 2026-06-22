@@ -10808,7 +10808,18 @@ function rPeer(){
       +`<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem"><button onclick="window._saveScales()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save scales</button><button onclick="window._resetScales()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer">↺ Reset to defaults</button><span style="font-size:.66rem;color:var(--mu)">Saving reloads the page to apply the new scale.</span></div>`
       +gradeMapHtml
       +aLevelMapHtml;
-    out.innerHTML=threshHtml+summaryHtml+attHtml+senHtml+incHtml+subjHtml+scalesHtml;
+    // Group the admin blocks into collapsible sections. Open/closed state is remembered across
+    // re-renders (rAdmin runs again after e.g. classifying a code) so a section you're working in
+    // doesn't snap shut. _noTitle strips a single block's own title where the section header repeats it.
+    window._admAcc=window._admAcc||{};
+    const _noTitle=(h,title)=>h.replace(`<div class="dwt">${title}</div>`,'');
+    const _accSec=(key,title,body)=>{const op=!!window._admAcc[key];return `<div class="dwt" style="padding:.7rem 1rem;margin:1rem 0 .55rem;cursor:pointer;display:flex;align-items:center;gap:.5rem;background:var(--sf2);border:1px solid var(--bd);border-radius:8px" onclick="window._admAcc['${key}']=!window._admAcc['${key}'];this.nextElementSibling.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>${title}</span><span class="tv-arrow${op?' tt-open':''}" style="margin-left:auto;font-size:.62rem;transition:transform .2s">▼</span></div><div class="${op?'':'tt-hide'}">${body}</div>`;};
+    out.innerHTML=summaryHtml
+      +_accSec('thr','Concern thresholds &amp; weighting',_noTitle(threshHtml,'Concern Thresholds &amp; Weightings'))
+      +_accSec('sub','Subject mapping',_noTitle(subjHtml,'Subjects'))
+      +_accSec('ats','Attendance &amp; SEN codes',attHtml+senHtml)
+      +_accSec('inc','Incident codes',_noTitle(incHtml,'Incident Codes (Behaviour Categories)'))
+      +_accSec('grd','Grading scale &amp; mapping',scalesHtml);
   }
 
   // Admin change handlers
