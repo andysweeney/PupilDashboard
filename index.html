@@ -1964,6 +1964,39 @@ function abGrade(v){if(v==null||isNaN(v))return '—';var n=ABILITY.n;var r=Math
 function scaleKeyHTML(){var sep='<span style="color:var(--bd);margin:0 .2rem">·</span>';var ab=ABILITY.levels.map(function(lv){return '<span style="display:inline-flex;align-items:center;gap:.25rem"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+(lv.colour||PAL.slate)+'"></span>'+lv.label+'</span>';}).join(sep);var ef=EFFORT.levels.map(function(lv){return '<span>'+lv.label+(lv.note?' '+lv.note:'')+'</span>';}).join(sep);return '<div class="crd" style="grid-column:1/-1"><div class="ct2">Scale key <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">'+ABILITY.bestLabel+' = best ability · '+EFFORT.bestLabel+' = highest effort</span></div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Ability</b>'+ab+'</div><div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;font-size:.72rem;margin-top:.3rem"><b style="color:var(--mu);min-width:3.2rem">Effort</b>'+ef+'</div></div>';}
 function abAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return abGrade(n);}
 function efDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(EFFORT.n,Math.max(1,Math.round(v)));const lv=EFFORT.levels[r-1];return lv?(lv.note||lv.label):'';}
+// ── Pupil-card attainment headline + vertical scale bar (Academic Performance) ──
+// Under the reference ladder a grade keeps its native value at cell[0]. When a pupil's grades this
+// term are a recognised national scale (GCSE 9-1, A-Level A*-E) the headline becomes the AVERAGE
+// GRADE in that scale (decimal for numbers) and the bar is labelled in that scale; otherwise we keep
+// the descriptor ladder (KS3 bands). a6 (avg reference rank) is the position on the descriptor bar.
+function _posNumeric(levels,value){const labs=levels.map(l=>parseFloat(l.label));if(value>=labs[0])return 1;if(value<=labs[labs.length-1])return labs.length;for(let i=0;i<labs.length-1;i++){if(value<=labs[i]&&value>=labs[i+1]){const span=(labs[i]-labs[i+1])||1;return (i+1)+(labs[i]-value)/span;}}return labs.length;}
+function _levelColourAt(levels,pos){if(pos==null||isNaN(pos)||!levels||!levels.length)return 'var(--mu)';const i=Math.min(levels.length,Math.max(1,Math.round(pos)))-1;return (levels[i]&&levels[i].colour)||'var(--mu)';}
+function _abHeadline(cells,a6){
+  const valid=(cells||[]).filter(c=>c&&c[0]!=null&&String(c[0]).trim()!=='');
+  let lvls=[];
+  if(_USE_REF&&valid.length)lvls=_builtinAbilityLevels(new Set(valid.map(c=>String(c[0]).trim())));
+  if(lvls.length){
+    const nums=valid.map(c=>parseFloat(String(c[0]).trim()));
+    if(nums.every(v=>!isNaN(v))){
+      const avg=nums.reduce((a,b)=>a+b,0)/nums.length,pos=_posNumeric(lvls,avg);
+      return {levels:lvls,valueLabel:avg.toFixed(1),pos:pos,colour:_levelColourAt(lvls,pos)};
+    }
+    const idxs=valid.map(c=>{const t=String(c[0]).trim().toUpperCase();const i=lvls.findIndex(l=>String(l.label).toUpperCase()===t);return i>=0?i+1:null}).filter(v=>v!=null);
+    if(idxs.length){const pos=idxs.reduce((a,b)=>a+b,0)/idxs.length,lab=lvls[Math.min(lvls.length,Math.max(1,Math.round(pos)))-1];return {levels:lvls,valueLabel:lab?lab.label:'\u2014',pos:pos,colour:_levelColourAt(lvls,pos)};}
+  }
+  return {levels:ABILITY.levels,valueLabel:abGrade(a6),pos:(a6!=null&&!isNaN(a6)?a6:null),colour:_levelColourAt(ABILITY.levels,a6)};
+}
+// Vertical band bar: gradient from each level's (Admin-set) colour, rungs labelled best->worst top->
+// bottom, marker line at the pupil's fractional position. levels are best-first (levels[0] = best).
+function _scaleBarHtml(levels,pos,opts){
+  opts=opts||{};const n=levels?levels.length:0;if(!n)return '';
+  const W=opts.w||112,H=opts.h||150;
+  const stops=(n===1)?(`${levels[0].colour||'var(--mu)'} 0%,${levels[0].colour||'var(--mu)'} 100%`):levels.map((l,i)=>`${l.colour||'var(--mu)'} ${Math.round(i/(n-1)*100)}%`).join(',');
+  const labels=levels.map((l,i)=>`<div style="position:absolute;left:18px;top:${n===1?50:(i/(n-1))*100}%;transform:translateY(-50%);font-size:.6rem;color:var(--mu);white-space:nowrap;line-height:1">${l.short||l.label}</div>`).join('');
+  let marker='';
+  if(pos!=null&&!isNaN(pos)){const p=Math.min(n,Math.max(1,pos)),topPct=(n===1?50:((p-1)/(n-1))*100);marker=`<div style="position:absolute;left:-3px;width:18px;top:${topPct}%;height:0;border-top:3px solid var(--tx);transform:translateY(-50%);border-radius:2px"></div>`;}
+  return `<div style="position:relative;display:inline-block;vertical-align:top;width:${W}px;height:${H}px"><div style="position:relative;width:11px;height:100%;border-radius:6px;background:linear-gradient(to bottom,${stops})">${marker}</div>${labels}</div>`;
+}
 function efAvgD(v){if(v==null||v==='')return'—';const n=parseFloat(v);if(isNaN(n)||n<=0)return String(v);return fN(n)+' '+efDesc(n);}
 function efAvg(row,subs){if(!row)return null;const v=subs.map(s2=>row.sc[s2]?row.sc[s2][1]:null).filter(e=>e!=null&&e>0);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 function ord(n){const s=['th','st','nd','rd'];const v=n%100;return n+(s[(v-20)%10]||s[v]||s[0])}
@@ -3164,6 +3197,8 @@ function rP(){
 
   const a6=abAvg(lt,act),a3=r3?abAvg(r3,act):null,a5=r5?abAvg(r5,act):null;
   const e6=efAvg(lt,act),e3=r3?efAvg(r3,act):null,e5=r5?efAvg(r5,act):null;
+  const _abH=_abHeadline(act.map(s=>(lt&&lt.sc&&lt.sc[s])?lt.sc[s]:null),a6);
+  const _abBestLab=(_abH.levels[0]&&(_abH.levels[0].short||_abH.levels[0].label))||ABILITY.bestLabel;
   const aY=a6!=null&&a3!=null?a6-a3:null,aT=a6!=null&&a5!=null?a6-a5:null;
   const eY=e6!=null&&e3!=null?e6-e3:null,eT=e6!=null&&e5!=null?e6-e5:null;
 
@@ -3422,7 +3457,7 @@ function rP(){
   const otherConcernsAlert=pupilOtherConcernsAlert(x);
   const congratsAlert=pupilCongratsAlert(x);
 
-  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}<div id="pcn-panel" data-px="${x}">${otherConcernsAlert}</div><div id="pcg-panel" data-px="${x}">${congratsAlert}</div>${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
+  document.getElementById('p-hd').innerHTML=`<div style="margin-bottom:1rem"><div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem"><span style="font-size:1.1rem;font-weight:600">${pu.id}</span><span style="color:var(--mu)">(${ctg} · ${cYG}${(()=>{const _g=REG[String(x)]?.gender;return _g==='M'?' · Male':_g==='F'?' · Female':(_g&&_g!=='?'&&_g!=='U'?' · '+_g:'');})()} · Intake ${ink})</span>${leftTag} ${tL}</div>${(()=>{const tgRecs=en.filter(r=>r.t==='tg').sort((a,b)=>a.f.localeCompare(b.f));if(tgRecs.length<=1)return'';return'<div style="font-size:.7rem;color:var(--mu);margin-bottom:.2rem">TG history: '+tgRecs.map(r=>{const to=r.u?r.u:'present';return'<span style="display:inline-flex;align-items:center;gap:.15rem;padding:.08rem .3rem;border-radius:3px;background:var(--sf2);border:1px solid var(--bd);margin:.1rem"><b style="color:var(--tx)">'+r.v+'</b> <span style="font-size:.6rem">'+r.f+' → '+to+'</span></span>'}).join(' ')+'</div>'})()}${bcLine}<div id="pcn-panel" data-px="${x}">${otherConcernsAlert}</div><div id="pcg-panel" data-px="${x}">${congratsAlert}</div>${flagsLine}${drp?'<div style="margin-top:.2rem;margin-bottom:.2rem">'+drp+'</div>':''}${yoy}</div>`;
 
   // Render timetable grid
   renderPresenceGrid(x);
@@ -3438,7 +3473,8 @@ function rP(){
   document.getElementById('p-acadprog-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Academic Progress</div>`;
 
   // ── Attendance section (summary page) ──
-  document.getElementById('p-att-section').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd);margin-bottom:.5rem">Attendance</div><div class="crd-g"><div class="crd"><div class="ct2">Attendance ${ayLabel}${isA?'':' · '+sf}</div><div style="display:flex;align-items:baseline;gap:.9rem;flex-wrap:wrap"><span class="cv2" style="color:${ayAttCol};font-size:2.4rem">${ayAttPct}${ayAttPct==='—'?'':'%'}</span>${isA?'':`<span style="font-size:.8rem;color:var(--mu)">${sf}: <b style="color:${ayAttCol}">${ayAttPct}%</b></span>`}</div><div style="font-size:.7rem;color:var(--mu);margin-top:.3rem">Periods attended this academic year</div></div></div>`;
+  const _attCard=`<div class="crd"><div class="ct2">Attendance ${ayLabel}${isA?'':' · '+sf}</div><div style="display:flex;align-items:baseline;gap:.9rem;flex-wrap:wrap"><span class="cv2" style="color:${ayAttCol};font-size:2.4rem">${ayAttPct}${ayAttPct==='—'?'':'%'}</span>${isA?'':`<span style="font-size:.8rem;color:var(--mu)">${sf}: <b style="color:${ayAttCol}">${ayAttPct}%</b></span>`}</div><div style="font-size:.7rem;color:var(--mu);margin-top:.3rem">Periods attended this academic year</div></div>`;
+  document.getElementById('p-att-section').innerHTML='';
 
   // ── Sanctions & House Points section (summary page) ──
   const _hpRecs=(DD.housePoints||[]).filter(r=>r[0]===x&&r[2]>=ayStart&&r[2]<=ayEnd);
@@ -3450,15 +3486,26 @@ function rP(){
 
   if(hasGrades&&isA){
     document.getElementById('p-crds').innerHTML=`
-    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${abGrade(a6)}</span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
-      <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
-      <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
+    ${_attCard}
+    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${_abBestLab} = best)</span></div>
+      <div style="display:flex;gap:1rem;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${_abH.valueLabel}</span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
+          <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
+          <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
+        </div>
+        <div style="flex:0 0 auto">${_scaleBarHtml(_abH.levels,_abH.pos)}</div>
+      </div>
     </div>
     <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efRkStr}</b> in ${ctg}</span></div>
-      <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
-      <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
+      <div style="display:flex;gap:1rem;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efRkStr}</b> in ${ctg}</span></div>
+          <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
+          <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
+        </div>
+        <div style="flex:0 0 auto">${_scaleBarHtml(EFFORT.levels,e6)}</div>
+      </div>
     </div>`;
   }else if(hasGrades&&!isA){
     // Class ranking for single subject
@@ -3479,24 +3526,33 @@ function rP(){
       efClsRkStr=efRi?`${ord(efRi)}/${efRanked.length}`:'—';
     }
     document.getElementById('p-crds').innerHTML=`
+    ${_attCard}
     <div class="crd"><div class="ct2">${sf} Ability (${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${abGrade(a6)}</span>${abClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abClsRkStr}</b> in class</span>`:''}</div>
-      ${clsInfo?`<div style="margin-top:.15rem">${clsInfo}</div>`:''}
-      <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
-      <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
+      <div style="display:flex;gap:1rem;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${_abH.valueLabel}</span>${abClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abClsRkStr}</b> in class</span>`:''}</div>
+          ${clsInfo?`<div style="margin-top:.15rem">${clsInfo}</div>`:''}
+          <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
+          <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
+        </div>
+        <div style="flex:0 0 auto">${_scaleBarHtml(_abH.levels,_abH.pos)}</div>
+      </div>
     </div>
     <div class="crd g"><div class="ct2">${sf} Effort (${PL[PER.indexOf(lp)]})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span>${efClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efClsRkStr}</b> in class</span>`:''}</div>
-      ${clsInfo?`<div style="margin-top:.15rem">${clsInfo}</div>`:''}
-      <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
-      <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
+      <div style="display:flex;gap:1rem;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span>${efClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efClsRkStr}</b> in class</span>`:''}</div>
+          ${clsInfo?`<div style="margin-top:.15rem">${clsInfo}</div>`:''}
+          <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
+          <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
+        </div>
+        <div style="flex:0 0 auto">${_scaleBarHtml(EFFORT.levels,e6)}</div>
+      </div>
     </div>`;
   }else{
     // No grade data
-    document.getElementById('p-crds').innerHTML='<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported for this pupil.</div></div>';
+    document.getElementById('p-crds').innerHTML=_attCard+'<div class="crd" style="grid-column:1/-1"><div class="ct2" style="color:var(--mu)">Grade data not available</div><div style="font-size:.75rem;color:var(--mu)">Ability and effort grades have not been imported for this pupil.</div></div>';
   }
-
-  if(hasGrades) document.getElementById('p-crds').insertAdjacentHTML('beforeend', scaleKeyHTML());
 
   // Charts — only render if grades available
   dc('pab');dc('pef');
@@ -3611,13 +3667,13 @@ function rP(){
       // Triple Science sub-rows: only if this is Science AND the pupil has a triple breakdown
       // in any visible period.
       if(s==='Science'){
-        const hasTriple=rpp.some(p=>data[p]?.sc?.['Science']?.[3]);
+        const hasTriple=rpp.some(p=>{const t=data[p]?.sc?.['Science']?.[3];return t&&typeof t==='object'&&!Array.isArray(t);});
         if(hasTriple){
           ['Biology','Chemistry','Physics'].forEach(sub=>{
             const subCells=rpp.map(p=>{
               const r=data[p];
               const triple=r?.sc?.['Science']?.[3];
-              const subEntry=triple?triple[sub]:null;
+              const subEntry=(triple&&typeof triple==='object'&&!Array.isArray(triple))?triple[sub]:null;
               if(!subEntry)return'<td style="color:var(--mu);text-align:center;padding:.15rem .1rem;font-size:.6rem">—</td><td style="color:var(--mu);text-align:center;padding:.15rem .1rem;font-size:.6rem">—</td>';
               return`<td style="text-align:center;padding:.15rem .1rem">${bHo(subEntry)}</td><td style="text-align:center;padding:.15rem .1rem">${eHc(subEntry[1])}</td>`;
             }).join('');
@@ -3626,7 +3682,7 @@ function rP(){
         }
       }
     });
-    return`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Per-Subject Breakdown</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 .5rem .75rem"><div style="overflow-x:auto"><table class="d" style="font-size:.65rem"><thead><tr><th style="text-align:left;font-size:.65rem;position:sticky;left:0;background:var(--sf);z-index:1">Subject</th>${pairHdr}</tr></thead><tbody>${rows.join('')}</tbody></table></div></div></div>`;
+    return`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Per-Subject Breakdown</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div style="padding:0 .5rem .75rem"><div style="overflow-x:auto"><table class="d" style="font-size:.65rem"><thead><tr><th style="text-align:left;font-size:.65rem;position:sticky;left:0;background:var(--sf);z-index:1">Subject</th>${pairHdr}</tr></thead><tbody>${rows.join('')}</tbody></table></div></div></div>`;
   })();
   }else{
     document.getElementById('p-tbl').innerHTML='';
