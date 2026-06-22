@@ -17,7 +17,7 @@ in the genuine SIMS exports:
 
 Subjects are passed through RAW — no mapping happens here. That is the Admin panel's job.
 """
-import os, re, sys
+import os, re, sys, shutil
 import pandas as pd
 
 ATT_COLS = ['Name', 'Reg', 'Mark', 'Date', 'Subject', 'Teacher', 'Period Description']
@@ -144,6 +144,10 @@ def stage(upload_dir, out_dir, grade_term=None, current_acad_year=None, verbose=
     buckets = {}
     for fn in sorted(os.listdir(upload_dir)):
         if not fn.lower().endswith(('.csv', '.xlsx')):
+            # Admin grade-mapping calibration (JSON) rides along verbatim — the engine folds it onto
+            # its transition keys. The CSV/XLSX-only path below would otherwise drop it.
+            if re.match(r'_calibration_ks[45]\.json$', fn):
+                shutil.copyfile(os.path.join(upload_dir, fn), os.path.join(out_dir, fn))
             continue
         role, yg = detect(fn)
         if role:
