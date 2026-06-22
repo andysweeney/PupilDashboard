@@ -3199,8 +3199,10 @@ function rP(){
   const e6=efAvg(lt,act),e3=r3?efAvg(r3,act):null,e5=r5?efAvg(r5,act):null;
   const _abH=_abHeadline(act.map(s=>(lt&&lt.sc&&lt.sc[s])?lt.sc[s]:null),a6);
   const _abBestLab=(_abH.levels[0]&&(_abH.levels[0].short||_abH.levels[0].label))||ABILITY.bestLabel;
-  const aY=a6!=null&&a3!=null?a6-a3:null,aT=a6!=null&&a5!=null?a6-a5:null;
-  const eY=e6!=null&&e3!=null?e6-e3:null,eT=e6!=null&&e5!=null?e6-e5:null;
+  // Ability & effort scales are inverted (rank/number 1 = best), so an improvement LOWERS the value.
+  // Report the change as prior-minus-current, so a gain shows +ve (green) and a slip -ve (red).
+  const aY=a6!=null&&a3!=null?a3-a6:null,aT=a6!=null&&a5!=null?a5-a6:null;
+  const eY=e6!=null&&e3!=null?e3-e6:null,eT=e6!=null&&e5!=null?e5-e6:null;
 
   // TG-based ranking: find all pupils currently in this TG, then rank them for any period
   // "Currently in this TG" = their latest period row has tg === ctg
