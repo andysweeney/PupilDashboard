@@ -17,8 +17,66 @@ in the genuine SIMS exports:
 
 Subjects are passed through RAW — no mapping happens here. That is the Admin panel's job.
 """
-import os, re, sys, shutil
+import os, re, sys, shutil, json
 import pandas as pd
+
+# ── Term-label recognition (for grade Resultsets) ─────────────────────────────
+# Built-in season words → T1/T2/T3. Deliberately CONSERVATIVE: only clearly-standard,
+# unambiguous wordings live here. Anything ambiguous (e.g. "Winter") or bespoke is left
+# unresolved and surfaced in Admin for the school to map, so a term is never silently
+# filed in the wrong place. Order matters only in that the first contained word wins.
+_SEASON_WORDS = [
+    ('michaelmas', 'T1'), ('mich', 'T1'), ('autumn', 'T1'), ('aut', 'T1'), ('fall', 'T1'),
+    ('lent', 'T2'), ('hilary', 'T2'), ('spring', 'T2'), ('spr', 'T2'),
+    ('trinity', 'T3'), ('summer', 'T3'), ('sum', 'T3'),
+]
+_MONTHS_RS = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+              'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
+
+
+def _norm_term(s):
+    """Canonical key for a Resultset label — must match the dashboard's normaliser exactly
+    (lowercase, runs of non-alphanumerics collapsed to one space, trimmed)."""
+    return re.sub(r'[^a-z0-9]+', ' ', str(s or '').lower()).strip()
+
+
+def _parse_term_date(s):
+    """If the label is (or contains) a date, return (month, year); else None. Only consulted
+    when no season word matched, so it never overrides an explicit season."""
+    s = str(s or '')
+    m = re.search(r'(20\d{2})[-/](\d{1,2})(?:[-/]\d{1,2})?', s)            # 2025-12, 2025/12/05
+    if m:
+        mo = int(m.group(2))
+        if 1 <= mo <= 12:
+            return (mo, int(m.group(1)))
+    m = re.search(r'\b([a-z]{3,})\s+(20\d{2})', s.lower())                  # December 2025 / Dec 2025
+    if m and m.group(1)[:3] in _MONTHS_RS:
+        return (_MONTHS_RS[m.group(1)[:3]], int(m.group(2)))
+    m = re.search(r'\b(\d{1,2})[/.](\d{1,2})[/.](20\d{2})\b', s)            # 05/12/2025 (d/m/y)
+    if m:
+        mo = int(m.group(2))
+        if 1 <= mo <= 12:
+            return (mo, int(m.group(3)))
+    return None
+
+
+def _load_term_map(upload_dir):
+    """Per-school overrides for term labels the built-ins don't know: {normalised label: 'T1'|'T2'|'T3'}.
+    Rides along like the other admin-editable engine inputs (_calibration_ks*.json, _ability_scale.json)."""
+    out = {}
+    try:
+        p = os.path.join(upload_dir, '_term_map.json')
+        if os.path.exists(p):
+            with open(p, encoding='utf-8') as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                for k, v in raw.items():
+                    vs = str(v).strip().upper()
+                    if vs in ('T1', 'T2', 'T3'):
+                        out[_norm_term(k)] = vs
+    except Exception:
+        pass
+    return out
 
 ATT_COLS = ['Name', 'Reg', 'Mark', 'Date', 'Subject', 'Teacher', 'Period Description']
 BEH_COLS = ['Name', 'Date', 'Subject', 'Lesson - Period', 'Incident', 'Teacher']
@@ -75,36 +133,55 @@ def _beh_norm(df, historic):
     return d[BEH_COLS]
 
 
-def _parse_grades(attain_paths, effort_paths, pid_intake=None, fallback_term=None):
+def _parse_grades(attain_paths, effort_paths, pid_intake=None, fallback_term=None, term_map=None):
     pid_intake = pid_intake or {}
-    stats = {'rows': 0, 'unresolved_term': 0}
+    term_map = term_map or {}
+    stats = {'rows': 0, 'unresolved_term': 0, 'unresolved_labels': set()}
     def pidnum(n):
         m = re.match(r'(\d+)', str(n));  return str(int(m.group(1))) if m else None
     def term_of(resultset, pidn):
-        # Season from the resultset; academic year from (resultset year group + pupil intake).
-        s = str(resultset or '').strip(); low = s.lower()
-        if 'aut' in low:   season = 'T1'
-        elif 'spr' in low: season = 'T2'
-        elif 'sum' in low: season = 'T3'
-        else:
-            tm = re.search(r'\bt\s*([1-3])\b', low) or re.search(r'term\s*([1-3])', low)
-            season = 'T' + tm.group(1) if tm else None
+        # Resolve the SEASON (T1/T2/T3), then the academic YEAR, from the Resultset label.
+        s = str(resultset or '').strip(); low = s.lower(); norm = _norm_term(s)
+        season = None; ay = None
+        # 1) Per-school override wins (covers bespoke wordings the school has mapped in Admin).
+        if norm and norm in term_map:
+            season = term_map[norm]
+        # 2) Built-in season words (Autumn/Spring/Summer + Michaelmas/Lent/Hilary/Trinity/Fall).
         if season is None:
+            for w, t in _SEASON_WORDS:
+                if w in low:
+                    season = t; break
+        # 3) Explicit "T1".."T3" / "Term 1".."Term 3".
+        if season is None:
+            tm = re.search(r'\bt\s*([1-3])\b', low) or re.search(r'term\s*([1-3])', low)
+            if tm:
+                season = 'T' + tm.group(1)
+        # 4) A date label: month → season, year → AY (UK Sept–Aug). Only if nothing above matched.
+        if season is None:
+            d = _parse_term_date(s)
+            if d:
+                mo, yr = d
+                if mo >= 9:   season, ay = 'T1', yr
+                elif mo <= 4: season, ay = 'T2', yr - 1
+                else:         season, ay = 'T3', yr - 1
+        if season is None:
+            if s:
+                stats['unresolved_labels'].add(s)
             return fallback_term
-        ay = None
-        # Preferred: a "Year N" group in the resultset, resolved to an AY via the pupil's intake.
-        ygm = re.search(r'year\s*(\d{1,2})\b', low) or re.search(r'\byr?\s*(\d{1,2})\b', low)
-        yg = int(ygm.group(1)) if ygm else None
-        intake = pid_intake.get(pidn) if pidn else None
-        if yg is not None and 7 <= yg <= 13 and intake is not None:
-            ay = intake + (yg - 7)
-        else:
-            # Fallback: an explicit calendar year in the resultset. AY is labelled by its START
-            # year, so an autumn-term calendar year IS the AY; spring/summer is AY+1.
-            ym = re.search(r'(20\d{2})', s)
-            if ym:
-                cal = int(ym.group(1)); ay = cal if season == 'T1' else cal - 1
+        # AY (unless a date already fixed it): prefer year-group + pupil intake, else a calendar year.
         if ay is None:
+            ygm = re.search(r'year\s*(\d{1,2})\b', low) or re.search(r'\byr?\s*(\d{1,2})\b', low)
+            yg = int(ygm.group(1)) if ygm else None
+            intake = pid_intake.get(pidn) if pidn else None
+            if yg is not None and 7 <= yg <= 13 and intake is not None:
+                ay = intake + (yg - 7)
+            else:
+                ym = re.search(r'(20\d{2})', s)
+                if ym:
+                    cal = int(ym.group(1)); ay = cal if season == 'T1' else cal - 1
+        if ay is None:
+            if s:
+                stats['unresolved_labels'].add(s)
             return fallback_term
         return f"{season} {ay}"
     def parse(paths, rx, valcol):
@@ -247,11 +324,23 @@ def stage(upload_dir, out_dir, grade_term=None, current_acad_year=None, verbose=
                         pid_intake[str(int(_m.group(1)))] = int(float(_rr['Intake']))
             except Exception as e:
                 log(f"  grades: roster intake map unavailable ({e})")
-        rep, gsum = _parse_grades(attain, effort, pid_intake, fallback_term=grade_term)
+        # Per-school term-label overrides (Admin-mapped). Built-ins handle the standard wordings;
+        # this catches anything bespoke a school uses.
+        term_map = _load_term_map(upload_dir)
+        rep, gsum = _parse_grades(attain, effort, pid_intake, fallback_term=grade_term, term_map=term_map)
         rep.to_csv(os.path.join(out_dir, 'Reports.csv'), index=False)
         summary['report_rows'] = len(rep)
+        # Surface any term labels we couldn't place, so the engine can pass them to the Admin
+        # "unknown term" mapper. Distinct, sorted; an empty list clears a previously-flagged set.
+        _unres = sorted(gsum.get('unresolved_labels') or [])
+        try:
+            with open(os.path.join(out_dir, 'unresolved_terms.json'), 'w', encoding='utf-8') as _uf:
+                json.dump(_unres, _uf)
+        except Exception as e:
+            log(f"  grades: could not write unresolved-terms list ({e})")
         if gsum.get('unresolved_term'):
-            log(f"  grades: {gsum['unresolved_term']} rows with unresolvable term (left blank for Admin)")
+            log(f"  grades: {gsum['unresolved_term']} rows with unresolvable term "
+                f"({len(_unres)} distinct label(s) for Admin to map)")
 
     for k, v in summary.items():
         log(f"  {k}: {v}")
