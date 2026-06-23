@@ -101,7 +101,7 @@ table.d tr:hover td{background:var(--sf2)}
   #p-pupil-net svg { max-height:390px !important; }
   #cl-network svg { max-height:300px !important; }
   #cl-network .disc-box, #sv-charts-bottom .disc-box { display:flex; }
-  #cl-network .disc-box>div, #sv-charts-bottom .disc-box>div { max-height:none !important; height:100%; width:100%; flex:1 1 auto; }
+  #cl-network .disc-box>div, #sv-charts-bottom .disc-box>div { max-height:none !important; flex:1 1 auto; min-height:0; width:100%; }
 
   /* fit wide content to portrait width */
   /* no scrollbars / clipping in print — show full range */
@@ -1173,14 +1173,19 @@ function _scanGradeTokens(){
 function _builtinAbilityLevels(tokens){
   const arr=[...tokens].map(t=>String(t).trim()).filter(Boolean);
   if(!arr.length)return [];
-  if(arr.every(t=>/^[1-9]$/.test(t))){                       // GCSE 9-1 (9 best)
-    const col={9:PAL.green,8:PAL.green,7:PAL.blue,6:PAL.blue,5:PAL.sky,4:PAL.gold,3:PAL.orange,2:PAL.red,1:PAL.red};
-    return [9,8,7,6,5,4,3,2,1].map(n=>({csv:[String(n)],label:String(n),colour:col[n]}));
+  const up=arr.map(t=>t.toUpperCase());
+  if(up.every(t=>/^[1-9]$/.test(t)||t==='U')){               // GCSE 9-1 (9 best), U (Ungraded) = worst
+    const col={'9':PAL.green,'8':PAL.green,'7':PAL.blue,'6':PAL.blue,'5':PAL.sky,'4':PAL.gold,'3':PAL.orange,'2':PAL.red,'1':PAL.red,'U':PAL.red};
+    const levels=['9','8','7','6','5','4','3','2','1'].map(n=>({csv:[n],label:n,colour:col[n]}));
+    if(up.includes('U'))levels.push({csv:['U'],label:'U',colour:col['U']});
+    return levels;
   }
   const ALV=['A*','A','B','C','D','E'];
-  if(arr.every(t=>ALV.includes(t.toUpperCase()))){           // A-Level A*-E (A* best)
-    const col={'A*':PAL.green,'A':PAL.green,'B':PAL.blue,'C':PAL.sky,'D':PAL.orange,'E':PAL.red};
-    return ALV.map(g=>({csv:[g],label:g,colour:col[g]}));
+  if(up.every(t=>ALV.includes(t)||t==='U')){                 // A-Level A*-E (A* best), U = worst
+    const col={'A*':PAL.green,'A':PAL.green,'B':PAL.blue,'C':PAL.sky,'D':PAL.orange,'E':PAL.red,'U':PAL.red};
+    const levels=ALV.map(g=>({csv:[g],label:g,colour:col[g]}));
+    if(up.includes('U'))levels.push({csv:['U'],label:'U',colour:col['U']});
+    return levels;
   }
   return [];                                                 // mixed/unknown -> school defines its own
 }
@@ -2071,7 +2076,7 @@ function _abHeadline(cells,a6){
   let lvls=[];
   if(_USE_REF&&valid.length)lvls=_builtinAbilityLevels(new Set(valid.map(c=>String(c[0]).trim())));
   if(lvls.length){
-    const nums=valid.map(c=>parseFloat(String(c[0]).trim()));
+    const nums=valid.map(c=>{const t=String(c[0]).trim().toUpperCase();return t==='U'?0:parseFloat(t);});
     if(nums.every(v=>!isNaN(v))){
       const avg=nums.reduce((a,b)=>a+b,0)/nums.length,pos=_posNumeric(lvls,avg);
       return {levels:lvls,valueLabel:avg.toFixed(1),pos:pos,colour:_levelColourAt(lvls,pos)};
@@ -8038,11 +8043,11 @@ function rSV(){
     </div>`;
   }
 
-  function alertBox(title,color,items,renderFn,scrollable){
+  function alertBox(title,color,items,renderFn,scrollable,fill){
     const none=`<span style="font-size:.75rem;color:var(--mu);font-style:italic">None</span>`;
     const content=items.length?items.map(renderFn).join(''):none;
     const countLabel=items.length?` <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.6rem;color:var(--mu)">(${items.length})</span>`:'';
-    return`<div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:.85rem;min-width:0;max-height:300px;display:flex;flex-direction:column;overflow:hidden">
+    return`<div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:.85rem;min-width:0;${fill?'flex:1 1 auto;min-height:0':'max-height:300px'};display:flex;flex-direction:column;overflow:hidden">
       <div style="font-size:.68rem;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem;flex-shrink:0">${title}${countLabel}</div>
       <div style="overflow-y:auto;flex:1;min-height:0;padding-right:.4rem">${content}</div>
     </div>`;
@@ -8124,7 +8129,7 @@ function rSV(){
 
   const _abSpecs=_stageDistSpecs(yearGroup,sub);
   const _abChartsHtml=_abSpecs.map((s,i)=>{const best=(s.levels[0]&&s.levels[0].label)||ABILITY.bestLabel;const ttl=s.name?`${s.name} Ability`:'Ability Distribution Over Time';return `<div class="chc" style="flex:1 1 280px;min-width:0"><div class="cht">${ttl} (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${best} = best)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svst-${i}"></canvas></div></div>`;}).join('');
-  document.getElementById('sv-charts-bottom').innerHTML=`<div style="grid-column:1/-1"><div style="display:flex;gap:.85rem;flex-wrap:wrap;align-items:stretch"><div style="flex:2.2 1 360px;display:flex;gap:.85rem;flex-wrap:wrap;min-width:0">${_abChartsHtml}</div><div class="disc-box" style="flex:1 1 280px;min-width:0">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true)}</div></div><div class="chc" style="margin-top:.85rem"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div></div>`;
+  document.getElementById('sv-charts-bottom').innerHTML=`<div style="grid-column:1/-1"><div style="display:flex;gap:.85rem;flex-wrap:wrap;align-items:stretch"><div style="flex:2.2 1 360px;display:flex;gap:.85rem;flex-wrap:wrap;min-width:0">${_abChartsHtml}</div><div class="disc-box" style="flex:1 1 280px;min-width:0">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true,true)}</div></div><div class="chc" style="margin-top:.85rem"><div class="cht">Effort Distribution Over Time (Stacked %) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw" style="height:clamp(250px,20vw,380px)"><canvas id="c-svefst"></canvas></div></div></div>`;
 
   // Build per-period data points for all pupils and each sub-group
   function ptAb(p,flag){const rs=ygRows(yearGroup,p).filter(r=>flag==null||r[flag]);const s=rs.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}
@@ -8304,11 +8309,11 @@ function rCL(){
     const tg=pupilTG(item.idx);
     return`<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(40,34,20,.3)"><div style="min-width:6rem"><span style="font-family:'IBM Plex Mono',monospace;font-size:.78rem;font-weight:500">${pLink(item.idx,item.pid)}</span><div style="font-size:.58rem;color:var(--mu)">${tg}</div></div>${flags?`<span style="display:flex;gap:.2rem">${flags}</span>`:''}<span style="font-size:.72rem;color:var(--mu)">${prvL} → <span style="color:var(--red);font-weight:600">${curL}</span></span><span style="margin-left:auto;font-size:.72rem;font-family:'IBM Plex Mono',monospace;color:var(--red);font-weight:600">${item.diff}</span></div>`;
   }
-  function alertBox(title,color,items,renderFn,scrollable){
+  function alertBox(title,color,items,renderFn,scrollable,fill){
     const none=`<span style="font-size:.75rem;color:var(--mu);font-style:italic">None</span>`;
     const content=items.length?items.map(renderFn).join(''):none;
     const countLabel=items.length?` <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.6rem;color:var(--mu)">(${items.length})</span>`:'';
-    return`<div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:.85rem;min-width:0;max-height:300px;display:flex;flex-direction:column;overflow:hidden">
+    return`<div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:.85rem;min-width:0;${fill?'flex:1 1 auto;min-height:0':'max-height:300px'};display:flex;flex-direction:column;overflow:hidden">
       <div style="font-size:.68rem;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem;flex-shrink:0">${title}${countLabel}</div>
       <div style="overflow-y:auto;flex:1;min-height:0;padding-right:.4rem">${content}</div>
     </div>`;
@@ -8504,7 +8509,7 @@ function rCL(){
 
   // Render dropdown + graph container
   const netDiv=document.getElementById('cl-network');
-  netDiv.innerHTML=`<div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:.85rem;align-items:stretch"><div class="dw" style="margin-bottom:0"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Min co-occurrences <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div><div class="disc-box" style="min-width:0;display:flex">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true)}</div></div>${expDisciplineHtml}`;
+  netDiv.innerHTML=`<div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:.85rem;align-items:stretch"><div class="dw" style="margin-bottom:0"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Min co-occurrences <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div><div class="disc-box" style="min-width:0;display:flex">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true,true)}</div></div>${expDisciplineHtml}`;
 
   window._netCtx={classPupilList:[...classPups],sub,cl};
   renderNet();
