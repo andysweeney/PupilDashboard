@@ -100,8 +100,8 @@ table.d tr:hover td{background:var(--sf2)}
   #p-sanc [style*="height:clamp"], #p-sanc-subj [style*="height:clamp"] { height:150px !important; }
   #p-pupil-net svg { max-height:390px !important; }
   #cl-network svg { max-height:300px !important; }
-  #cl-network .disc-box, #sv-charts-bottom .disc-box { display:flex; }
-  #cl-network .disc-box>div, #sv-charts-bottom .disc-box>div { max-height:none !important; flex:1 1 auto; min-height:0; width:100%; }
+  #cl-network .disc-box, #sv-charts-bottom .disc-box { position:relative; }
+  #cl-network .disc-box>div, #sv-charts-bottom .disc-box>div { position:absolute; inset:0; max-height:none !important; }
 
   /* fit wide content to portrait width */
   /* no scrollbars / clipping in print — show full range */
@@ -135,6 +135,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <button class="tb" onclick="sw('class',this)">🏫 Class</button>
 <button class="tb" onclick="sw('tutor',this)">👥 Tutor Group</button>
 <button class="tb" onclick="sw('classcomp',this)">⚖️ Comparison</button>
+<button class="tb" onclick="sw('tgcomp',this)">👥 Tutor Group Comparison</button>
 <button class="tb" onclick="sw('compare',this)">📈 Cross Year Comparison</button>
 <button class="tb" onclick="sw('progression',this)">📊 Year Progression Comparison</button>
 <button class="tb" onclick="sw('teacher',this)">👩‍🏫 Teacher</button>
@@ -274,6 +275,13 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div class="cg"><label>Subject</label><select id="cc-sub" onchange="rCC()"></select></div>
 </div>
 <div id="cc-out"></div>
+</div>
+
+<div id="vw-tgcomp" class="vw">
+<div class="ctl">
+<div class="cg"><label>Year Group</label><select id="tgc-yg" onchange="rTGC()"></select></div>
+</div>
+<div id="tgc-out"></div>
 </div>
 
 <div id="vw-teacher" class="vw"><div id="tv-out"></div></div>
@@ -6760,7 +6768,7 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else rP();
 }
 
 
@@ -7324,7 +7332,7 @@ function rUpload(){
           +'<input type="file" accept=".csv,.tsv,.txt"'+(multi?' multiple':'')+' style="display:none" onchange="window._upChoose(\''+s.id+'\',this)"></label>')
       +'</div>';
   };
-  const rosterInput=(label,editIntake)=>'<label style="font-family:inherit;font-size:.76rem;font-weight:600;color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:.35rem .7rem;cursor:pointer;background:var(--sf2);white-space:nowrap">'+label
+  const rosterInput=(label,editIntake)=>'<label style="font-family:inherit;font-size:.76rem;font-weight:600;color:var(--tx);border:1px solid #c7b996;border-radius:7px;padding:.35rem .7rem;cursor:pointer;background:#dccfb5;white-space:nowrap">'+label
     +'<input type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="window._upChoose(\'sen\',this'+(editIntake!=null?(','+editIntake):'')+')"></label>';
 
   const cohortCards=cohorts.map(c=>{
@@ -7333,7 +7341,7 @@ function rUpload(){
     return '<div style="border:1px solid var(--bd);border-radius:10px;padding:.5rem .9rem;margin-top:.8rem">'
       +'<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.1rem">'
         +'<div style="flex:1;font-size:.9rem;font-weight:700;color:var(--tx)">'+c.intake+' intake <span style="font-weight:400;color:var(--mu)">· Year '+c.yg+(n?' · '+n+' pupils':'')+'</span></div>'
-        +rosterInput('Update roster',c.intake)
+        +rosterInput('Update roster (SEN + gender)',c.intake)
       +'</div>'+cs.map(s=>slotRow(s,false)).join('')+'</div>';
   }).join('');
 
@@ -8663,6 +8671,48 @@ function rCC(){
   document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--orange)">Exp.</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--red)">Exp.</th><th style="color:var(--violet)">Det.</th><th style="color:var(--violet)">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+function rTGC(){
+  const yearGroup=parseInt(document.getElementById('tgc-yg').value);
+  if(!yearGroup)return;
+  const enrols=ygEnrol(yearGroup);
+  // Group this year's pupils by tutor group
+  const tm={};
+  enrols.filter(r=>r.t==='tg'&&r.u===null).forEach(r=>{if(!tm[r.v])tm[r.v]=new Set();tm[r.v].add(r.x)});
+  const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('tgc-out').innerHTML='<div style="color:var(--mu);padding:2rem">No data for Year '+yearGroup+'</div>';return}
+  const lp=ygCurrentGradePeriod(yearGroup)||pp[pp.length-1];
+  const lpIdx=pp.indexOf(lp);
+  const p3=lpIdx>=2?pp[lpIdx-2]:null;
+  // Cross-subject averages (a tutor group spans every subject, so we average across all of them)
+  const avgAbX=rs=>{const v=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(x=>x>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
+  const avgEfX=rs=>{const v=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:0).filter(x=>x>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
+  const _td=new Date();const _todayISO=`${_td.getFullYear()}-${String(_td.getMonth()+1).padStart(2,'0')}-${String(_td.getDate()).padStart(2,'0')}`;
+  const ayStart=`${CAY}-09-01`;
+  const SAN_ALL=DD.sanctions||[];
+  const rows=Object.entries(tm).sort(([a],[b])=>String(a).localeCompare(String(b),undefined,{numeric:true})).map(([tg,pupSet])=>{
+    const lr=ygRows(yearGroup,lp).filter(r=>pupSet.has(r[0]));
+    let totAbs=0;pupSet.forEach(px=>{totAbs+=countAbsPeriods(px,ayStart,_todayISO).total});
+    let totL=0;for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=ayStart&&w<=_todayISO)totL+=tl}
+    const exp=totL*pupSet.size;
+    const ytdAtt=exp>0?parseFloat(((exp-totAbs)/exp*100).toFixed(1)):null;
+    const attCol=ytdAtt==null?'color:var(--mu)':ytdAtt>=95?'color:var(--green);font-weight:600':ytdAtt>=90?'':'color:var(--red);font-weight:600';
+    const avg=avgAbX(lr),avgE=avgEfX(lr);
+    let pAvg=null,pAvgE=null;if(p3){const pr=ygRows(yearGroup,p3).filter(r=>pupSet.has(r[0]));pAvg=avgAbX(pr);pAvgE=avgEfX(pr)}
+    const chg=avg!=null&&pAvg!=null?avg-pAvg:null;
+    const chgS=chg===null?'color:var(--mu)':chg>0?'color:var(--green)':chg<=-1?'color:var(--red);font-weight:600':chg<0?'color:var(--red)':'';
+    const chgE=avgE!=null&&pAvgE!=null?avgE-pAvgE:null;
+    const chgES=chgE===null?'color:var(--mu)':chgE<0?'color:var(--green)':chgE>=1?'color:var(--red);font-weight:600':chgE>0?'color:var(--red)':'';
+    const sendC=lr.filter(r=>r[4]).length,fsmC=lr.filter(r=>r[6]).length;
+    const senCats={K:0,E:0,Add:0,Strat:0,N:0};
+    lr.forEach(r=>{const c=SEN_STATUS[String(r[0])];if(c){if(c==='K')senCats.K++;else if(c==='E')senCats.E++;else if(c==='Add'||c==='add')senCats.Add++;else if(c==='Strat'||c==='strat')senCats.Strat++;else if(c==='N')senCats.N++}});
+    const tgSanc=SAN_ALL.filter(s=>pupSet.has(s[0])&&s[2]>=ayStart&&s[2]<=_todayISO);
+    const nCodes=tgSanc.filter(s=>s[1]===0).length,nOnCalls=tgSanc.filter(s=>s[1]===1).length,nDets=tgSanc.filter(s=>s[1]===2).length;
+    let m=0,f=0;pupSet.forEach(px=>{const g=REG[String(px)]?.gender;if(g==='M')m++;else if(g==='F')f++});
+    return`<tr><td style="font-weight:500">${tg}</td><td>${pupSet.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${m}M · ${f}F</div></td><td style="text-align:center;font-family:'IBM Plex Mono',monospace;${attCol}">${ytdAtt!=null?ytdAtt+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${_abAvgLabel(_abCells(lr,SUBS),avg)}</td><td style="font-weight:600;color:${eC(avgE)}">${efAvgD(avgE)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'\u2014'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'\u2014'}</td><td style="text-align:center;${sendC?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${sendC||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'\u2014'}</td><td style="text-align:center;${fsmC?'color:var(--blue);font-weight:600':'color:var(--mu)'}">${fsmC||'\u2014'}</td><td style="text-align:center;${nCodes?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${nCodes||'\u2014'}</td><td style="text-align:center;${nOnCalls?'color:var(--red);font-weight:600':'color:var(--mu)'}">${nOnCalls||'\u2014'}</td><td style="text-align:center;${nDets?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${nDets||'\u2014'}</td></tr>`;
+  }).join('');
+  const cmpLabel=p3?PL[PER.indexOf(p3)]:'previous period';
+  document.getElementById('tgc-out').innerHTML=`<div class="dw"><div class="dwt">Tutor Group Comparison \u2014 Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Ability and effort are averaged across all subjects (${ABILITY.bestLabel} = best ability). \u0394 columns compare with ${cmpLabel}. Sanctions are this academic year, all subjects.</div><table class="d ctr"><thead><tr><th>Tutor Group</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. \u0394</th><th>Ef. \u0394</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--violet)">Det.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 (function(){
   const ps=document.getElementById('p-sel');
   const pupils=Object.values(REG).sort((a,b)=>{if(a.left!==b.left)return a.left?1:-1;return a.id.localeCompare(b.id)});
@@ -8693,6 +8743,7 @@ function rCC(){
     'cl-yg':{hasAll:false,onChange:'popCL()'},
     'tg-yg':{hasAll:false,onChange:'popTG()'},
     'cc-yg':{hasAll:false,onChange:'rCC()'},
+    'tgc-yg':{hasAll:false,onChange:'rTGC()'},
     'cmp-yg':{hasAll:false,onChange:'rCmp()'},
     'bc-yg':{hasAll:true,onChange:'popBCTG();rBC()'},
     'pp-yg':{hasAll:true,onChange:'rPP()'},
@@ -9316,6 +9367,7 @@ function rPeer(){
 }
 
   window.rCC=rCC;
+  window.rTGC=rTGC;
   // ── ANALYTICS TAB ──
   function rAnalytics(){
     const yearGroup=parseInt(document.getElementById('an-yg').value);
