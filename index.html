@@ -9057,15 +9057,14 @@ function rPeer(){
   // stack to the group's weekly total.
   const weekLabels=peerWeeks.map(w=>new Date(w+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
   const _shade=(hex,f)=>{const m=hex.replace('#','');const r=Math.round(parseInt(m.slice(0,2),16)*f),g=Math.round(parseInt(m.slice(2,4),16)*f),b=Math.round(parseInt(m.slice(4,6),16)*f);return`rgb(${r},${g},${b})`};
-  const sancDS=[];
-  allSeries.forEach((s,gi)=>{
-    const col=s.color,st='g'+gi,cd=(s.sanc&&s.sanc.codes)||[],dd=(s.sanc&&s.sanc.det)||[];
-    sancDS.push({label:s.label+' · codes',data:cd,backgroundColor:col+'cc',stack:st,borderWidth:0});
-    sancDS.push({label:s.label+' · detentions',data:dd,backgroundColor:_shade(col,0.5),stack:st,borderWidth:0});
+  const sancLineDS=allSeries.map(s=>{
+    const cd=(s.sanc&&s.sanc.codes)||[],dd=(s.sanc&&s.sanc.det)||[];
+    const tot=cd.map((c,i)=>parseFloat((c+((dd[i])||0)).toFixed(3)));
+    return{label:s.label,data:tot,borderColor:s.color,backgroundColor:s.color+'18',borderWidth:2,pointRadius:2,pointBackgroundColor:s.color,tension:.3,fill:false,spanGaps:true};
   });
   const sancTot=allSeries.flatMap(s=>(s.sanc&&s.sanc.codes)?s.sanc.codes.map((c,i)=>c+((s.sanc.det[i])||0)):[]);
   const sancMax=sancTot.length?Math.max(0.5,Math.ceil(Math.max(...sancTot)*10)/10):1;
-  sc2('peerSanc',new Chart(document.getElementById('c-peerSanc'),{type:'bar',data:{labels:weekLabels,datasets:sancDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:8},boxWidth:10,padding:6}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}`}}},scales:{x:{stacked:true,ticks:{color:'#6e7686',font:{size:7},autoSkip:true,maxRotation:0},grid:{display:false},border:{color:'#e6dfd0'}},y:{stacked:true,min:0,max:sancMax,ticks:{color:'#6e7686',font:{size:11}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
+  sc2('peerSanc',new Chart(document.getElementById('c-peerSanc'),{type:'line',data:{labels:weekLabels,datasets:sancLineDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:8},boxWidth:10,padding:6}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y}`}}},scales:{x:{ticks:{color:'#6e7686',font:{size:7},autoSkip:true,maxRotation:0},grid:{display:false},border:{color:'#e6dfd0'}},y:{min:0,max:sancMax,ticks:{color:'#6e7686',font:{size:11}},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}}}}}));
 }
 
   window.sw=sw;
