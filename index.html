@@ -7,11 +7,11 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#FAF7F0;--sf:#FFFFFF;--sf2:#F3EEE3;--bd:#E6DFD0;--ac:#642535;--ac2:#a03050;--ac3:#2d7a4f;--tx:#1B2231;--mu:#6E7686;--bel:#a4382e;--dev:#b5511a;--wrk:#b58416;--met:#2a6e9a;--con:#642535;--skl:#5e2a86;--exc:#2f7d49;--serif:'Fraunces',Georgia,'Times New Roman',serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--red:#b5483b;--red-deep:#9a3328;--red-band:#a4382e;--rose:#a12c44;--orange:#bb6b1a;--orange-mid:#c2772e;--orange-pale:#d89a5a;--amber:#b07b12;--gold:#9c8211;--amber-band:#b58416;--orange-band:#b5511a;--green:#2e9469;--green-mid:#2e8a5f;--green-deep:#2e7a55;--green-dark:#1f5a40;--lime:#6e9b27;--green-band:#2f7d49;--green-bg:#e6f0e9;--green-bg2:#cbe3ce;--teal:#1e8c80;--teal-bright:#2ba89a;--blue:#4e6bc8;--sky:#3b8fb5;--cyan:#2e86b0;--blue-band:#2a6e9a;--navy:#1f4e70;--teal-dark:#2a7c95;--indigo:#5258c0;--violet:#6f4bc0;--lilac:#8a74c8;--purple:#7355be;--plum:#5e2a86;--magenta:#a845b8;--pink:#c25e92;--pink-deep:#b84a86;--slate:#8e8b82;--amber-bg:#f7ecd3}
 body{background-color:var(--bg);background-image:radial-gradient(rgba(120,108,82,.05) 1px,transparent 1px);background-size:4px 4px;color:var(--tx);font-family:'Hanken Grotesk',system-ui,sans-serif;font-size:15px}
-header{background:#642535;border-bottom:1px solid #4a1a28;padding:.5rem 1.5rem;display:flex;align-items:center;gap:1.2rem;position:sticky;top:0;z-index:100;flex-wrap:wrap}
-.logo{font-size:1rem;font-weight:700;color:#ffffff}.logo span{color:#e8c0c8;font-weight:400}
+header{background:var(--hdr,#642535);border-bottom:1px solid var(--hdr-bd,#4a1a28);padding:.5rem 1.5rem;display:flex;align-items:center;gap:1.2rem;position:sticky;top:0;z-index:100;flex-wrap:wrap}
+.logo{font-size:1rem;font-weight:700;color:var(--hdr-tx,#ffffff)}.logo span{color:var(--hdr-tx2,#e8c0c8);font-weight:400}
 .tabs{display:flex;gap:.2rem;flex-wrap:wrap}
-.tb{background:none;border:1px solid transparent;color:#d4a0aa;font-family:inherit;font-size:.75rem;font-weight:500;padding:.3rem .7rem;border-radius:7px;cursor:pointer;transition:all .15s;white-space:nowrap}
-.tb:hover{color:#ffffff;background:rgba(255,255,255,.15)}.tb.on{background:#ffffff;color:#642535}
+.tb{background:none;border:1px solid transparent;color:var(--hdr-tx2,#d4a0aa);font-family:inherit;font-size:.75rem;font-weight:500;padding:.3rem .7rem;border-radius:7px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.tb:hover{color:var(--hdr-tx,#ffffff);background:var(--hdr-hov,rgba(255,255,255,.15))}.tb.on{background:var(--hdr-tx,#ffffff);color:var(--hdr,#642535)}
 .vw{display:none;padding:1.5rem;max-width:1500px;margin:0 auto}.vw.on{display:block}
 .ctl{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1.25rem;align-items:center}
 .cg label{display:block;font-size:.68rem;font-weight:500;color:var(--mu);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
@@ -127,6 +127,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 .tt-grid{box-shadow:0 1px 1px rgba(40,34,20,.04)}
 </style></head><body>
 <header>
+<img id="brand-logo" alt="School logo" style="display:none;max-height:34px;max-width:150px;margin-right:.1rem;vertical-align:middle;border-radius:4px">
 <div class="logo">Pupil Progress <span>Dashboard</span></div>
 <div class="tabs">
 <button id="tab-admin" class="tb" style="display:none" onclick="sw('admin',this)">🔧 Admin</button>
@@ -1165,6 +1166,34 @@ async function resetCfg(id,lsKey){
   try{localStorage.removeItem(_cfgKey(lsKey));}catch(e){}
   if(SB_ON){try{await sbDel(id);delete _SBCACHE[id];}catch(e){console.warn('[cfg] server reset failed for',id,e.message);}}
 }
+// ── Per-school branding (logo + header colour) ──
+// Persisted via the same app_settings rails as thresholds (school-namespaced, server-authoritative,
+// localStorage cache). Header colours are CSS-var overrides whose fallbacks are the default maroon,
+// so a school that sets nothing looks identical to the baseline.
+const BRANDING_LS='pupilDashboard.branding.v1';
+function _brandHex(c){c=String(c||'').trim();return /^#[0-9a-fA-F]{6}$/.test(c)?c:null;}
+function _brandLum(hex){const h=hex.replace('#','');const r=parseInt(h.slice(0,2),16)/255,g=parseInt(h.slice(2,4),16)/255,b=parseInt(h.slice(4,6),16)/255;const f=v=>v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b);}
+function _brandDarken(hex,k){const h=hex.replace('#','');const ch=i=>Math.max(0,Math.min(255,Math.round(parseInt(h.slice(i,i+2),16)*k))).toString(16).padStart(2,'0');return '#'+ch(0)+ch(2)+ch(4);}
+function _applyBranding(b){
+  const root=document.documentElement.style;
+  const col=b&&_brandHex(b.headerColour);
+  if(col){
+    root.setProperty('--hdr',col);
+    root.setProperty('--hdr-bd',_brandDarken(col,0.72));
+    const light=_brandLum(col)>0.55;           // light header → dark text, else white text
+    root.setProperty('--hdr-tx',light?'#1B2231':'#ffffff');
+    root.setProperty('--hdr-tx2',light?'rgba(27,34,49,.62)':'rgba(255,255,255,.72)');
+    root.setProperty('--hdr-hov',light?'rgba(0,0,0,.08)':'rgba(255,255,255,.15)');
+  }else{
+    ['--hdr','--hdr-bd','--hdr-tx','--hdr-tx2','--hdr-hov'].forEach(v=>root.removeProperty(v));
+  }
+  const img=document.getElementById('brand-logo');
+  if(img){
+    if(b&&b.logo){img.src=b.logo;img.style.display='';}
+    else{img.removeAttribute('src');img.style.display='none';}
+  }
+}
+window._applyBranding=_applyBranding;
 // Built-in national DISPLAY scales (GCSE / A-Level / numeric effort), detected from the grades
 // actually present so a fresh school's imported KS4/KS5 grades render with no setup. National
 // standards only — the school's own saved scale always overrides these in _resolveScales, and a
@@ -1380,8 +1409,9 @@ async function _resolveScales(){
   return cfg;
 }
 // ── Login gate now runs at the top of boot, before any data is fetched. ──
-await sbPrefetch(['scales','dataKeys','thresholds','gcseMap','incident_categories']);
+await sbPrefetch(['scales','dataKeys','thresholds','gcseMap','incident_categories','branding']);
 try{const _ic=loadCfg('incident_categories','pupilDashboard.incidentCategories.v1');if(_ic)window._applyIncidentCategories(_ic);}catch(e){}
+try{_applyBranding(loadCfg('branding',BRANDING_LS));}catch(e){}
 // ── Admin-write gating: only users listed in the Supabase `admins` table may edit
 //    Admin settings. Non-admins never see the Admin tab; RLS is the real enforcement
 //    (any config write from a non-admin is rejected server-side). Dismissals stay open. ──
@@ -8829,6 +8859,7 @@ function rTGC(){
   // boot-selected pupil renders against defaults and any later re-render (e.g. dismiss/restore)
   // silently uses the stricter saved thresholds, making borderline concerns "disappear".
   loadThresholds();
+  try{_applyBranding(loadCfg('branding',BRANDING_LS));}catch(e){}
   rP();
   // Initialise concern threshold display
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
@@ -11291,7 +11322,22 @@ function rPeer(){
     window._admAcc=window._admAcc||{};
     const _noTitle=(h,title)=>h.replace(`<div class="dwt">${title}</div>`,'');
     const _accSec=(key,title,body)=>{const op=!!window._admAcc[key];return `<div class="dwt" style="padding:.7rem 1rem;margin:1rem 0 .55rem;cursor:pointer;display:flex;align-items:center;gap:.5rem;background:var(--sf2);border:1px solid var(--bd);border-radius:8px" onclick="window._admAcc['${key}']=!window._admAcc['${key}'];this.nextElementSibling.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>${title}</span><span class="tv-arrow${op?' tt-open':''}" style="margin-left:auto;font-size:.62rem;transition:transform .2s">▼</span></div><div class="${op?'':'tt-hide'}">${body}</div>`;};
+    // ── Branding panel (school-admin self-serve: logo + header colour) ──
+    const _curBrand=loadCfg('branding',BRANDING_LS)||{};
+    const _bcol=_brandHex(_curBrand.headerColour)||'#642535';
+    const _blogo=_curBrand.logo||'';
+    const _bBtn='font-family:inherit;font-size:.72rem;font-weight:600;padding:.4rem .8rem;border-radius:7px;border:1px solid var(--bd);cursor:pointer;background:var(--tx);color:var(--bg,#fff)';
+    const _bBtn2='font-family:inherit;font-size:.72rem;font-weight:500;padding:.4rem .8rem;border-radius:7px;border:1px solid var(--bd);cursor:pointer;background:var(--sf2);color:var(--tx)';
+    const brandHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Branding</div>`
+      +`<div style="font-size:.72rem;color:var(--mu);margin-bottom:.9rem;padding:0 .1rem">Your logo and header colour are saved for your school only. They persist across devices and sign-ins.</div>`
+      +`<div style="display:flex;flex-wrap:wrap;gap:2rem;align-items:flex-start;padding:0 .1rem .3rem">`
+        +`<div><div style="font-size:.7rem;font-weight:600;margin-bottom:.4rem">Header colour</div>`
+          +`<div style="display:flex;align-items:center;gap:.5rem"><input type="color" id="brand-col" value="${_bcol}" style="width:46px;height:32px;border:1px solid var(--bd);border-radius:6px;background:var(--sf);cursor:pointer;padding:2px"><button onclick="window._brandingSaveColour()" style="${_bBtn}">Apply</button><button onclick="window._brandingResetColour()" style="${_bBtn2}">Default</button></div></div>`
+        +`<div><div style="font-size:.7rem;font-weight:600;margin-bottom:.4rem">School logo <span style="font-weight:400;color:var(--mu)">— PNG or SVG, under 50&nbsp;KB</span></div>`
+          +`<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap"><div style="width:124px;height:38px;border:1px dashed var(--bd);border-radius:6px;display:flex;align-items:center;justify-content:center;background:var(--sf2);overflow:hidden">${_blogo?`<img src="${_blogo}" style="max-height:34px;max-width:118px">`:'<span style="font-size:.6rem;color:var(--mu)">No logo</span>'}</div><input type="file" id="brand-logo-file" accept="image/png,image/jpeg,image/svg+xml,image/webp" onchange="window._brandingPickLogo(this)" style="font-size:.7rem;max-width:210px">`+(_blogo?`<button onclick="window._brandingRemoveLogo()" style="${_bBtn2}">Remove</button>`:'')+`</div><div id="brand-logo-msg" style="font-size:.65rem;color:var(--mu);margin-top:.35rem;min-height:.9rem"></div></div>`
+      +`</div></div>`;
     out.innerHTML=summaryHtml
+      +_accSec('brand','Branding — logo &amp; header colour',brandHtml)
       +_accSec('thr','Concern thresholds &amp; weighting',_noTitle(threshHtml,'Concern Thresholds &amp; Weightings'))
       +_accSec('sub','Subject mapping',_noTitle(subjHtml,'Subjects'))
       +_accSec('ats','Attendance &amp; SEN codes',attHtml+senHtml)
@@ -11300,6 +11346,33 @@ function rPeer(){
   }
 
   // Admin change handlers
+  window._brandingPickLogo=function(inp){
+    const f=inp.files&&inp.files[0];const msg=document.getElementById('brand-logo-msg');
+    if(!f)return;
+    if(f.size>60*1024){if(msg){msg.textContent='That image is '+Math.round(f.size/1024)+' KB — please use one under 50 KB.';msg.style.color='var(--red)';}inp.value='';return;}
+    const rd=new FileReader();
+    rd.onload=async()=>{
+      const cur=loadCfg('branding',BRANDING_LS)||{};cur.logo=rd.result;
+      if(msg){msg.textContent='Saving…';msg.style.color='var(--mu)';}
+      const ok=await saveCfg('branding',BRANDING_LS,cur);_applyBranding(cur);
+      if(msg){msg.textContent=ok?'Logo saved.':'Saved on this device, but the server save failed.';msg.style.color=ok?'var(--green)':'var(--red)';}
+      rAdmin();
+    };
+    rd.readAsDataURL(f);
+  };
+  window._brandingSaveColour=async function(){
+    const col=document.getElementById('brand-col');if(!col)return;
+    const cur=loadCfg('branding',BRANDING_LS)||{};cur.headerColour=col.value;
+    await saveCfg('branding',BRANDING_LS,cur);_applyBranding(cur);rAdmin();
+  };
+  window._brandingResetColour=async function(){
+    const cur=loadCfg('branding',BRANDING_LS)||{};delete cur.headerColour;
+    await saveCfg('branding',BRANDING_LS,cur);_applyBranding(cur);rAdmin();
+  };
+  window._brandingRemoveLogo=async function(){
+    const cur=loadCfg('branding',BRANDING_LS)||{};delete cur.logo;
+    await saveCfg('branding',BRANDING_LS,cur);_applyBranding(cur);rAdmin();
+  };
   window._adminSetAtt=function(code,cat){
     const ac=DD.config.att_codes;
     // Remove from all categories
