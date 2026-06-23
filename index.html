@@ -9262,6 +9262,11 @@ function rPeer(){
   // ── NETWORK GRAPH ──
   const tgNetDiv=document.getElementById('tg-network');
   if(typeof renderNet==='function'){
+    if(isAllTG){
+      // The whole-year network (every tutor group at once) is too dense to read and the most
+      // expensive thing on this tab to draw, so skip it and prompt for a single tutor group.
+      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;display:flex;align-items:center;gap:.6rem;margin-bottom:0"><span>Sanction Pair Network</span></div><div style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">Select a single tutor group to see its sanction pair network. Across all tutor groups the network is too dense to be readable.</div></div></div>`;
+    }else{
     // Find co-occurring sanctions within TG
     const tgLessonSanc=tgSancAY.filter(s=>s[3]!=null&&s[4]!=null);
     // Group by date+period
@@ -9322,6 +9327,7 @@ function rPeer(){
       tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="font-size:.6rem;color:var(--mu);margin-bottom:.5rem">Showing pupils sanctioned together in the same lesson ≥2 times this academic year</div>${svg}</div></div>`;
     }else{
       tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No significant sanction pairs found</div></div></div>`;
+    }
     }
   }
 
