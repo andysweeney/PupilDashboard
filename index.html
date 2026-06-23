@@ -9255,7 +9255,8 @@ function rPeer(){
     // Ability/Effort
     const curScores=SUBS.map(s=>r[3][s]?abRk(r[3][s])||0:0).filter(v=>v>0);
     const curEffort=SUBS.map(s=>r[3][s]?r[3][s][1]:null).filter(v=>v!=null&&v>0);
-    const pAvgAb=curScores.length?(curScores.reduce((a,b)=>a+b,0)/curScores.length).toFixed(1):'—';
+    const pAvgAbRank=curScores.length?curScores.reduce((a,b)=>a+b,0)/curScores.length:null;
+    const pAvgAb=pAvgAbRank!=null?_abAvgLabel(_abCells([r],SUBS),pAvgAbRank):'—';
     const pAvgEf=curEffort.length?(curEffort.reduce((a,b)=>a+b,0)/curEffort.length).toFixed(1):'—';
 
     return`<tr>
@@ -9264,7 +9265,7 @@ function rPeer(){
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${attCol}">${pAttPct}%</td>
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${pCodes?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${pCodes||'—'}</td>
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${pDets?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${pDets||'—'}</td>
-      ${hasGradesTG?`<td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:${aC(parseFloat(pAvgAb))}">${pAvgAb}</td>
+      ${hasGradesTG?`<td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:${pAvgAbRank!=null?aC(pAvgAbRank):'var(--mu)'}">${pAvgAb}</td>
       <td style="text-align:center;font-family:'IBM Plex Mono',monospace;color:${eC(parseFloat(pAvgEf))}">${pAvgEf}</td>`:''}
     </tr>`;
   }).join('');
