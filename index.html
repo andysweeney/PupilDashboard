@@ -8524,6 +8524,28 @@ function rCL(){
   // Performance section title
   document.getElementById('cl-perf-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Effort and Ability Summary</div>`;
 
+  // ── Historic Grade List (attainment + effort per pupil, across terms) ──
+  let gradeHistHtml='';
+  {
+    const histPeriods=pp.filter(p=>clRows(p).some(r=>r[3][sub]&&(r[3][sub][0]||r[3][sub][1])));
+    if(histPeriods.length){
+      const cellMaps=histPeriods.map(p=>{const m={};clRows(p).forEach(r=>{if(r[3][sub])m[r[0]]=r[3][sub]});return m;});
+      const pupArr=[...classPups].sort((a,b)=>String(REG[String(a)]?.id||a).localeCompare(String(REG[String(b)]?.id||b)));
+      const perHdr=histPeriods.map(pp2=>`<th colspan="2" style="text-align:center;font-size:.58rem;border-left:1px solid var(--bd)">${PL[PER.indexOf(pp2)]}</th>`).join('');
+      const subHdr=histPeriods.map(()=>`<th style="text-align:center;font-size:.52rem;color:var(--mu);font-weight:400;border-left:1px solid var(--bd)">Att</th><th style="text-align:center;font-size:.52rem;color:var(--mu);font-weight:400">Ef</th>`).join('');
+      const histBody=pupArr.map((px,i)=>{
+        const nm=REG[String(px)]?.id||String(px);
+        const cells=histPeriods.map((p,pi)=>{
+          const cell=cellMaps[pi][px];
+          if(!cell)return'<td style="text-align:center;color:var(--mu);font-size:.6rem;border-left:1px solid var(--bd)">—</td><td style="text-align:center;color:var(--mu);font-size:.6rem">—</td>';
+          return`<td style="text-align:center;padding:.15rem .1rem;border-left:1px solid var(--bd)">${bHo(cell)}</td><td style="text-align:center;padding:.15rem .1rem">${eHc(cell[1])}</td>`;
+        }).join('');
+        return`<tr><td style="color:var(--mu);font-size:.7rem;text-align:center">${i+1}</td><td style="font-family:'IBM Plex Mono',monospace;font-weight:500;white-space:nowrap;position:sticky;left:0;background:var(--sf);z-index:1">${pLink(px,nm)}</td><td style="font-size:.65rem;color:var(--mu)">${pupilTG(px)}</td>${cells}</tr>`;
+      }).join('');
+      gradeHistHtml=`<div class="dw" style="margin-top:.85rem;padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Historic Grade List</span><span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— Attainment &amp; Effort · ${sub}</span><span class="tv-arrow tt-open" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div style="padding:0 .5rem .75rem"><div style="overflow-x:auto"><table class="d" style="font-size:.65rem"><thead><tr><th rowspan="2" style="text-align:center">#</th><th rowspan="2" style="text-align:left;position:sticky;left:0;background:var(--sf);z-index:1">Pupil</th><th rowspan="2">TG</th>${perHdr}</tr><tr>${subHdr}</tr></thead><tbody>${histBody}</tbody></table></div></div></div>`;
+    }
+  }
+
   // ── NETWORK GRAPH: Sanction Pairs ──
   // Determine available academic years for these pupils
   const netInk=parseInt(Object.keys(ENR).find(ik=>{
@@ -8535,7 +8557,7 @@ function rCL(){
 
   // Render dropdown + graph container
   const netDiv=document.getElementById('cl-network');
-  netDiv.innerHTML=`<div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:.85rem;align-items:stretch"><div class="dw" style="margin-bottom:0"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Min co-occurrences <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div><div class="disc-box" style="min-width:0;display:flex">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true,true)}</div></div>${expDisciplineHtml}`;
+  netDiv.innerHTML=`<div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:.85rem;align-items:stretch"><div class="dw" style="margin-bottom:0"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Min co-occurrences <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div><div class="disc-box" style="min-width:0;display:flex">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true,true)}</div></div>${gradeHistHtml}${expDisciplineHtml}`;
 
   window._netCtx={classPupilList:[...classPups],sub,cl};
   renderNet();
