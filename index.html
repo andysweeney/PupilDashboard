@@ -8085,9 +8085,22 @@ function rSV(){
   const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
   const _oteVals=lr.map(r=>r[3][sub]?r[3][sub][2]:null).filter(v=>v!=null&&v!=='');
   const _oteLvls=_builtinAbilityLevels(new Set(_oteVals.map(v=>String(v).trim())));
-  const _oteTot=_oteVals.length;
-  const maxGradeCount=Math.max(..._oteLvls.map(l=>_oteVals.filter(v=>String(v).trim()===l.label).length),1);
-  const gradeRows=_oteLvls.length?_oteLvls.map(l=>{const c=_oteVals.filter(v=>String(v).trim()===l.label).length;const p=_oteTot?(c/_oteTot*100).toFixed(0):0;const barW=Math.round(c/maxGradeCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:3.5rem">${l.label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${l.colour}44;border-left:2px solid ${l.colour}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join(''):`<div style="color:var(--mu);font-size:.7rem;padding:.2rem 0">No on-track grades recorded for this group.</div>`;
+  // Prefer a separate on-track target (OTE, cell[2]) when the school supplies one; otherwise
+  // bucket the attainment / "On track for" grade the school actually provides (cell[0], via rank)
+  // so the breakdown is never blank when grades exist.
+  const _useOTE=_oteLvls.length>0&&_oteVals.length>0;
+  let gradeRows,gradeBreakdownLabel;
+  if(_useOTE){
+    gradeBreakdownLabel='on-track estimate';
+    const _oteTot=_oteVals.length;
+    const maxGradeCount=Math.max(..._oteLvls.map(l=>_oteVals.filter(v=>String(v).trim()===l.label).length),1);
+    gradeRows=_oteLvls.map(l=>{const c=_oteVals.filter(v=>String(v).trim()===l.label).length;const p=_oteTot?(c/_oteTot*100).toFixed(0):0;const barW=Math.round(c/maxGradeCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:3.5rem">${l.label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${l.colour}44;border-left:2px solid ${l.colour}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
+  }else{
+    gradeBreakdownLabel='on-track grade';
+    const _bandTot=sc2r.length;
+    const _bandMax=Math.max(...ABILITY.levels.map((lv,i)=>sc2r.filter(rk=>rk===i+1).length),1);
+    gradeRows=_bandTot?ABILITY.levels.map((lv,i)=>{const c=sc2r.filter(rk=>rk===i+1).length;if(!c)return'';const p=(c/_bandTot*100).toFixed(0);const col=lv.colour||GC[lv.label]||PAL.slate;const barW=Math.round(c/_bandMax*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${col}"></span><span style="color:var(--mu);min-width:3.5rem">${lv.label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${col}44;border-left:2px solid ${col}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join(''):`<div style="color:var(--mu);font-size:.7rem;padding:.2rem 0">No grades recorded for this group.</div>`;
+  }
 
   // Effort breakdown with bar chart
   const efLabels=['Excellent','Good','Developing','Low'];
@@ -8126,7 +8139,7 @@ function rSV(){
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
       ${sgBlockEf}
     </div>
-    <div class="crd"><div class="ct2">Grade Breakdown <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(on-track estimate)</span></div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${gradeRows}</div></div>
+    <div class="crd"><div class="ct2">Grade Breakdown <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${gradeBreakdownLabel})</span></div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${gradeRows}</div></div>
     <div class="crd"><div class="ct2">Effort Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${efRows}</div></div>`;
 
   dc('svab');dc('svef');dc('svst');dc('svefst');
@@ -8525,8 +8538,18 @@ function rCL(){
   const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
   const _oteVals=lr.map(r=>r[3][sub]?r[3][sub][2]:null).filter(v=>v!=null&&v!=='');
   const _oteLvls=_builtinAbilityLevels(new Set(_oteVals.map(v=>String(v).trim())));
-  const _oteTot=_oteVals.length;
-  const gradeRows=_oteLvls.length?_oteLvls.map(l=>{const c=_oteVals.filter(v=>String(v).trim()===l.label).length;const p=_oteTot?(c/_oteTot*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:4.5rem">${l.label}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join(''):`<div style="color:var(--mu);font-size:.7rem">No on-track grades recorded.</div>`;
+  // Prefer separate OTE target (cell[2]); else bucket the attainment / "On track for" grade (cell[0]).
+  const _useOTE=_oteLvls.length>0&&_oteVals.length>0;
+  let gradeRows,gradeBreakdownLabel;
+  if(_useOTE){
+    gradeBreakdownLabel='on-track estimate';
+    const _oteTot=_oteVals.length;
+    gradeRows=_oteLvls.map(l=>{const c=_oteVals.filter(v=>String(v).trim()===l.label).length;const p=_oteTot?(c/_oteTot*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:4.5rem">${l.label}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join('');
+  }else{
+    gradeBreakdownLabel='on-track grade';
+    const _bandTot=sc2r.length;
+    gradeRows=_bandTot?ABILITY.levels.map((lv,i)=>{const c=sc2r.filter(rk=>rk===i+1).length;if(!c)return'';const p=(c/_bandTot*100).toFixed(0);const col=lv.colour||GC[lv.label]||PAL.slate;return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${col}"></span><span style="color:var(--mu);min-width:4.5rem">${lv.label}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`}).join(''):`<div style="color:var(--mu);font-size:.7rem">No grades recorded.</div>`;
+  }
 
   if(hasGradesCL){
   document.getElementById('cl-cards').innerHTML=`
@@ -8542,7 +8565,7 @@ function rCL(){
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
       ${sgBlockEf}
     </div>
-    <div class="crd"><div class="ct2">Grade Breakdown <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(on-track estimate)</span></div><div style="display:flex;flex-direction:column;gap:.15rem;margin-top:.25rem">${gradeRows}</div></div>
+    <div class="crd"><div class="ct2">Grade Breakdown <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${gradeBreakdownLabel})</span></div><div style="display:flex;flex-direction:column;gap:.15rem;margin-top:.25rem">${gradeRows}</div></div>
     <div class="crd"><div class="ct2">Flags</div><div style="margin-top:.25rem">${flagsStr(sendN,ehcpN,fsmN,lr)}</div></div>`;
   }else{
     document.getElementById('cl-cards').innerHTML=`
