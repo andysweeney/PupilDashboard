@@ -88,6 +88,8 @@ table.d tr:hover td{background:var(--sf2)}
   .crd, .chc, .dw, .tt-grid { break-inside:avoid; }
   #p-att-section, #p-sanchp-section { break-inside:avoid; }
   #p-acad-title, #p-acadprog-title, #p-behav-title, #p-dist-title, #p-dist-hp-title, #p-hist-title { break-after:avoid; }
+  /* start the House Points Distribution on a fresh page when printing */
+  #p-dist-hp-title { break-before: page; }
 
   /* charts re-layout for print via the beforeprint hook — no CSS bitmap-scaling (which distorted the axes) */
   .ch-g { gap:.6rem !important; }
@@ -3421,7 +3423,7 @@ function rP(){
           return dir==='drop'?x.diff>=thresh:x.diff<=-thresh;
         }
       });if(!f2.length)return no;
-      return f2.map(x=>{const col=dir==='drop'?PAL.red:PAL.green;const bg=dir==='drop'?'rgba(181,72,59,.08)':'rgba(46,148,105,.08)';const bd=dir==='drop'?'rgba(181,72,59,.2)':'rgba(46,148,105,.2)';const sign=x.diff>0?'+':'';return`<span style="display:inline-flex;gap:.15rem;background:${bg};border:1px solid ${bd};border-radius:3px;padding:.08rem .35rem;font-size:.7rem;color:${col}">${x.s} ${sign}${x.diff}</span>`}).join(' ');
+      return f2.map(x=>{const col=dir==='drop'?PAL.red:PAL.green;const bg=dir==='drop'?'rgba(181,72,59,.08)':'rgba(46,148,105,.08)';const bd=dir==='drop'?'rgba(181,72,59,.2)':'rgba(46,148,105,.2)';const arrow=dir==='drop'?'▼':'▲';return`<span style="display:inline-flex;gap:.15rem;background:${bg};border:1px solid ${bd};border-radius:3px;padding:.08rem .35rem;font-size:.7rem;color:${col}">${x.s} ${arrow}${Math.abs(x.diff)}</span>`}).join(' ');
     }
     function dgRow(label,abC,efC){
       return`<div style="display:grid;grid-template-columns:7rem 1fr 1fr;gap:.4rem;align-items:center;min-height:1.6rem"><span style="font-size:.68rem;color:var(--mu)">${label}</span><div style="display:flex;gap:.2rem;flex-wrap:wrap">${abC}</div><div style="display:flex;gap:.2rem;flex-wrap:wrap">${efC}</div></div>`;
@@ -8083,24 +8085,25 @@ function rSV(){
   // Grade breakdown with bar chart
   // Grade breakdown — on-track (OTE) grades, bucketed best-first using the national grade colours
   const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
-  const _oteVals=lr.map(r=>r[3][sub]?r[3][sub][2]:null).filter(v=>v!=null&&v!=='');
-  const _oteLvls=_builtinAbilityLevels(new Set(_oteVals.map(v=>String(v).trim())));
-  // Prefer a separate on-track target (OTE, cell[2]) when the school supplies one; otherwise
-  // bucket the attainment / "On track for" grade the school actually provides (cell[0], via rank)
-  // so the breakdown is never blank when grades exist.
-  const _useOTE=_oteLvls.length>0&&_oteVals.length>0;
+  // Bucket the actual on-track grade the school uploaded (native cell[0], e.g. GCSE 9-1) using the
+  // recognised grade scale. Only when the native scale is non-numeric (KS3 descriptors) do we fall
+  // back to the reference ability band. (No separate OTE target exists in this data.)
+  const _natVals=lr.map(r=>r[3][sub]?r[3][sub][0]:null).filter(v=>v!=null&&v!=='');
+  const _natLvls=_builtinAbilityLevels(new Set(_natVals.map(v=>String(v).trim())));
   let gradeRows,gradeBreakdownLabel;
-  if(_useOTE){
-    gradeBreakdownLabel='on-track estimate';
-    const _oteTot=_oteVals.length;
-    const maxGradeCount=Math.max(..._oteLvls.map(l=>_oteVals.filter(v=>String(v).trim()===l.label).length),1);
-    gradeRows=_oteLvls.map(l=>{const c=_oteVals.filter(v=>String(v).trim()===l.label).length;const p=_oteTot?(c/_oteTot*100).toFixed(0):0;const barW=Math.round(c/maxGradeCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:3.5rem">${l.label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${l.colour}44;border-left:2px solid ${l.colour}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
-  }else{
+  if(_natLvls.length&&_natVals.length){
     gradeBreakdownLabel='on-track grade';
+    const _gTot=_natVals.length;
+    const _gMax=Math.max(..._natLvls.map(l=>_natVals.filter(v=>String(v).trim()===l.label).length),1);
+    gradeRows=_natLvls.map(l=>{const c=_natVals.filter(v=>String(v).trim()===l.label).length;if(!c)return'';const p=_gTot?(c/_gTot*100).toFixed(0):0;const barW=Math.round(c/_gMax*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:3.5rem">${l.label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${l.colour}44;border-left:2px solid ${l.colour}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
+  }else{
+    gradeBreakdownLabel='ability band';
     const _bandTot=sc2r.length;
     const _bandMax=Math.max(...ABILITY.levels.map((lv,i)=>sc2r.filter(rk=>rk===i+1).length),1);
-    gradeRows=_bandTot?ABILITY.levels.map((lv,i)=>{const c=sc2r.filter(rk=>rk===i+1).length;if(!c)return'';const p=(c/_bandTot*100).toFixed(0);const col=lv.colour||GC[lv.label]||PAL.slate;const barW=Math.round(c/_bandMax*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${col}"></span><span style="color:var(--mu);min-width:3.5rem">${lv.label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${col}44;border-left:2px solid ${col}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join(''):`<div style="color:var(--mu);font-size:.7rem;padding:.2rem 0">No grades recorded for this group.</div>`;
+    gradeRows=_bandTot?ABILITY.levels.map((lv,i)=>{const c=sc2r.filter(rk=>rk===i+1).length;if(!c)return'';const p=(c/_bandTot*100).toFixed(0);const col=lv.colour||GC[lv.label]||PAL.slate;const barW=Math.round(c/_bandMax*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${col}"></span><span style="color:var(--mu);min-width:3.5rem">${lv.label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${col}44;border-left:2px solid ${col}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join(''):'';
   }
+  {const _ungraded=Math.max(0,lrSubj.length-_natVals.length);if(_ungraded)gradeRows+=`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:var(--bd)"></span><span style="color:var(--mu);min-width:3.5rem">No grade</span><div style="flex:1;height:14px"></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right;color:var(--mu)">${_ungraded}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem"></span></div>`;}
+  if(!gradeRows)gradeRows=`<div style="color:var(--mu);font-size:.7rem;padding:.2rem 0">No grades recorded for this group.</div>`;
 
   // Effort breakdown with bar chart
   const efLabels=['Excellent','Good','Developing','Low'];
@@ -8109,6 +8112,8 @@ function rSV(){
   const efTotal=efCounts.reduce((a,b)=>a+b,0);
   const maxEfCount=Math.max(...efCounts,1);
   const efRows=efLabels.map((label,i)=>{const c=efCounts[i];const p=efTotal?(c/efTotal*100).toFixed(0):0;const barW=Math.round(c/maxEfCount*100);return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${efColors[i]}"></span><span style="color:var(--mu);min-width:3.5rem">${label}</span><div style="flex:1;height:14px;background:var(--sf2);border-radius:3px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${efColors[i]}44;border-left:2px solid ${efColors[i]}"></div></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right">${c}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem">(${p}%)</span></div>`}).join('');
+  let efRowsHtml=efRows;
+  {const _efUngraded=Math.max(0,lrSubj.length-efTotal);if(_efUngraded)efRowsHtml+=`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:var(--bd)"></span><span style="color:var(--mu);min-width:3.5rem">No grade</span><div style="flex:1;height:14px"></div><span style="font-family:'IBM Plex Mono',monospace;min-width:1.5rem;text-align:right;color:var(--mu)">${_efUngraded}</span><span style="color:var(--mu);font-size:.6rem;min-width:2.5rem"></span></div>`;}
 
   // Set flags in header bar
   document.getElementById('sv-flags').innerHTML=`${flagsStr(sendN,ehcpN,fsmN,lrSubj)} · <span style="color:var(--tx);font-weight:500">${lrSubj.length}</span> pupils · ${genderStr(lrSubj)}`;
@@ -8140,7 +8145,7 @@ function rSV(){
       ${sgBlockEf}
     </div>
     <div class="crd"><div class="ct2">Grade Breakdown <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${gradeBreakdownLabel})</span></div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${gradeRows}</div></div>
-    <div class="crd"><div class="ct2">Effort Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${efRows}</div></div>`;
+    <div class="crd"><div class="ct2">Effort Breakdown</div><div style="display:flex;flex-direction:column;gap:.25rem;margin-top:.25rem">${efRowsHtml}</div></div>`;
 
   dc('svab');dc('svef');dc('svst');dc('svefst');
   document.getElementById('sv-charts-top').innerHTML=`<div class="chc"><div class="cht">${sub} Ability Over Time (Y${yearGroup}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div><div class="chw"><canvas id="c-svab"></canvas></div></div><div class="chc"><div class="cht">${sub} Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div><div class="chw"><canvas id="c-svef"></canvas></div></div>`;
@@ -8536,20 +8541,22 @@ function rCL(){
   renderNet();
 
   const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
-  const _oteVals=lr.map(r=>r[3][sub]?r[3][sub][2]:null).filter(v=>v!=null&&v!=='');
-  const _oteLvls=_builtinAbilityLevels(new Set(_oteVals.map(v=>String(v).trim())));
-  // Prefer separate OTE target (cell[2]); else bucket the attainment / "On track for" grade (cell[0]).
-  const _useOTE=_oteLvls.length>0&&_oteVals.length>0;
+  // Bucket the native on-track grade (cell[0], e.g. GCSE 9-1); fall back to the reference band only
+  // for non-numeric (KS3 descriptor) scales.
+  const _natVals=lr.map(r=>r[3][sub]?r[3][sub][0]:null).filter(v=>v!=null&&v!=='');
+  const _natLvls=_builtinAbilityLevels(new Set(_natVals.map(v=>String(v).trim())));
   let gradeRows,gradeBreakdownLabel;
-  if(_useOTE){
-    gradeBreakdownLabel='on-track estimate';
-    const _oteTot=_oteVals.length;
-    gradeRows=_oteLvls.map(l=>{const c=_oteVals.filter(v=>String(v).trim()===l.label).length;const p=_oteTot?(c/_oteTot*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:4.5rem">${l.label}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join('');
-  }else{
+  if(_natLvls.length&&_natVals.length){
     gradeBreakdownLabel='on-track grade';
+    const _gTot=_natVals.length;
+    gradeRows=_natLvls.map(l=>{const c=_natVals.filter(v=>String(v).trim()===l.label).length;const p=_gTot?(c/_gTot*100).toFixed(0):0;return c?`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${l.colour}"></span><span style="color:var(--mu);min-width:4.5rem">${l.label}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`:''}).join('');
+  }else{
+    gradeBreakdownLabel='ability band';
     const _bandTot=sc2r.length;
-    gradeRows=_bandTot?ABILITY.levels.map((lv,i)=>{const c=sc2r.filter(rk=>rk===i+1).length;if(!c)return'';const p=(c/_bandTot*100).toFixed(0);const col=lv.colour||GC[lv.label]||PAL.slate;return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${col}"></span><span style="color:var(--mu);min-width:4.5rem">${lv.label}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`}).join(''):`<div style="color:var(--mu);font-size:.7rem">No grades recorded.</div>`;
+    gradeRows=_bandTot?ABILITY.levels.map((lv,i)=>{const c=sc2r.filter(rk=>rk===i+1).length;if(!c)return'';const p=(c/_bandTot*100).toFixed(0);const col=lv.colour||GC[lv.label]||PAL.slate;return`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:${col}"></span><span style="color:var(--mu);min-width:4.5rem">${lv.label}</span><span style="font-family:'IBM Plex Mono',monospace">${c}</span><span style="color:var(--mu);font-size:.65rem">(${p}%)</span></div>`}).join(''):'';
   }
+  {const _ungraded=Math.max(0,classPups.size-_natVals.length);if(_ungraded)gradeRows+=`<div style="display:flex;align-items:center;gap:.3rem;font-size:.75rem"><span style="width:8px;height:8px;border-radius:50%;background:var(--bd)"></span><span style="color:var(--mu);min-width:4.5rem">No grade</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--mu)">${_ungraded}</span></div>`;}
+  if(!gradeRows)gradeRows=`<div style="color:var(--mu);font-size:.7rem">No grades recorded.</div>`;
 
   if(hasGradesCL){
   document.getElementById('cl-cards').innerHTML=`
