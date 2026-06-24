@@ -1192,6 +1192,12 @@ function _applyBranding(b){
     if(b&&b.logo){img.src=b.logo;img.style.display='';}
     else{img.removeAttribute('src');img.style.display='none';}
   }
+  // browser-tab favicon follows the school's uploaded logo (same source as the header logo)
+  let _icon=document.querySelector('link[rel="icon"]');
+  if(b&&b.logo){
+    if(!_icon){_icon=document.createElement('link');_icon.rel='icon';document.head.appendChild(_icon);}
+    _icon.href=b.logo;
+  }else if(_icon){_icon.parentNode.removeChild(_icon);}
 }
 window._applyBranding=_applyBranding;
 // Built-in national DISPLAY scales (GCSE / A-Level / numeric effort), detected from the grades
