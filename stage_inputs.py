@@ -124,7 +124,19 @@ def _att_norm(df):
 
 
 def _beh_norm(df, historic):
-    d = df.rename(columns={'Pupil name': 'Name', 'Teacher Name': 'Teacher'})
+    d = df.copy()
+    # Rename source->target ONLY when the target isn't already present; if a file carries both
+    # (e.g. 'Name' AND 'Pupil name'), renaming would create two identically-named columns, which
+    # makes the later pd.concat fail with "Reindexing only valid with uniquely valued Index objects".
+    # In that case keep the existing target column and drop the redundant source.
+    for src, tgt in (('Pupil name', 'Name'), ('Teacher Name', 'Teacher')):
+        if src in d.columns:
+            if tgt in d.columns:
+                d = d.drop(columns=[src])
+            else:
+                d = d.rename(columns={src: tgt})
+    # Belt-and-braces: collapse any remaining duplicate labels (keep first) so columns stay unique.
+    d = d.loc[:, ~d.columns.duplicated()]
     if 'Teacher' not in d.columns:
         d['Teacher'] = ''
     for c in BEH_COLS:
