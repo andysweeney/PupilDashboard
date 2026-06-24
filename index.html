@@ -6832,6 +6832,10 @@ function rSchools(){
     +'</div>'
     +'<h3 style="margin:1.4rem 0 .4rem;font-size:.95rem">Existing schools</h3>'
     +'<div id="ns-list" style="font-size:.82rem;color:var(--mu)">Loading\u2026</div>'
+    +'<h3 style="margin:1.6rem 0 .4rem;font-size:.95rem">Manage administrators</h3>'
+    +'<div style="font-size:.78rem;color:var(--mu);margin-bottom:.5rem">Add or remove admins for a school. Removing admin rights leaves the person as a normal user; only you can reset an admin\u2019s password.</div>'
+    +'<select id="ma-school" onchange="window._muLoadAdmins()" style="'+INP+';max-width:340px;margin-bottom:.6rem"><option value="">Choose a school\u2026</option></select>'
+    +'<div id="ma-out"></div>'
     +'</div>';
   _nsLoadSchools();
 }
@@ -6876,7 +6880,7 @@ async function _nsLoadSchools(){
       { headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken() } });
     _NS_SCHOOLS = r.ok ? (await r.json()) : [];
   }catch(e){ _NS_SCHOOLS=[]; }
-  _NS_DEL=null; _nsRenderList();
+  _NS_DEL=null; _nsRenderList(); try{ window._muFillSchoolSelect&&window._muFillSchoolSelect(); }catch(e){}
 }
 function _nsRenderList(){
   const el=document.getElementById('ns-list'); if(!el) return;
@@ -6900,6 +6904,104 @@ function _nsRenderList(){
   }).join('');
 }
 window._nsAskDelete=function(slug){ _NS_DEL=slug; _nsRenderList(); };
+// ── User management (calls the manage-users Edge Function; all authz enforced server-side) ──
+let _MU_ADMINS=[], _MU_USERS=[];
+async function _muCall(payload){
+  const r=await fetch(SB_URL+'/functions/v1/manage-users',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken(),'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok||!j.ok){throw new Error(j.error||('HTTP '+r.status));}
+  return j;
+}
+const _MU_BTN='font-family:inherit;font-size:.72rem;border:1px solid var(--bd);border-radius:6px;padding:.25rem .6rem;background:var(--sf2);color:var(--tx);cursor:pointer';
+const _MU_RED='font-family:inherit;font-size:.72rem;border:1px solid var(--bd);border-radius:6px;padding:.25rem .6rem;background:var(--sf2);color:#c0392b;cursor:pointer';
+const _MU_INP='font-family:inherit;font-size:.8rem;padding:.4rem .55rem;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);color:var(--tx)';
+const _MU_GO='font-family:inherit;font-size:.78rem;font-weight:600;padding:.4rem .8rem;border-radius:6px;border:1px solid var(--bd);background:var(--tx);color:var(--bg,#fff);cursor:pointer';
+
+// ----- Schools tab: manage a school's ADMINS (platform owner) -----
+window._muFillSchoolSelect=function(){
+  const sel=document.getElementById('ma-school'); if(!sel) return; const cur=sel.value;
+  sel.innerHTML='<option value="">Choose a school\u2026</option>'+(_NS_SCHOOLS||[]).map(function(s){return '<option value="'+_upEsc(s.school_id)+'">'+_upEsc(s.display_name||s.school_id)+'</option>';}).join('');
+  if(cur) sel.value=cur;
+};
+window._muLoadAdmins=async function(){
+  const sel=document.getElementById('ma-school'), out=document.getElementById('ma-out'); if(!sel||!out) return;
+  const school=sel.value; if(!school){ out.innerHTML=''; return; }
+  out.innerHTML='<div style="color:var(--mu);font-size:.8rem">Loading\u2026</div>';
+  try{ const j=await _muCall({action:'list',school_id:school}); _MU_ADMINS=(j.users||[]).filter(function(u){return u.role==='admin';}); _muRenderAdmins(school); }
+  catch(e){ out.innerHTML='<div style="color:#c0392b;font-size:.8rem">'+_upEsc(e.message)+'</div>'; }
+};
+function _muRenderAdmins(school){
+  const out=document.getElementById('ma-out'); if(!out) return;
+  const rows=_MU_ADMINS.length? _MU_ADMINS.map(function(a){
+    return '<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem .2rem;border-bottom:1px solid var(--bd)"><div style="flex:1">'+_upEsc(a.email)+'</div>'
+      +'<button onclick="window._muResetPw(\''+a.id+'\')" style="'+_MU_BTN+'">Reset password</button>'
+      +'<button onclick="window._muRemoveAdmin(\''+a.id+'\')" style="'+_MU_RED+'">Remove admin</button></div>';
+  }).join(''):'<div style="color:var(--mu);font-size:.78rem;padding:.3rem 0">No admins.</div>';
+  out.innerHTML=rows
+    +'<div style="margin-top:.8rem;border-top:1px solid var(--bd);padding-top:.7rem"><div style="font-weight:600;font-size:.78rem;margin-bottom:.4rem">Add an administrator</div>'
+    +'<div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center"><input id="ma-email" type="email" placeholder="head@school.uk" style="'+_MU_INP+'"><input id="ma-pw" type="text" placeholder="password (min 8)" style="'+_MU_INP+'"><button onclick="window._muAddAdmin(\''+school+'\')" style="'+_MU_GO+'">Add admin</button></div>'
+    +'<div id="ma-msg" style="font-size:.72rem;color:var(--mu);margin-top:.4rem"></div></div>';
+}
+window._muAddAdmin=async function(school){
+  const e=document.getElementById('ma-email'), p=document.getElementById('ma-pw'), m=document.getElementById('ma-msg');
+  const email=((e&&e.value)||'').trim(), pw=(p&&p.value)||'';
+  const set=function(t,c){ if(m){ m.textContent=t; m.style.color=c||'var(--mu)'; } };
+  if(!email||pw.length<8){ set('Enter an email and a password of at least 8 characters.','#c0392b'); return; }
+  set('Adding\u2026');
+  try{ await _muCall({action:'create',school_id:school,email:email,password:pw,role:'admin'}); _muLoadAdmins(); }
+  catch(err){ set(err.message,'#c0392b'); }
+};
+window._muRemoveAdmin=async function(id){
+  const a=_MU_ADMINS.find(function(x){return x.id===id;})||{};
+  if(!confirm('Remove admin rights from '+(a.email||'this user')+'? They will remain a normal user of the school.')) return;
+  try{ await _muCall({action:'remove-admin',user_id:id}); _muLoadAdmins(); }
+  catch(err){ alert(err.message); }
+};
+
+// ----- Admin tab: manage this school's REGULAR USERS (school admin) -----
+window._muLoadUsers=async function(){
+  const out=document.getElementById('mu-users-out'); if(!out) return;
+  out.innerHTML='<div style="color:var(--mu);font-size:.8rem">Loading\u2026</div>';
+  try{ const j=await _muCall({action:'list'}); _MU_USERS=j.users||[]; _muRenderUsers(); }
+  catch(e){ out.innerHTML='<div style="color:#c0392b;font-size:.8rem">'+_upEsc(e.message)+'</div>'; }
+};
+function _muRenderUsers(){
+  const out=document.getElementById('mu-users-out'); if(!out) return;
+  if(!_MU_USERS.length){ out.innerHTML='<div style="color:var(--mu);font-size:.78rem">No users yet.</div>'; return; }
+  out.innerHTML=_MU_USERS.map(function(u){
+    const isAdmin=u.role==='admin';
+    return '<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem .2rem;border-bottom:1px solid var(--bd)"><div style="flex:1">'+_upEsc(u.email)+(isAdmin?' <span style="color:var(--ac);font-size:.64rem;font-weight:600">\u00b7 admin</span>':'')+'</div>'
+      +(isAdmin
+        ? '<span style="color:var(--mu);font-size:.66rem">managed by company admin</span>'
+        : '<button onclick="window._muResetPw(\''+u.id+'\')" style="'+_MU_BTN+'">Reset password</button><button onclick="window._muDeleteUser(\''+u.id+'\')" style="'+_MU_RED+'">Remove</button>')
+      +'</div>';
+  }).join('');
+}
+window._muAddUser=async function(){
+  const e=document.getElementById('mu-new-email'), p=document.getElementById('mu-new-pw'), m=document.getElementById('mu-new-msg');
+  const email=((e&&e.value)||'').trim(), pw=(p&&p.value)||'';
+  const set=function(t,c){ if(m){ m.textContent=t; m.style.color=c||'var(--mu)'; } };
+  if(!email||pw.length<8){ set('Enter an email and a password of at least 8 characters.','#c0392b'); return; }
+  set('Adding\u2026');
+  try{ await _muCall({action:'create',email:email,password:pw,role:'user'}); if(e)e.value=''; if(p)p.value=''; set('Added.','#1a7f4b'); _muLoadUsers(); }
+  catch(err){ set(err.message,'#c0392b'); }
+};
+window._muDeleteUser=async function(id){
+  const u=_MU_USERS.find(function(x){return x.id===id;})||{};
+  if(!confirm('Remove '+(u.email||'this user')+'? This permanently deletes their login.')) return;
+  try{ await _muCall({action:'delete-user',user_id:id}); _muLoadUsers(); }
+  catch(err){ alert(err.message); }
+};
+// Shared: reset a password (works for both panels; server decides if allowed).
+window._muResetPw=async function(id){
+  const rec=(_MU_ADMINS.concat(_MU_USERS)).find(function(x){return x.id===id;})||{};
+  const pw=prompt('New password for '+(rec.email||'this user')+' (min 8 characters):');
+  if(pw==null) return;
+  if(pw.length<8){ alert('Password must be at least 8 characters.'); return; }
+  try{ await _muCall({action:'set-password',user_id:id,password:pw}); alert('Password updated.'); }
+  catch(err){ alert(err.message); }
+};
+
 window._nsDelCancel=function(){ _NS_DEL=null; _nsRenderList(); };
 window._nsDelCheck=function(){ const i=document.getElementById('ns-del-in'), b=document.getElementById('ns-del-go'); if(i&&b){ const ok=i.value.trim()===_NS_DEL; b.disabled=!ok; b.style.opacity=ok?'1':'.5'; } };
 window._nsDelConfirm=async function(){
@@ -11336,13 +11438,22 @@ function rPeer(){
         +`<div><div style="font-size:.7rem;font-weight:600;margin-bottom:.4rem">School logo <span style="font-weight:400;color:var(--mu)">— PNG or SVG, under 50&nbsp;KB</span></div>`
           +`<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap"><div style="width:124px;height:38px;border:1px dashed var(--bd);border-radius:6px;display:flex;align-items:center;justify-content:center;background:var(--sf2);overflow:hidden">${_blogo?`<img src="${_blogo}" style="max-height:34px;max-width:118px">`:'<span style="font-size:.6rem;color:var(--mu)">No logo</span>'}</div><input type="file" id="brand-logo-file" accept="image/png,image/jpeg,image/svg+xml,image/webp" onchange="window._brandingPickLogo(this)" style="font-size:.7rem;max-width:210px">`+(_blogo?`<button onclick="window._brandingRemoveLogo()" style="${_bBtn2}">Remove</button>`:'')+`</div><div id="brand-logo-msg" style="font-size:.65rem;color:var(--mu);margin-top:.35rem;min-height:.9rem"></div></div>`
       +`</div></div>`;
+    // ── Users & access panel (school-admin self-serve: manage regular users) ──
+    const usersHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Users &amp; access</div>`
+      +`<div style="font-size:.72rem;color:var(--mu);margin:0 .1rem .8rem">Add staff who can view your school\u2019s dashboard. They cannot see or change this Admin panel. Admin accounts are managed by the company administrator.</div>`
+      +`<div id="mu-users-out" style="font-size:.8rem;color:var(--mu);padding:0 .1rem">Loading\u2026</div>`
+      +`<div style="margin:.9rem .1rem 0;border-top:1px solid var(--bd);padding-top:.8rem"><div style="font-weight:600;font-size:.76rem;margin-bottom:.4rem">Add a user</div>`
+      +`<div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center"><input id="mu-new-email" type="email" placeholder="teacher@school.uk" style="${_MU_INP}"><input id="mu-new-pw" type="text" placeholder="password (min 8)" style="${_MU_INP}"><button onclick="window._muAddUser()" style="${_MU_GO}">Add user</button></div>`
+      +`<div id="mu-new-msg" style="font-size:.7rem;color:var(--mu);margin-top:.4rem"></div></div></div>`;
     out.innerHTML=summaryHtml
       +_accSec('brand','Branding — logo &amp; header colour',brandHtml)
+      +_accSec('users','Users &amp; access',usersHtml)
       +_accSec('thr','Concern thresholds &amp; weighting',_noTitle(threshHtml,'Concern Thresholds &amp; Weightings'))
       +_accSec('sub','Subject mapping',_noTitle(subjHtml,'Subjects'))
       +_accSec('ats','Attendance &amp; SEN codes',attHtml+senHtml)
       +_accSec('inc','Incident codes',_noTitle(incHtml,'Incident Codes (Behaviour Categories)'))
       +_accSec('grd','Grading scale &amp; mapping',scalesHtml);
+    try{ if(IS_ADMIN) window._muLoadUsers&&window._muLoadUsers(); }catch(e){}
   }
 
   // Admin change handlers
