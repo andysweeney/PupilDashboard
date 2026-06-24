@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Pupil Dashboard — Intake Architecture</title>
-  <link rel="icon" href="favicon.png">
+<link rel="icon" href="favicon.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
@@ -1193,12 +1193,6 @@ function _applyBranding(b){
     if(b&&b.logo){img.src=b.logo;img.style.display='';}
     else{img.removeAttribute('src');img.style.display='none';}
   }
-  // browser-tab favicon follows the school's uploaded logo (same source as the header logo)
-  let _icon=document.querySelector('link[rel="icon"]');
-  if(b&&b.logo){
-    if(!_icon){_icon=document.createElement('link');_icon.rel='icon';document.head.appendChild(_icon);}
-    _icon.href=b.logo;
-  }else if(_icon){_icon.parentNode.removeChild(_icon);}
 }
 window._applyBranding=_applyBranding;
 // Built-in national DISPLAY scales (GCSE / A-Level / numeric effort), detected from the grades
