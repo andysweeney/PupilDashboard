@@ -1654,6 +1654,14 @@ DD.config.att_codes=_DKcfg.att_codes;
 DD.config.sen_codes=_DKcfg.sen_codes;
 DD.config.incident_codes=_DKcfg.incident_codes;
 DD.config.subject_map=_DKcfg.subject_map;
+// One 'continues from' value, a list of them, or nothing -> always a clean array.
+// Kept outside the engine so the Admin panel reads the config the same way it does.
+function _cfList(v){
+  if(v==null) return [];
+  if(Array.isArray(v)) return v.map(x=>String(x==null?'':x).trim()).filter(Boolean);
+  const s=String(v).trim();
+  return s?[s]:[];
+}
 // Subject resolution engine — raw->canonical (unify), canonical->display (rename), continuesFrom (forks).
 // Mirror of subject_engine.js. Reads ONLY config (sidecar + Admin edits); data stays raw.
 function _buildSUBJ(cfg){
@@ -1661,12 +1669,45 @@ function _buildSUBJ(cfg){
   const _n=s=>s==null?null:String(s).trim();
   const canonicalOf=raw=>{const s=_n(raw);if(s==null)return null;return aliases[s]!=null?aliases[s]:s;};
   const displayOf=id=>{const m=canon[id];return (m&&m.display)||id;};
-  const parentOf=id=>(canon[id]&&canon[id].continuesFrom)||null;
-  const childrenOf=id=>Object.keys(canon).filter(c=>canon[c].continuesFrom===id);
+  // continuesFrom is a LIST. A single value cannot express a split (English becoming
+  // English Language and English Literature) or a merge (both becoming English again
+  // in Y12). Older configs stored one string, so reading tolerates both.
+  const parentsOf=id=>_cfList(canon[id]&&canon[id].continuesFrom);
+  const parentOf=id=>{const p=parentsOf(id);return p.length?p[0]:null;};   // legacy callers
+  const childrenOf=id=>Object.keys(canon).filter(c=>parentsOf(c).indexOf(id)>=0);
   const isFork=id=>childrenOf(id).length>1;
-  const family=id=>{let root=id;const g=new Set();while(parentOf(root)&&!g.has(root)){g.add(root);root=parentOf(root);}const out=[root],st=[root];while(st.length){const n=st.pop();for(const c of childrenOf(n))(out.push(c),st.push(c));}return out;};
-  const children=Object.keys(canon).filter(id=>canon[id]&&canon[id].continuesFrom!=null);
-  return {canonicalOf,displayOf,parentOf,childrenOf,isFork,family,children,hasLineage:children.length>0,_cfg:cfg};
+  // A thread is a CONNECTED COMPONENT, not a chain up to a root. With several parents
+  // there is no single root to walk to, and 'English -> English Language -> English'
+  // is a legitimate cycle that a chain walker would loop on forever. Breadth-first in
+  // both directions with a seen set handles both.
+  const family=id=>{
+    const seen=new Set([id]),q=[id],out=[id];
+    while(q.length){
+      const n=q.pop();
+      for(const p of parentsOf(n)) if(!seen.has(p)){seen.add(p);out.push(p);q.push(p);}
+      for(const c of childrenOf(n)) if(!seen.has(c)){seen.add(c);out.push(c);q.push(c);}
+    }
+    return out;
+  };
+  // Nearest ancestor carrying a value, closest first. Returns null on a cycle with
+  // nothing to find rather than hanging.
+  const nearestAncestorWith = (id,has) => {
+    const seen=new Set([id]); let level=parentsOf(id).slice();
+    while(level.length){
+      const next=[];
+      for(const a of level){
+        if(seen.has(a)) continue;
+        seen.add(a);
+        if(has(a)) return a;
+        for(const g of parentsOf(a)) if(!seen.has(g)) next.push(g);
+      }
+      level=next;
+    }
+    return null;
+  };
+  const children=Object.keys(canon).filter(id=>parentsOf(id).length>0);
+  return {canonicalOf,displayOf,parentOf,parentsOf,childrenOf,isFork,family,
+          nearestAncestorWith,children,hasLineage:children.length>0,_cfg:cfg};
 }
 let SUBJ=_buildSUBJ(DD.config.subject_map);
 {/* dsm:oncall-reclass:start */const _ICm=DD.config.incident_codes;let _ocReclass=0;(DD.sanctionDetails||[]).forEach((d,i)=>{if(d&&_ICm[d[0]]){d[1]=_ICm[d[0]];if(incCatKey(d[1])==='oc'&&DD.sanctions&&DD.sanctions[i]&&DD.sanctions[i][1]===0){DD.sanctions[i][1]=1;_ocReclass++;}}});DD._ocReclass=_ocReclass;try{if(_ocReclass)console.info('[dsm] reclassified '+_ocReclass+' On-Call-categorised code(s) to On-Call type');}catch(e){}/* dsm:oncall-reclass:end */}
@@ -1860,7 +1901,11 @@ function clAt(en,s,p){const d=pDate(p);return en.filter(r=>r.t==='cls'&&r.s===s)
 function sDrop(en,s){const r=en.find(e=>e.t==='subj'&&e.s===s);return r?r.u:null}
 function getProg(ink,x){const a=PRG[inkKey(ink)]||{};const o={};for(const[p,rs]of Object.entries(a)){const r=rs.find(r=>r[0]===x);if(r)o[p]={x:r[0],pid:r[1],tg:r[2],sc:r[3],send:r[4],ehcp:r[5],fsm:r[6]}}
   if(SUBJ&&SUBJ.hasLineage){for(const p in o){const src=o[p].sc;if(!src)continue;let cl=null;
-    for(const ch of SUBJ.children){if(src[ch]==null){let an=SUBJ.parentOf(ch);while(an!=null&&src[an]==null)an=SUBJ.parentOf(an);if(an!=null&&src[an]!=null){if(!cl)cl=Object.assign({},src);cl[ch]=src[an];}}}
+    for(const ch of SUBJ.children){
+      if(src[ch]!=null) continue;
+      const an=SUBJ.nearestAncestorWith(ch,a=>src[a]!=null);   // breadth-first, cycle-safe
+      if(an!=null){if(!cl)cl=Object.assign({},src);cl[ch]=src[an];}
+    }
     if(cl)o[p].sc=cl;}}
   return o}
 function allR(ink,p){return(PRG[inkKey(ink)]||{})[p]||[]}
@@ -11460,18 +11505,25 @@ function rPeer(){
     unmappedSubj.forEach(s=>{subjHtml+=_subjRow(s,true);});
     foundSubjects.filter(s=>!unmappedSubj.includes(s)).sort((a,b)=>String(a).localeCompare(String(b))).forEach(s=>{subjHtml+=_subjRow(s,false);});
     subjHtml+=`</tbody></table></div>`;
-    subjHtml+=`<div style="font-size:.74rem;font-weight:600;color:var(--tx);margin:.9rem 0 .4rem">Display name &amp; continuation</div><div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th>Shown as</th><th>Continues from</th></tr></thead><tbody>`;
+    subjHtml+=`<div style="font-size:.74rem;font-weight:600;color:var(--tx);margin:.9rem 0 .4rem">Display name &amp; continuation</div>`;
+    subjHtml+=`<div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.5">A subject can continue from more than one — use this where two strands merge, or where one splits into several. &ldquo;Continues to&rdquo; is worked out for you and cannot be edited directly.</div>`;
+    subjHtml+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Subject</th><th>Shown as</th><th>Continues from</th><th>Continues to</th></tr></thead><tbody>`;
     canonUniverse.forEach(id=>{
       const disp=(subjCanon[id]&&subjCanon[id].display)||'';
-      const par=(subjCanon[id]&&subjCanon[id].continuesFrom)||'';
-      const childCount=canonUniverse.filter(c=>(subjCanon[c]&&subjCanon[c].continuesFrom)===id).length;
+      const parList=_cfList(subjCanon[id]&&subjCanon[id].continuesFrom);
+      const kids=canonUniverse.filter(c=>_cfList(subjCanon[c]&&subjCanon[c].continuesFrom).indexOf(id)>=0);
+      const childCount=kids.length;
       const forkBadge=childCount>1?` <span style="color:var(--violet);font-weight:600;font-size:.62rem">FORK</span>`:'';
       // Removable = a created name that nothing uses: not a raw subject from the data, nothing mapped
       // into it, and not a fork parent. Lets a typo'd or abandoned "Add subject" entry be cleared.
       const removable=(subjCanon[id]!=null)&&!foundSubjects.includes(id)&&!Object.values(subjAliases).includes(id)&&childCount===0;
       const rmBtn=removable?` <button data-id="${_sesc(id)}" onclick="window._adminSetSubject('remove',this.getAttribute('data-id'),'')" title="Remove this unused subject" style="background:transparent;border:none;color:var(--mu);cursor:pointer;font-size:.78rem;padding:0 .15rem;line-height:1">&#10005;</button>`:'';
-      const parOpts=['<option value="">&mdash; none &mdash;</option>'].concat(canonUniverse.filter(c=>c!==id).map(c=>`<option value="${_sesc(c)}"${c===par?' selected':''}>${_sesc(c)}</option>`)).join('');
-      subjHtml+=`<tr><td style="font-weight:500;font-size:.72rem">${_sesc(id)}${forkBadge}${rmBtn}</td><td><input value="${_sesc(disp)}" placeholder="${_sesc(id)}" data-id="${_sesc(id)}" onchange="window._adminSetSubject('display',this.getAttribute('data-id'),this.value)" style="${_sSel};width:140px"></td><td><select data-id="${_sesc(id)}" onchange="window._adminSetSubject('parent',this.getAttribute('data-id'),this.value)" style="${_sSel}">${parOpts}</select></td></tr>`;
+      const _chip='display:inline-flex;align-items:center;gap:.25rem;padding:.1rem .3rem .1rem .4rem;margin:0 .25rem .2rem 0;border:1px solid var(--bd);border-radius:4px;background:var(--sf2);font-size:.68rem';
+      const chips=parList.map(pn=>`<span style="${_chip}">${_sesc(pn)}<button data-id="${_sesc(id)}" data-par="${_sesc(pn)}" title="Remove" onclick="window._adminSetSubject('parentRemove',this.getAttribute('data-id'),this.getAttribute('data-par'))" style="background:transparent;border:none;color:var(--mu);cursor:pointer;font-size:.66rem;padding:0;line-height:1">&#10005;</button></span>`).join('');
+      const addable=canonUniverse.filter(c=>c!==id&&parList.indexOf(c)<0);
+      const addSel=addable.length?`<select data-id="${_sesc(id)}" onchange="window._adminSetSubject('parentAdd',this.getAttribute('data-id'),this.value);this.selectedIndex=0" style="${_sSel}"><option value="">${parList.length?'+ add another':'&mdash; none &mdash;'}</option>${addable.map(c=>`<option value="${_sesc(c)}">${_sesc(c)}</option>`).join('')}</select>`:'';
+      const kidTxt=kids.length?kids.map(k=>`<span style="${_chip};background:transparent;color:var(--mu)">${_sesc(k)}</span>`).join(''):'<span style="color:var(--mu);font-size:.68rem">&mdash;</span>';
+      subjHtml+=`<tr><td style="font-weight:500;font-size:.72rem">${_sesc(id)}${forkBadge}${rmBtn}</td><td><input value="${_sesc(disp)}" placeholder="${_sesc(id)}" data-id="${_sesc(id)}" onchange="window._adminSetSubject('display',this.getAttribute('data-id'),this.value)" style="${_sSel};width:140px"></td><td>${chips}${addSel}</td><td>${kidTxt}</td></tr>`;
     });
     subjHtml+=`</tbody></table></div>`;
     subjHtml+=`<div style="display:flex;align-items:center;gap:.8rem;margin-top:.6rem"><span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--green);font-weight:600">✓ Saved automatically</span><span style="font-size:.65rem;color:var(--mu)">Subject choices save instantly and never change your data — only how it is read.</span></div></div>`;
@@ -11888,7 +11940,8 @@ function rPeer(){
     DD.config.subject_map=DD.config.subject_map||{aliases:{},canonical:{}};
     const A=DD.config.subject_map.aliases=DD.config.subject_map.aliases||{};
     const C=DD.config.subject_map.canonical=DD.config.subject_map.canonical||{};
-    const _prune=id=>{if(C[id]&&!C[id].created&&!C[id].display&&!C[id].continuesFrom&&!Object.values(A).includes(id))delete C[id];};
+    const _prune=id=>{if(C[id]&&!C[id].created&&!C[id].display&&!_cfList(C[id].continuesFrom).length&&!Object.values(A).includes(id))delete C[id];};
+    const _setPar=(id,list)=>{C[id]=C[id]||{};if(list.length)C[id].continuesFrom=list;else delete C[id].continuesFrom;_prune(id);};
     if(kind==='alias'){
       if(!value||value===key){const had=A[key];delete A[key];if(had)_prune(had);}
       else{A[key]=value;C[value]=C[value]||{};}
@@ -11897,9 +11950,18 @@ function rPeer(){
       if(value)C[key].display=value;else delete C[key].display;
       _prune(key);
     }else if(kind==='parent'){
-      C[key]=C[key]||{};
-      if(value)C[key].continuesFrom=value;else delete C[key].continuesFrom;
-      _prune(key);
+      _setPar(key,value?[value]:[]);                 // legacy single-value callers
+    }else if(kind==='parentAdd'){
+      // A subject may continue from several. Cycles are permitted on purpose —
+      // 'English -> English Language -> English' is a real curriculum shape.
+      if(value&&value!==key){
+        const l=_cfList(C[key]&&C[key].continuesFrom);
+        if(l.indexOf(value)<0)l.push(value);
+        _setPar(key,l);
+        C[value]=C[value]||{};                       // keep the parent in the universe
+      }
+    }else if(kind==='parentRemove'){
+      _setPar(key,_cfList(C[key]&&C[key].continuesFrom).filter(p=>p!==value));
     }else if(kind==='create'){
       const nm=String(value==null?'':value).trim();
       if(nm){C[nm]=C[nm]||{};C[nm].created=true;}   // explicit "Add subject" — sticky until removed via ✕
