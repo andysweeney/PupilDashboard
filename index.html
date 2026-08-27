@@ -130,6 +130,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <header>
 <img id="brand-logo" alt="School logo" style="display:none;max-height:34px;max-width:150px;margin-right:.1rem;vertical-align:middle;border-radius:4px">
 <div class="logo">Pupil Progress <span>Dashboard</span></div>
+<select id="hdr-school" title="Viewing which school" style="display:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.28rem .5rem;margin-right:.5rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx);max-width:210px" onchange="window._switchSchool(this.value)"></select>
 <div class="tabs">
 <button id="tab-admin" class="tb" style="display:none" onclick="sw('admin',this)">🔧 Admin</button>
 <button id="tab-upload" class="tb" style="display:none" onclick="sw('upload',this)">⬆️ Upload</button>
@@ -1073,10 +1074,42 @@ function authUser(){return (_SESSION&&_SESSION.user)||null;}
 // (stamped server-side, not user-editable). Null on a single-school site, so data
 // loads from the bucket root and nothing changes. Subdomain-based resolution is added
 // later (Path B), scoped to the real product domain, when per-school URLs are switched on.
+// Active-school override — platform owners only.
+// The permission check lives HERE rather than in the dropdown that sets it, so a
+// stored value can never take effect for anyone who is not an owner: clearing the
+// dropdown from the page, or writing the key by hand, changes nothing.
+// Switching reloads the page rather than re-keying live caches. _cfgKey(), _dsmNs(),
+// _SBCACHE, DD, DSM, the scales and the term map are all keyed or built from
+// schoolId(); rebuilding them from scratch is the only way to be sure none of the
+// previous school's state survives the move.
+function _activeSchoolLsKey(){ return 'pupilDashboard.activeSchool.v1'; }
+function activeSchoolOverride(){
+  try{
+    if(!isPlatformOwner()) return null;
+    var v=localStorage.getItem(_activeSchoolLsKey());
+    return v||null;
+  }catch(e){ return null; }
+}
 function schoolId(){
+  var ov=activeSchoolOverride(); if(ov) return ov;
   try{ var u=authUser(); var t=u&&u.app_metadata&&u.app_metadata.school_id; if(t) return t; }catch(e){}
   return null;
 }
+// Set the override, record the move, reload into the other school's data.
+window._switchSchool=async function(sid){
+  if(!isPlatformOwner()) return;
+  sid=String(sid||'');
+  var cur=activeSchoolOverride()||'';
+  if(sid===cur) return;
+  try{
+    if(sid) localStorage.setItem(_activeSchoolLsKey(),sid);
+    else localStorage.removeItem(_activeSchoolLsKey());
+  }catch(e){}
+  // Logged AFTER the override moves, so the row lands in the log of the school
+  // being entered — that school's admins can see the visit, which is the point.
+  try{ await auditLog('school_switched',null,null,{from:cur||'(own account)',to:sid||'(own account)'}); }catch(e){}
+  location.reload();
+};
 // Platform owner = the operator who can create new schools. Set in app_metadata (server-side,
 // not user-writable), so a regular school admin can never gain this.
 function isPlatformOwner(){
@@ -1190,7 +1223,7 @@ async function auditLog(action,subjectType,subjectId,context){
         p_subject_type:subjectType||null,
         p_subject_id:(subjectId==null?null:String(subjectId)),
         p_context:context||{},
-        p_school_id:(window._ACTIVE_SCHOOL||null)  // job 2 hook: set when a platform owner switches school
+        p_school_id:activeSchoolOverride()  // the school being viewed, not necessarily the viewer's own
       })
     });
     if(!r.ok) console.warn('[audit] not recorded:',action,r.status);
@@ -1512,6 +1545,34 @@ async function checkAdmin(){
   try{const s=document.getElementById('tab-schools'); if(s) s.style.display=isPlatformOwner()?'':'none';}catch(e){}
 }
 await checkAdmin();
+try{ _hdrInitSchoolSwitcher(); }catch(e){}
+// Header school switcher (platform owner only). Populated from the same `schools`
+// table the Schools tab already lists, so there is nothing extra to maintain.
+async function _hdrInitSchoolSwitcher(){
+  const sel=document.getElementById('hdr-school');
+  if(!sel||!SB_ON||!isPlatformOwner()) return;
+  let rows=[];
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/schools?select=school_id,display_name&order=display_name.asc',
+      {headers:_SBHEAD()});
+    rows = r.ok ? (await r.json()) : [];
+  }catch(e){ rows=[]; }
+  const cur=activeSchoolOverride()||'';
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  sel.innerHTML='<option value="">\u2014 My own account \u2014</option>'
+    +rows.map(s=>'<option value="'+esc(s.school_id)+'">'+esc(s.display_name||s.school_id)+'</option>').join('');
+  sel.value=cur;
+  sel.style.display='';
+  // Viewing someone else's school should never be a quiet state you forget you are in.
+  if(cur){
+    sel.style.background='rgba(200,119,46,.14)';
+    sel.style.borderColor='var(--orange,#c8772e)';
+    sel.style.color='var(--tx)';
+    const nm=(rows.find(s=>s.school_id===cur)||{}).display_name||cur;
+    sel.title='You are viewing '+nm+'\u2019s data. Switch back to your own account when you are done.';
+  }
+}
+
 // Two-way dismissal sync: pull the team's shared dismissals in and push any local-only
 // ones up. Non-blocking so first paint isn't gated on the network; refresh on landing.
 dsmServerPush().then(()=>{try{dsmRefresh()}catch(e){}});
