@@ -183,6 +183,108 @@ def norm_subject(s):
     s = str(s).strip()
     return SUBJECT_MAP.get(s, s)
 
+# ── Subject spelling variants ─────────────────────────────────────────────────
+# Raw subject names arrive mis-cased, truncated by the export, and decorated with
+# qualification noise. This PROPOSES groups that are probably one subject. It never
+# merges anything: SUBJECT_MAP — the school's own choices, made in the Admin panel —
+# remains the only thing that collapses a name.
+#
+# Four passes, unioned together:
+#   tidy    'pe' / 'PE (9-1)'             -> 'pe'         exact match
+#   loose   'GCSE Maths' / 'Maths'         -> 'maths'      exact match
+#   squash  'P.E.' / 'PE'                  -> 'pe'         exact match
+#   prefix  'Histor'->'History', 'Sculp'->'Sculpt'->'Sculpture'   truncation
+#
+# The prefix pass fires only when the extra characters do NOT start with a space.
+# That is what keeps 'English' apart from 'English Language': a truncation finishes
+# a word, a different subject adds one. Grouping those two would be precisely the
+# mistake the naming spec warns against — they are a continuity relationship, and
+# continuity must never collapse.
+
+_QUAL_NOISE = re.compile(
+    r'\b(?:i?gcse|gce|btec|ncfe|cache|ocr|aqa|edexcel|wjec|eduqas|'
+    r'a\s*level|as\s*level|a2|ks\s*[1-5]|key\s*stage\s*[1-5]|'
+    r'level\s*[1-3]|year\s*\d{1,2}|yr\s*\d{1,2}|'
+    r'full\s*course|short\s*course)\b')
+_MIN_PREFIX = 4        # below this 'Art' would swallow 'Art and Design'
+
+def _subj_tidy(s):
+    """Case, brackets, punctuation and spacing stripped."""
+    t = re.sub(r'\(.*?\)', ' ', str(s).lower())
+    t = t.replace('&', ' and ')
+    t = re.sub(r'[^a-z0-9]+', ' ', t)
+    return re.sub(r'\s+', ' ', t).strip()
+
+def _subj_loose(s):
+    """As _subj_tidy, plus qualification words."""
+    return re.sub(r'\s+', ' ', _QUAL_NOISE.sub(' ', _subj_tidy(s))).strip()
+
+def _subj_squash(s):
+    """Spaces and joining 'and' gone too, so 'P.E.'/'PE' and 'Design & Technology'/
+    'Design Technology' meet. EXACT matching only — never used for prefixes, where
+    losing the word boundary would reunite 'English' with 'English Language'."""
+    return re.sub(r'\band\b', '', _subj_tidy(s)).replace(' ', '')
+
+def subject_variant_groups(raw_names, alias_map=None):
+    """{group key: {raw names}} for names that look like the same subject.
+
+    A group whose members already resolve to a single canonical under alias_map is
+    dropped, so the Admin flag clears once the school has mapped them rather than
+    nagging forever."""
+    names = sorted({str(n).strip() for n in raw_names
+                    if n is not None and str(n).strip()})
+    parent = {n: n for n in names}
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # Passes 1-3: identical keys.
+    for keyfn in (_subj_tidy, _subj_loose, _subj_squash):
+        buckets = {}
+        for n in names:
+            k = keyfn(n)
+            if k:
+                buckets.setdefault(k, []).append(n)
+        for members in buckets.values():
+            for m in members[1:]:
+                union(members[0], m)
+
+    # Pass 4: truncation.
+    tidy = {n: _subj_tidy(n) for n in names}
+    for a in names:
+        ka = tidy[a]
+        if len(ka) < _MIN_PREFIX:
+            continue
+        for b in names:
+            if a == b:
+                continue
+            kb = tidy[b]
+            if len(kb) > len(ka) and kb.startswith(ka) \
+               and not kb[len(ka):].startswith(' '):
+                union(a, b)
+
+    groups = {}
+    for n in names:
+        groups.setdefault(find(n), set()).add(n)
+
+    out = {}
+    for root, members in groups.items():
+        if len(members) < 2:
+            continue
+        if alias_map:
+            if len({alias_map.get(m, m) for m in members}) == 1:
+                continue            # already resolved by the school
+        out[_subj_tidy(root) or root] = members
+    return out
+
 @lru_cache(maxsize=None)
 def parse_date_flex(date_str):
     """Parse dates in various formats (incl. dd-Mon-yy like '04-Sep-25')."""
@@ -406,16 +508,24 @@ att_all = att_all.dropna(subset=['DateISO'])
 # Academic year (start calendar year) per row — used to build per-year snapshots.
 att_all['AY'] = _vmap(att_all['DateISO'], acad_year)
 
-# Subject normalisation + flag case/spelling variants (e.g. 'Pe' vs 'PE') for mapping.
+# Subject normalisation + propose spelling variants for mapping.
+# Every source that carries a subject is considered, not attendance alone, so a name
+# that only ever appears on reports or behaviour still gets surfaced for mapping.
 _raw_subjects = set(att_all['Subject'].dropna().astype(str).str.strip())
-_variant_groups = {}
-for _s in _raw_subjects:
-    _variant_groups.setdefault(_s.lower(), set()).add(_s)
-_subject_variants = {k: v for k, v in _variant_groups.items() if len(v) > 1}
+for _df in [reports] + list(codes_list):
+    try:
+        if _df is not None and 'Subject' in _df.columns:
+            _raw_subjects |= set(_df['Subject'].dropna().astype(str).str.strip())
+    except Exception:
+        pass
+_raw_subjects.discard('')
+_subject_variants = subject_variant_groups(_raw_subjects, SUBJECT_MAP)
 if _subject_variants:
     print("⚠ SUBJECT SPELLING VARIANTS (add a canonical form to subject_map):")
     for _k, _v in sorted(_subject_variants.items()):
         print(f"  {sorted(_v)}")
+else:
+    print(f"Subjects: {len(_raw_subjects)} distinct raw names, no variants proposed")
 att_all['Subject'] = _vmap(att_all['Subject'], norm_subject)
 
 # Flag unknown attendance codes
