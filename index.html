@@ -1210,6 +1210,7 @@ async function auditQuery(opt){
     if(opt.schoolId)    q+='&school_id=eq.'+encodeURIComponent(opt.schoolId);
     if(opt.subjectType) q+='&subject_type=eq.'+encodeURIComponent(opt.subjectType);
     if(opt.subjectId)   q+='&subject_id=eq.'+encodeURIComponent(opt.subjectId);
+    if(opt.actorId)     q+='&actor_id=eq.'+encodeURIComponent(opt.actorId);
     if(opt.action)      q+='&action=eq.'+encodeURIComponent(opt.action);
     if(opt.since)       q+='&occurred_at=gte.'+encodeURIComponent(opt.since);
     const r=await fetch(SB_URL+q,{headers:_SBHEAD(),cache:'no-store'});
@@ -6879,14 +6880,10 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
-  // Views that put named pupils on screen. Whole-cohort analysis (charts with no
-  // pupil named) is deliberately not logged — widen this map if that changes.
-  try{
-    const _AV={class:'class_view',classcomp:'class_view',sanctions:'class_view',
-               behaviour:'class_view',concerns:'class_view',send:'class_view',
-               tutor:'year_group_view',tgcomp:'year_group_view'};
-    if(_AV[v]) auditLog(_AV[v],null,null,{view:v});
-  }catch(e){}
+  // Every screen is recorded. 'class' and 'tutor' are logged inside rCL()/rTG()
+  // instead, because those also run when the dropdown changes — so switching from
+  // 10A to 10B writes its own row, which a tab-level log would miss.
+  try{ if(v!=='class'&&v!=='tutor') auditLog('view_opened',null,null,{view:v}); }catch(e){}
   if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else rP();
 }
 
@@ -8445,6 +8442,7 @@ function rCL(){
   const sub=document.getElementById('cl-sub').value;
   const cl=parseInt(document.getElementById('cl-cls').value);
   if(!yearGroup||!sub||isNaN(cl))return;
+  auditLog('class_view','class','Y'+yearGroup+' '+sub+' '+cl,{view:'class'});
   const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('cl-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('cl-charts').innerHTML='';document.getElementById('cl-alerts').innerHTML='';document.getElementById('cl-network').innerHTML='';document.getElementById('cl-title').innerHTML='';document.getElementById('cl-send-title').innerHTML='';document.getElementById('cl-send').innerHTML='';document.getElementById('cl-perf-title').innerHTML='';const cs=document.getElementById('cl-summary');if(cs)cs.innerHTML='';return}
   const nP=pp.length;
   const lp=ygCurrentGradePeriod(yearGroup)||pp[nP-1];
@@ -9373,6 +9371,7 @@ function rPeer(){
   const yearGroup=parseInt(document.getElementById('tg-yg').value);
   const tgName=document.getElementById('tg-sel').value;
   if(!yearGroup||!tgName) return;
+  auditLog('year_group_view','year_group','Y'+yearGroup+' '+(tgName==='__all'?'(all tutor groups)':tgName),{view:'tutor'});
 
   const ink=CFG.intakes.find(i=>curYG(i)===yearGroup);
   if(!ink) return;
@@ -11147,25 +11146,41 @@ function rPeer(){
   // itself: "who opened this pupil's record this term". The search box takes a
   // NAME, resolves it against the roster in this browser, and queries by id — the
   // name never travels to the server and the log never stores one.
+  // ── Audit log viewer ───────────────────────────────────────────────────────
+  // Answers both halves of the safeguarding question: "who opened this pupil's
+  // record" and "what did this member of staff look at". The pupil box takes a
+  // NAME, resolves it against the roster in this browser, and queries by id — the
+  // name never travels to the server and the log never stores one.
   const _AUDIT_ACTIONS={
     login:'Signed in', logout:'Signed out',
-    pupil_view_opened:'Opened a pupil', class_view:'Viewed a class list',
-    year_group_view:'Viewed a tutor group', report_generated:'Printed a report',
-    export_downloaded:'Downloaded a file', flag_actioned:'Actioned a flag',
-    config_changed:'Changed a setting', school_switched:'Switched school',
-    import_run:'Ran an import', role_changed:'Changed someone\u2019s access'};
+    pupil_view_opened:'Opened a pupil', class_view:'Viewed a class',
+    year_group_view:'Viewed a tutor group', view_opened:'Opened a screen',
+    report_generated:'Printed a report', export_downloaded:'Downloaded a file',
+    flag_actioned:'Actioned a flag', config_changed:'Changed a setting',
+    school_switched:'Switched school', import_run:'Ran an import',
+    role_changed:'Changed someone\u2019s access'};
+  // Screen codes as they appear in the tab bar, so the log reads in English.
+  const _AUDIT_VIEWS={pupil:'Pupil',compare:'Compare',progression:'Progression',
+    teacher:'Teacher',subject:'Subject',class:'Class',tutor:'Tutor group',
+    classcomp:'Class comparison',tgcomp:'Tutor group comparison',behaviour:'Behaviour',
+    pairs:'Pairs',peer:'Peer groups',send:'SEND',analytics:'Analytics',
+    concerns:'Concerns',sanctions:'Sanctions',slotavoid:'Slot avoidance',
+    rebalance:'Rebalance',admin:'Admin',upload:'Upload',schools:'Schools'};
   function _auEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  let _AU_ACTORS=null;   // cached staff list, loaded once per Admin visit
 
   function _auditPanelHtml(){
     const INP='font-family:inherit;font-size:.78rem;padding:.35rem .5rem;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);color:var(--tx)';
     const acts=Object.keys(_AUDIT_ACTIONS).map(k=>'<option value="'+k+'">'+_AUDIT_ACTIONS[k]+'</option>').join('');
     return '<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Audit log</div>'
       +'<div style="font-size:.72rem;color:var(--mu);line-height:1.5;margin-bottom:.8rem">'
-        +'Every time someone opens a pupil, prints a report, downloads a file or changes a setting, a line is written here. '
+        +'Every screen someone opens is recorded here, along with printing, downloads, flag decisions and setting changes. '
+        +'Class and tutor-group rows name the group that was on screen. '
         +'Records are kept for 13 months and then deleted automatically. Repeated views of the same thing within five minutes count once; '
         +'downloads and access changes are always recorded in full.</div>'
       +'<div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem">'
-        +'<input id="au-name" placeholder="Pupil name (optional)" style="'+INP+';min-width:190px">'
+        +'<input id="au-name" placeholder="Pupil name (optional)" style="'+INP+';min-width:180px">'
+        +'<select id="au-who" style="'+INP+';min-width:190px"><option value="">Anyone</option></select>'
         +'<select id="au-act" style="'+INP+'"><option value="">Anything</option>'+acts+'</select>'
         +'<select id="au-days" style="'+INP+'"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option>'
           +'<option value="90">Last 3 months</option><option value="400">Last 13 months</option></select>'
@@ -11184,10 +11199,32 @@ function rPeer(){
     return hits;
   }
 
+  // The staff dropdown is built from the log itself, so it lists exactly the
+  // people who have actually done something — including anyone who has since left.
+  window._auLoadActors=async function(){
+    const sel=document.getElementById('au-who'); if(!sel) return;
+    if(_AU_ACTORS){ _auFillActors(); return; }
+    try{
+      const r=await fetch(SB_URL+'/rest/v1/rpc/audit_actors',{method:'POST',
+        headers:Object.assign(_SBHEAD(),{'Content-Type':'application/json'}),body:'{}'});
+      _AU_ACTORS = r.ok ? (await r.json()) : [];
+    }catch(e){ _AU_ACTORS=[]; }
+    _auFillActors();
+  };
+  function _auFillActors(){
+    const sel=document.getElementById('au-who'); if(!sel) return;
+    const cur=sel.value;
+    sel.innerHTML='<option value="">Anyone</option>'
+      +(_AU_ACTORS||[]).map(a=>'<option value="'+_auEsc(a.actor_id)+'">'+_auEsc(a.actor_email||a.actor_id)+'</option>').join('');
+    if(cur) sel.value=cur;
+  }
+
   window._auditRefresh=async function(){
     const out=document.getElementById('au-out'); if(!out) return;
+    window._auLoadActors();
     const nameEl=document.getElementById('au-name');
     const act=(document.getElementById('au-act')||{}).value||'';
+    const who=(document.getElementById('au-who')||{}).value||'';
     const days=parseInt((document.getElementById('au-days')||{}).value,10)||30;
     let subjectId=null;
 
@@ -11207,7 +11244,8 @@ function rPeer(){
 
     out.innerHTML='<div>Searching\u2026</div>';
     const since=new Date(Date.now()-days*864e5).toISOString();
-    const rows=await auditQuery({subjectId:subjectId, subjectType:(subjectId?'pupil':null), action:act||null, since:since, limit:400});
+    const rows=await auditQuery({subjectId:subjectId, subjectType:(subjectId?'pupil':null),
+                                 actorId:who||null, action:act||null, since:since, limit:400});
 
     if(!rows.length){
       out.innerHTML='<div>Nothing recorded for that search. '
@@ -11217,14 +11255,15 @@ function rPeer(){
     const fmt=t=>{try{return new Date(t).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return t;}};
     const about=r=>{
       if(r.subject_type==='pupil'){ const p=REG[r.subject_id]; return p&&p.id?_auEsc(p.id):'Pupil '+_auEsc(r.subject_id); }
+      if(r.subject_type==='class'||r.subject_type==='year_group') return _auEsc(r.subject_id);
       if(r.subject_type==='config') return 'Setting: '+_auEsc(r.subject_id);
       const c=r.context||{};
       if(c.file) return _auEsc(c.file);
-      if(c.view) return _auEsc(c.view);
+      if(c.view) return _auEsc(_AUDIT_VIEWS[c.view]||c.view);
       if(c.change) return _auEsc(String(c.change).replace(/_/g,' '));
       return '\u2014';
     };
-    out.innerHTML='<div style="margin-bottom:.5rem;color:var(--mu)">'+rows.length+' record'+(rows.length!==1?'s':'')+'.</div>'
+    out.innerHTML='<div style="margin-bottom:.5rem;color:var(--mu)">'+rows.length+' record'+(rows.length!==1?'s':'')+(rows.length>=400?' (showing the most recent 400)':'')+'.</div>'
       +'<div style="overflow-x:auto"><table class="d"><thead><tr><th>When</th><th>Who</th><th>What</th><th>About</th></tr></thead><tbody>'
       +rows.map(r=>'<tr><td style="white-space:nowrap">'+_auEsc(fmt(r.occurred_at))+'</td>'
         +'<td>'+_auEsc(r.actor_email||('user '+String(r.actor_id||'').slice(0,8)))+'</td>'
@@ -11637,7 +11676,7 @@ function rPeer(){
       +_accSec('grd','Grading scale &amp; mapping',scalesHtml)
       +_accSec('audit','Audit log',_auditPanelHtml());
     try{ if(IS_ADMIN) window._muLoadUsers&&window._muLoadUsers(); }catch(e){}
-    try{ if(window._admAcc['audit']) window._auditRefresh(); }catch(e){}
+    try{ if(window._admAcc['audit']) window._auditRefresh(); else window._auLoadActors&&window._auLoadActors(); }catch(e){}
   }
 
   // Admin change handlers
