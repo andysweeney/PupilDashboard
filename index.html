@@ -433,6 +433,11 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   };
   try{const _pd=document.getElementById('print-date');if(_pd)_pd.textContent=new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});}catch(e){}
   // Re-layout charts for print so axes/labels fit the print box instead of being bitmap-scaled
+  window.addEventListener('beforeprint',()=>{try{
+    const _s=document.getElementById('p-sel'), _px=_s?parseInt(_s.value):0;
+    const _on=document.querySelector('.vw.on'), _v=_on?String(_on.id||'').replace(/^vw-/,''):'';
+    auditLog('report_generated',_px?'pupil':null,_px||null,{view:_v});
+  }catch(e){}});
   window.addEventListener('beforeprint',()=>{try{document.querySelectorAll('#p-ch .chw').forEach(w=>{w.dataset.sh=w.style.height||'';w.style.height='210px'});document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}});
   window.addEventListener('afterprint',()=>{try{document.querySelectorAll('#p-ch .chw').forEach(w=>{w.style.height=w.dataset.sh||''});document.querySelectorAll('canvas').forEach(cv=>{const c=window.Chart&&Chart.getChart?Chart.getChart(cv):null;if(c)c.resize()});}catch(e){}});
   // ── Auth gate + data load ──────────────────────────────────────────────────
@@ -756,6 +761,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     rec.history.push({who,when:now.toISOString(),note,expiresAt,detailSnapshot:ctx.detail||''});
     DSM[_dsmPendingKey]=rec;
     dsmPersist();
+    auditLog('flag_actioned','pupil',ctx.px,{flag:ctx.type||''});
     dsmServerPush();            // propagate to the shared store (read-merge-write)
     dsmCancel();
     setTimeout(dsmRefresh,0);
@@ -796,6 +802,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     const out={generated:new Date().toISOString(),dismissals:DSM};
     const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='dismissals.json';a.click();
+    auditLog('export_downloaded',null,null,{file:'dismissals.json'});
   }
   function dsmImportPick(){
     const inp=document.createElement('input');inp.type='file';inp.accept='application/json,.json';
@@ -1091,6 +1098,7 @@ async function authRefresh(){
   }catch(e){return null;}
 }
 async function authSignOut(){
+  await auditLog('logout');
   try{if(authToken())await fetch(SB_URL+'/auth/v1/logout',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()}});}catch(e){}
   authClear();_SESSION=null;location.reload();
 }
@@ -1102,7 +1110,7 @@ async function authDoLogin(){
   if(err)err.style.display='none';
   if(!em||!pw){if(err){err.textContent='Enter your email and password.';err.style.display='block';}return;}
   if(btn){btn.disabled=true;btn.textContent='Signing in\u2026';}
-  try{await authSignIn(em,pw);location.reload();}
+  try{await authSignIn(em,pw);await auditLog('login');location.reload();}
   catch(e){if(err){err.textContent=String(e&&e.message||e);err.style.display='block';}if(btn){btn.disabled=false;btn.textContent='Sign in';}}
 };
 function renderLoginScreen(){
@@ -1141,6 +1149,74 @@ async function sbSet(id,value){
 async function sbDel(id){
   const r=await fetch(SB_URL+'/rest/v1/app_settings?id=eq.'+encodeURIComponent(_cfgKey(id)),{method:'DELETE',headers:_SBHEAD()}); return r.ok;
 }
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+// A safeguarding and DPIA trail: one row per meaningful view. The browser only
+// ever says WHAT happened — the server function log_event() stamps WHO did it and
+// WHICH school from the signed-in token, so a row cannot be forged from here.
+//
+// Rule: log the pupil's id, never their name. Names change and are not unique.
+// The Admin panel takes a typed name, resolves it against the roster, and queries
+// by id, so the log never becomes a second copy of anyone's personal details.
+//
+// Everything this function needs is declared inside it, because auditLog() is also
+// called from the login screen — at which point the constants further down this
+// file have not been initialised yet.
+var _AUDIT_SEEN;   // hoisted on purpose; filled the first time it is needed
+async function auditLog(action,subjectType,subjectId,context){
+  try{
+    if(!SB_ON) return;
+    const tok=authToken(); if(!tok) return;
+    // Repeats of the same view by the same person collapse for five minutes, so a
+    // class list does not write a row per pupil per repaint. Downloads and
+    // permission changes never collapse — they are what an investigation needs.
+    const DEDUPE_MS=5*60*1000;
+    const ALWAYS=['login','logout','export_downloaded','school_switched',
+                  'role_changed','config_changed','import_run','flag_actioned'];
+    if(ALWAYS.indexOf(action)<0){
+      if(!_AUDIT_SEEN) _AUDIT_SEEN=Object.create(null);
+      const k=action+'|'+(subjectType||'')+'|'+(subjectId==null?'':subjectId), now=Date.now();
+      if(_AUDIT_SEEN[k]&&(now-_AUDIT_SEEN[k])<DEDUPE_MS) return;
+      _AUDIT_SEEN[k]=now;
+      // Keep the map from growing across a long day at the desk.
+      const keys=Object.keys(_AUDIT_SEEN);
+      if(keys.length>300) keys.forEach(x=>{if(now-_AUDIT_SEEN[x]>DEDUPE_MS) delete _AUDIT_SEEN[x];});
+    }
+    const r=await fetch(SB_URL+'/rest/v1/rpc/log_event',{
+      method:'POST',
+      headers:{apikey:SB_KEY,Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        p_action:action,
+        p_subject_type:subjectType||null,
+        p_subject_id:(subjectId==null?null:String(subjectId)),
+        p_context:context||{},
+        p_school_id:(window._ACTIVE_SCHOOL||null)  // job 2 hook: set when a platform owner switches school
+      })
+    });
+    if(!r.ok) console.warn('[audit] not recorded:',action,r.status);
+  }catch(e){ console.warn('[audit] not recorded:',action,e&&e.message||e); }
+}
+// A failed log must never break a view, so nothing above ever throws.
+window.auditLog=auditLog;
+
+// Read side, for the Admin panel. Returns [] rather than throwing, so someone
+// without permission sees an empty table instead of a broken page.
+async function auditQuery(opt){
+  opt=opt||{};
+  try{
+    if(!SB_ON) return [];
+    let q='/rest/v1/audit_log?select=occurred_at,actor_id,actor_email,action,subject_type,subject_id,context'
+         +'&order=occurred_at.desc&limit='+(parseInt(opt.limit,10)||300);
+    if(opt.schoolId)    q+='&school_id=eq.'+encodeURIComponent(opt.schoolId);
+    if(opt.subjectType) q+='&subject_type=eq.'+encodeURIComponent(opt.subjectType);
+    if(opt.subjectId)   q+='&subject_id=eq.'+encodeURIComponent(opt.subjectId);
+    if(opt.action)      q+='&action=eq.'+encodeURIComponent(opt.action);
+    if(opt.since)       q+='&occurred_at=gte.'+encodeURIComponent(opt.since);
+    const r=await fetch(SB_URL+q,{headers:_SBHEAD(),cache:'no-store'});
+    if(!r.ok){ console.warn('[audit] query failed',r.status); return []; }
+    return await r.json();
+  }catch(e){ console.warn('[audit] query failed',e&&e.message||e); return []; }
+}
 const _SBCACHE={};
 async function sbPrefetch(ids){
   if(!SB_ON) return;
@@ -1161,6 +1237,7 @@ function loadCfg(id,lsKey){
 async function saveCfg(id,lsKey,value){
   try{localStorage.setItem(_cfgKey(lsKey),JSON.stringify(value));}catch(e){}
   if(SB_ON){try{await sbSet(id,value);_SBCACHE[id]=value;}catch(e){console.warn('[cfg] server save failed for',id,e.message);return false;}}
+  auditLog('config_changed','config',id,{});   // which setting, never its contents
   return true;
 }
 async function resetCfg(id,lsKey){
@@ -3288,6 +3365,7 @@ function rP(){
     if(window._ONBOARDING){ const el=document.getElementById('vw-pupil'); if(el) el.innerHTML='<div style="padding:2rem 1rem;color:var(--mu);font-size:.92rem">No pupils yet — '+(IS_ADMIN?'head to <b>⬆️ Upload</b> to add your first cohort.':'your administrator hasn\u2019t added any data yet.')+'</div>'; }
     return;
   }
+  auditLog('pupil_view_opened','pupil',x);
   const pu=REG[x],ink=pu.intake,en=getEn(ink,x),data=getProg(ink,x),ctg=curTG(en);
   const pp=PER.filter(p=>data[p]),nP=pp.length;
   // hasGrades: true if ANY period has subject grades (not just the latest — Spring grades
@@ -6801,6 +6879,14 @@ function sw(v,btn){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('vw-'+v).classList.add('on');
   if(btn)btn.classList.add('on');
+  // Views that put named pupils on screen. Whole-cohort analysis (charts with no
+  // pupil named) is deliberately not logged — widen this map if that changes.
+  try{
+    const _AV={class:'class_view',classcomp:'class_view',sanctions:'class_view',
+               behaviour:'class_view',concerns:'class_view',send:'class_view',
+               tutor:'year_group_view',tgcomp:'year_group_view'};
+    if(_AV[v]) auditLog(_AV[v],null,null,{view:v});
+  }catch(e){}
   if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else rP();
 }
 
@@ -6949,13 +7035,17 @@ window._muAddAdmin=async function(school){
   const set=function(t,c){ if(m){ m.textContent=t; m.style.color=c||'var(--mu)'; } };
   if(!email||pw.length<8){ set('Enter an email and a password of at least 8 characters.','#c0392b'); return; }
   set('Adding\u2026');
-  try{ await _muCall({action:'create',school_id:school,email:email,password:pw,role:'admin'}); _muLoadAdmins(); }
+  try{ await _muCall({action:'create',school_id:school,email:email,password:pw,role:'admin'});
+       auditLog('role_changed',null,null,{change:'admin_added',school:school});
+       _muLoadAdmins(); }
   catch(err){ set(err.message,'#c0392b'); }
 };
 window._muRemoveAdmin=async function(id){
   const a=_MU_ADMINS.find(function(x){return x.id===id;})||{};
   if(!confirm('Remove admin rights from '+(a.email||'this user')+'? They will remain a normal user of the school.')) return;
-  try{ await _muCall({action:'remove-admin',user_id:id}); _muLoadAdmins(); }
+  try{ await _muCall({action:'remove-admin',user_id:id});
+       auditLog('role_changed',null,null,{change:'admin_removed'});
+       _muLoadAdmins(); }
   catch(err){ alert(err.message); }
 };
 
@@ -11052,6 +11142,97 @@ function rPeer(){
   }
   
   // ── ADMIN TAB ──
+  // ── Audit log viewer ───────────────────────────────────────────────────────
+  // Turns the safeguarding obligation into something the school can answer for
+  // itself: "who opened this pupil's record this term". The search box takes a
+  // NAME, resolves it against the roster in this browser, and queries by id — the
+  // name never travels to the server and the log never stores one.
+  const _AUDIT_ACTIONS={
+    login:'Signed in', logout:'Signed out',
+    pupil_view_opened:'Opened a pupil', class_view:'Viewed a class list',
+    year_group_view:'Viewed a tutor group', report_generated:'Printed a report',
+    export_downloaded:'Downloaded a file', flag_actioned:'Actioned a flag',
+    config_changed:'Changed a setting', school_switched:'Switched school',
+    import_run:'Ran an import', role_changed:'Changed someone\u2019s access'};
+  function _auEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+  function _auditPanelHtml(){
+    const INP='font-family:inherit;font-size:.78rem;padding:.35rem .5rem;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);color:var(--tx)';
+    const acts=Object.keys(_AUDIT_ACTIONS).map(k=>'<option value="'+k+'">'+_AUDIT_ACTIONS[k]+'</option>').join('');
+    return '<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Audit log</div>'
+      +'<div style="font-size:.72rem;color:var(--mu);line-height:1.5;margin-bottom:.8rem">'
+        +'Every time someone opens a pupil, prints a report, downloads a file or changes a setting, a line is written here. '
+        +'Records are kept for 13 months and then deleted automatically. Repeated views of the same thing within five minutes count once; '
+        +'downloads and access changes are always recorded in full.</div>'
+      +'<div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem">'
+        +'<input id="au-name" placeholder="Pupil name (optional)" style="'+INP+';min-width:190px">'
+        +'<select id="au-act" style="'+INP+'"><option value="">Anything</option>'+acts+'</select>'
+        +'<select id="au-days" style="'+INP+'"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option>'
+          +'<option value="90">Last 3 months</option><option value="400">Last 13 months</option></select>'
+        +'<button onclick="window._auditRefresh()" style="font-family:inherit;font-size:.76rem;font-weight:600;padding:.4rem .9rem;border-radius:6px;border:none;background:var(--ac);color:#fff;cursor:pointer">Search</button>'
+      +'</div>'
+      +'<div id="au-out" style="font-size:.78rem;color:var(--mu)">Choose a filter and press Search.</div>'
+      +'</div>';
+  }
+
+  // Name -> pupil id, done here in the browser against the roster already loaded.
+  function _auMatchPupils(q){
+    q=String(q||'').trim().toLowerCase(); if(!q) return null;
+    const hits=[];
+    for(const k in REG){ const r=REG[k]; if(!r) continue;
+      if(String(r.id||'').toLowerCase().indexOf(q)>=0) hits.push({key:k,name:r.id}); }
+    return hits;
+  }
+
+  window._auditRefresh=async function(){
+    const out=document.getElementById('au-out'); if(!out) return;
+    const nameEl=document.getElementById('au-name');
+    const act=(document.getElementById('au-act')||{}).value||'';
+    const days=parseInt((document.getElementById('au-days')||{}).value,10)||30;
+    let subjectId=null;
+
+    const typed=(nameEl&&nameEl.value||'').trim();
+    if(typed){
+      const hits=_auMatchPupils(typed)||[];
+      if(!hits.length){ out.innerHTML='<div style="color:var(--red)">No pupil on the roster matches \u201c'+_auEsc(typed)+'\u201d.</div>'; return; }
+      if(hits.length>1){
+        out.innerHTML='<div style="margin-bottom:.4rem">'+hits.length+' pupils match \u2014 choose one:</div>'
+          +hits.slice(0,25).map(h=>'<button onclick="document.getElementById(\'au-name\').value=\''+_auEsc(String(h.name).replace(/'/g,"\\'"))+'\';window._auditRefresh()" '
+            +'style="font-family:inherit;font-size:.76rem;padding:.3rem .6rem;margin:0 .35rem .35rem 0;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);color:var(--tx);cursor:pointer">'
+            +_auEsc(h.name)+'</button>').join('');
+        return;
+      }
+      subjectId=hits[0].key;
+    }
+
+    out.innerHTML='<div>Searching\u2026</div>';
+    const since=new Date(Date.now()-days*864e5).toISOString();
+    const rows=await auditQuery({subjectId:subjectId, subjectType:(subjectId?'pupil':null), action:act||null, since:since, limit:400});
+
+    if(!rows.length){
+      out.innerHTML='<div>Nothing recorded for that search. '
+        +'If you have only just set the log up, that is expected \u2014 it records what happens from now on.</div>';
+      return;
+    }
+    const fmt=t=>{try{return new Date(t).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return t;}};
+    const about=r=>{
+      if(r.subject_type==='pupil'){ const p=REG[r.subject_id]; return p&&p.id?_auEsc(p.id):'Pupil '+_auEsc(r.subject_id); }
+      if(r.subject_type==='config') return 'Setting: '+_auEsc(r.subject_id);
+      const c=r.context||{};
+      if(c.file) return _auEsc(c.file);
+      if(c.view) return _auEsc(c.view);
+      if(c.change) return _auEsc(String(c.change).replace(/_/g,' '));
+      return '\u2014';
+    };
+    out.innerHTML='<div style="margin-bottom:.5rem;color:var(--mu)">'+rows.length+' record'+(rows.length!==1?'s':'')+'.</div>'
+      +'<div style="overflow-x:auto"><table class="d"><thead><tr><th>When</th><th>Who</th><th>What</th><th>About</th></tr></thead><tbody>'
+      +rows.map(r=>'<tr><td style="white-space:nowrap">'+_auEsc(fmt(r.occurred_at))+'</td>'
+        +'<td>'+_auEsc(r.actor_email||('user '+String(r.actor_id||'').slice(0,8)))+'</td>'
+        +'<td>'+_auEsc(_AUDIT_ACTIONS[r.action]||r.action)+'</td>'
+        +'<td>'+about(r)+'</td></tr>').join('')
+      +'</tbody></table></div>';
+  };
+
   function rAdmin(){
     const out=document.getElementById('admin-out');
     const attCodes=DD.config.att_codes||{};
@@ -11453,8 +11634,10 @@ function rPeer(){
       +_accSec('sub','Subject mapping',_noTitle(subjHtml,'Subjects'))
       +_accSec('ats','Attendance &amp; SEN codes',attHtml+senHtml)
       +_accSec('inc','Incident codes',_noTitle(incHtml,'Incident Codes (Behaviour Categories)'))
-      +_accSec('grd','Grading scale &amp; mapping',scalesHtml);
+      +_accSec('grd','Grading scale &amp; mapping',scalesHtml)
+      +_accSec('audit','Audit log',_auditPanelHtml());
     try{ if(IS_ADMIN) window._muLoadUsers&&window._muLoadUsers(); }catch(e){}
+    try{ if(window._admAcc['audit']) window._auditRefresh(); }catch(e){}
   }
 
   // Admin change handlers
@@ -11648,6 +11831,7 @@ function rPeer(){
     a.href=URL.createObjectURL(blob);
     a.download='data_key_config.json';
     a.click();
+    auditLog('export_downloaded',null,null,{file:'data_key_config.json'});
   };
 
   window.rAnalytics=rAnalytics;
