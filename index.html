@@ -135,7 +135,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <button id="tab-admin" class="tb" style="display:none" onclick="sw('admin',this)">🔧 Admin</button>
 <button id="tab-upload" class="tb" style="display:none" onclick="sw('upload',this)">⬆️ Upload</button>
 <button id="tab-schools" class="tb" style="display:none" onclick="sw('schools',this)">🏫 Schools</button>
-<button class="tb on" onclick="sw('pupil',this)">👤 Pupil</button>
+<button class="tb on" onclick="sw('home',this)">🏠 Home</button>
+<button class="tb" onclick="sw('pupil',this)">👤 Pupil</button>
 <button class="tb" onclick="sw('subject',this)">📚 Subject</button>
 <button class="tb" onclick="sw('class',this)">🏫 Class</button>
 <button class="tb" onclick="sw('tutor',this)">👥 Tutor Group</button>
@@ -166,7 +167,20 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 </div>
 </header>
 
-<div id="vw-pupil" class="vw on">
+<div id="vw-home" class="vw on">
+<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">
+  <label style="font-size:.72rem;color:var(--tx2);font-weight:600">Viewing as</label>
+  <select id="hm-role" onchange="rHome()" style="font-size:.75rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)">
+    <option value="tutor">Form tutor</option>
+    <option value="year">Year leader</option>
+    <option value="slt">Senior leadership</option>
+  </select>
+  <select id="hm-scope" onchange="rHome()" style="font-size:.75rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)"></select>
+  <span style="font-size:.68rem;color:var(--tx2)">Role selection is temporary — this will follow the signed-in user.</span>
+</div>
+<div id="hm-out"></div>
+</div>
+<div id="vw-pupil" class="vw">
 <div class="ctl">
 <div class="cg"><label>Pupil</label><select id="p-sel" onchange="rP()"></select></div>
 <div class="cg"><label>Subject</label><select id="p-sf"><option value="all">All Subjects</option></select></div>
@@ -6990,9 +7004,308 @@ function sw(v,btn){
   // instead, because those also run when the dropdown changes — so switching from
   // 10A to 10B writes its own row, which a tab-level log would miss.
   try{ if(v!=='class'&&v!=='tutor') auditLog('view_opened',null,null,{view:v}); }catch(e){}
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='home')rHome();else rP();
 }
 
+
+
+// ===== ROLE FRONT PAGES =====
+// One data set, three questions. A tutor needs names and what changed; a year
+// leader needs which subjects and periods are hot and who crossed a threshold;
+// SLT needs group gaps and whether anything we tried actually moved.
+//
+// Everything here is computed from DD at render time — no new data.json fields.
+
+// Sanction rows are [px, type, dateISO, subject, period]; type 2 is a detention.
+// SANC_DET runs parallel and holds [code, category].
+const _HM_UNPREP=/equipment|calculator|\bpen\b|exercise book|handbook|reading book|ingredient|\bkit\b|subject specific|uniform|blazer|jumper|\btie\b|shoes|socks|skirt|shirt|home learning|homework|prep not/i;
+function _hmIsUnprep(i){const d=SANC_DET[i];return !!(d&&d[0]&&_HM_UNPREP.test(d[0]));}
+
+// DD.sanctions[i][2] is normally an ISO date by the time the dashboard has loaded,
+// but it is a dateIndex integer in the raw file. Accept either, so this works
+// whichever side of the conversion it runs on.
+function _hmDate(r){
+  const v=r&&r[2];
+  if(typeof v==='number')return (DD.dateIndex||[])[v]||'';
+  return v||'';
+}
+function _hmToday(){
+  let m='';(DD.sanctions||[]).forEach(r=>{const d=_hmDate(r);if(d>m)m=d});
+  return m||new Date().toISOString().slice(0,10);
+}
+function _hmShift(iso,days){const d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
+function _hmSubj(k){
+  if(!k)return '';
+  if(typeof _SKR2!=='undefined'&&_SKR2[k])return _SKR2[k];
+  const m=DD.subjectKeys||{};
+  for(const n in m){if(m[n]===k)return n}
+  return k;
+}
+function _hmName(px){return ((DD.registry||{})[String(px)]||{}).id||('#'+px);}
+function _hmReg(px){return ((DD.registry||{})[String(px)]||{}).reg||'';}
+function _hmYear(px){return ((DD.registry||{})[String(px)]||{}).year||'';}
+
+// SEND / EHCP / FSM live on the progress rows, not the registry.
+let _HM_FLAGS=null;
+function _hmFlags(){
+  if(_HM_FLAGS)return _HM_FLAGS;
+  const f={};
+  Object.values(DD.progress||{}).forEach(ay=>Object.values(ay||{}).forEach(rows=>{
+    (rows||[]).forEach(r=>{
+      const k=String(r[0]);
+      if(!f[k])f[k]={send:false,ehcp:false,fsm:false};
+      if(r[3])f[k].send=true; if(r[4])f[k].ehcp=true; if(r[5])f[k].fsm=true;
+    });
+  }));
+  _HM_FLAGS=f; return f;
+}
+function _hmFlagChips(px){
+  const f=_hmFlags()[String(px)]||{};const out=[];
+  if(f.fsm)out.push('FSM'); if(f.ehcp)out.push('EHCP'); else if(f.send)out.push('SEN support');
+  return out.map(t=>'<span style="font-size:.62rem;background:var(--sf2);border:1px solid var(--bd);color:var(--tx2);padding:.08rem .38rem;border-radius:4px">'+t+'</span>').join(' ');
+}
+
+function _hmCard(label,value,note,tone){
+  const c=tone==='bad'?'var(--red)':tone==='good'?'var(--green)':'var(--tx)';
+  return '<div style="background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:.6rem .8rem;min-width:120px;flex:1">'
+    +'<div style="font-size:.66rem;color:var(--tx2)">'+label+'</div>'
+    +'<div style="font-size:1.35rem;font-weight:600;color:'+c+'">'+value
+    +(note?' <span style="font-size:.66rem;font-weight:500;color:var(--tx2)">'+note+'</span>':'')+'</div></div>';
+}
+function _hmPanel(title,sub,body){
+  return '<div style="background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:.75rem .9rem;margin-bottom:.7rem">'
+    +'<div style="font-weight:600;font-size:.85rem;margin-bottom:'+(sub?'.15rem':'.45rem')+'">'+title+'</div>'
+    +(sub?'<div style="font-size:.7rem;color:var(--tx2);margin-bottom:.5rem">'+sub+'</div>':'')
+    +body+'</div>';
+}
+function _hmBar(pct,tone){
+  const c=tone==='bad'?'var(--red)':tone==='warn'?'var(--orange)':'var(--sky)';
+  return '<span style="display:inline-block;width:'+Math.max(2,Math.round(pct))+'%;height:7px;background:'+c+';border-radius:4px;vertical-align:middle"></span>';
+}
+
+// The scope dropdown depends on the role.
+function _hmPopScope(){
+  const role=document.getElementById('hm-role').value;
+  const sel=document.getElementById('hm-scope');
+  const prev=sel.value;
+  let opts=[];
+  if(role==='tutor'){
+    const regs=new Set();Object.values(DD.registry||{}).forEach(r=>{if(r.reg)regs.add(r.reg)});
+    opts=[...regs].sort().map(r=>['reg:'+r,r]);
+  }else if(role==='year'){
+    const ys=new Set();Object.values(DD.registry||{}).forEach(r=>{if(r.year)ys.add(r.year)});
+    opts=[...ys].sort().map(y=>['year:'+y,y]);
+  }else{ opts=[['all','Whole school']]; }
+  sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('');
+  if(opts.some(o=>o[0]===prev))sel.value=prev;
+  sel.style.display=opts.length>1?'':'none';
+}
+
+function _hmPupilsInScope(){
+  const v=(document.getElementById('hm-scope')||{}).value||'all';
+  const reg=DD.registry||{};
+  const out=new Set();
+  Object.entries(reg).forEach(([px,r])=>{
+    if(v==='all')out.add(+px);
+    else if(v.startsWith('reg:')&&r.reg===v.slice(4))out.add(+px);
+    else if(v.startsWith('year:')&&r.year===v.slice(5))out.add(+px);
+  });
+  return out;
+}
+
+function rHome(){
+  _hmPopScope();
+  const role=document.getElementById('hm-role').value;
+  const out=document.getElementById('hm-out');
+  try{
+    out.innerHTML = role==='tutor' ? _hmTutor() : role==='year' ? _hmYearLeader() : _hmSLT();
+  }catch(e){
+    out.innerHTML='<div style="color:var(--red);padding:1rem">Could not build this view: '+e.message+'</div>';
+  }
+}
+
+// ---- FORM TUTOR: who changed, not who is highest ----------------------------
+// The last date differs by year group — one cohort's export can end a fortnight
+// before another's. Anchor on the newest date for THESE pupils, not the school,
+// or a form group whose data stopped early shows an empty page.
+function _hmScopeEnd(px){
+  let m='';(DD.sanctions||[]).forEach(r=>{if(px.has(r[0])){const d=_hmDate(r);if(d>m)m=d}});
+  return m||_hmToday();
+}
+function _hmTutor(){
+  const px=_hmPupilsInScope(), SAN=DD.sanctions||[];
+  const end=_hmScopeEnd(px), wkStart=_hmShift(end,-6), prevStart=_hmShift(end,-13), prevEnd=_hmShift(end,-7);
+  const now={},was={},unprep={};
+  SAN.forEach((r,i)=>{
+    if(!px.has(r[0]))return;
+    const dt=_hmDate(r);
+    if(dt>=wkStart&&dt<=end){now[r[0]]=(now[r[0]]||0)+1; if(_hmIsUnprep(i))unprep[r[0]]=(unprep[r[0]]||0)+1;}
+    else if(dt>=prevStart&&dt<=prevEnd)was[r[0]]=(was[r[0]]||0)+1;
+  });
+  const rows=[...px].map(p=>({px:p,n:now[p]||0,p:was[p]||0,u:unprep[p]||0,d:(now[p]||0)-(was[p]||0)}))
+                    .filter(r=>r.n||r.p);
+  const worse=rows.filter(r=>r.d>0).sort((a,b)=>b.d-a.d).slice(0,4);
+  const better=rows.filter(r=>r.d<0).sort((a,b)=>a.d-b.d).slice(0,2);
+  const tot=rows.reduce((a,r)=>a+r.n,0), ptot=rows.reduce((a,r)=>a+r.p,0);
+  const totU=rows.reduce((a,r)=>a+r.u,0);
+
+  const stale=end<_hmToday();
+  let h=(stale?'<div style="font-size:.68rem;color:var(--tx2);margin-bottom:.5rem">Latest data for this group is '+end+'. The whole school runs to '+_hmToday()+'.</div>':'')
+    +'<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
+    +_hmCard('Sanctions, week to '+end.slice(8)+'/'+end.slice(5,7),tot,(tot-ptot>0?'▲ ':'▼ ')+Math.abs(tot-ptot),tot>ptot?'bad':'good')
+    +_hmCard('Pupils involved',rows.filter(r=>r.n).length+' of '+px.size,'')
+    +_hmCard('Unprepared share',tot?Math.round(100*totU/tot)+'%':'—','')
+    +'</div>';
+
+  if(!worse.length&&!better.length){
+    h+=_hmPanel('Nothing unusual this week','','<div style="font-size:.75rem;color:var(--tx2)">No pupil has moved materially since last week.</div>');
+    return h;
+  }
+  const line=r=>{
+    const codes={};SAN.forEach((s,i)=>{const d2=_hmDate(s);if(s[0]===r.px&&d2>=wkStart&&d2<=end){const c=(SANC_DET[i]||[])[0]||'Other';codes[c]=(codes[c]||0)+1}});
+    const top=Object.entries(codes).sort((a,b)=>b[1]-a[1]).slice(0,2).map(x=>x[0]).join(', ');
+    const subs={};SAN.forEach(s=>{const d3=_hmDate(s);if(s[0]===r.px&&d3>=wkStart&&d3<=end&&s[3])subs[s[3]]=(subs[s[3]]||0)+1});
+    const tsub=Object.entries(subs).sort((a,b)=>b[1]-a[1]).slice(0,2).map(x=>_hmSubj(x[0])).join(' and ');
+    const col=r.d>0?'var(--red)':'var(--green)';
+    return '<div style="display:flex;gap:.6rem;padding:.55rem 0;border-bottom:1px solid var(--bd)">'
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="font-size:.82rem;font-weight:600">'+_hmName(r.px)+' <span style="font-weight:400;color:var(--tx2)">'+_hmReg(r.px)+'</span></div>'
+      +'<div style="font-size:.7rem;color:var(--tx2);line-height:1.5">'
+      +(r.d>0? r.n+' this week, up from '+r.p+(top?'. Mostly '+top.toLowerCase():'')+(tsub?', in '+tsub:'')+'.'
+             : r.n+' this week, down from '+r.p+'. Worth saying so.')
+      +'</div><div style="margin-top:.25rem">'+_hmFlagChips(r.px)+'</div></div>'
+      +'<div style="font-size:1.1rem;font-weight:600;color:'+col+'">'+(r.d>0?'+':'')+r.d+'</div></div>';
+  };
+  if(worse.length) h+=_hmPanel('Needs a word on Monday','Biggest increases since last week',worse.map(line).join(''));
+  if(better.length) h+=_hmPanel('Worth acknowledging','Improved most since last week',better.map(line).join(''));
+  return h;
+}
+
+// ---- YEAR LEADER: patterns, thresholds, departments -------------------------
+function _hmYearLeader(){
+  const px=_hmPupilsInScope(), SAN=DD.sanctions||[];
+  const end=_hmScopeEnd(px), ayStart=(end.slice(5)>='09-01'?end.slice(0,4):(+end.slice(0,4)-1))+'-09-01';
+  const wkStart=_hmShift(end,-6), prevStart=_hmShift(end,-13), prevEnd=_hmShift(end,-7);
+  let wk=0,pw=0; const bySub={},byPer={},unprepBy={},totBy={};
+  SAN.forEach((r,i)=>{
+    const dt=_hmDate(r);
+    if(!px.has(r[0])||dt<ayStart)return;
+    if(dt>=wkStart&&dt<=end)wk++; else if(dt>=prevStart&&dt<=prevEnd)pw++;
+    const up=_hmIsUnprep(i);
+    if(up){ if(r[3])bySub[r[3]]=(bySub[r[3]]||0)+1; unprepBy[r[0]]=(unprepBy[r[0]]||0)+1; }
+    if(r[4]!=null)byPer[r[4]]=(byPer[r[4]]||0)+1;
+    totBy[r[0]]=(totBy[r[0]]||0)+1;
+  });
+  const totAll=Object.values(totBy).reduce((a,b)=>a+b,0);
+  const totUn=Object.values(unprepBy).reduce((a,b)=>a+b,0);
+  const ranked=Object.values(totBy).sort((a,b)=>b-a);
+  const top25=ranked.slice(0,25).reduce((a,b)=>a+b,0);
+
+  let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
+    +_hmCard('Sanctions this week',wk,(wk-pw>0?'▲ ':'▼ ')+(pw?Math.abs(Math.round(100*(wk-pw)/pw))+'%':''),wk>pw?'bad':'good')
+    +_hmCard('Unprepared share',totAll?Math.round(100*totUn/totAll)+'%':'—','of all sanctions')
+    +_hmCard('Top 25 pupils hold',totAll?Math.round(100*top25/totAll)+'%':'—','')
+    +'</div>';
+
+  const subs=Object.entries(bySub).map(([k,v])=>[_hmSubj(k),v]).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  if(subs.length){
+    const mx=subs[0][1];
+    const body=subs.map(([n,v])=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+      +'<span style="width:96px;color:var(--tx2)">'+n+'</span>'
+      +'<span style="flex:1">'+_hmBar(100*v/mx,v/mx>0.7?'bad':v/mx>0.4?'warn':'ok')+'</span>'
+      +'<span style="width:56px;text-align:right">'+Math.round(100*v/totUn)+'%</span></div>').join('');
+    const two=subs.slice(0,2);
+    const share=Math.round(100*(two.reduce((a,x)=>a+x[1],0))/totUn);
+    h+=_hmPanel('Unprepared sanctions by subject',
+      two.length>1?two[0][0]+' and '+two[1][0]+' are '+share+'% between them.':'',body);
+  }
+
+  const pers=Object.keys(byPer).sort();
+  if(pers.length){
+    const mx=Math.max(...pers.map(p=>byPer[p]));
+    const body='<div style="display:flex;align-items:flex-end;gap:.6rem;height:88px">'
+      +pers.map(p=>'<div style="flex:1;text-align:center">'
+        +'<div style="height:'+Math.round(76*byPer[p]/mx)+'px;background:'+(byPer[p]===mx?'var(--sky)':'var(--bd)')+';border-radius:4px 4px 0 0"></div>'
+        +'<div style="font-size:.64rem;color:var(--tx2);margin-top:.2rem">P'+p+'</div></div>').join('')+'</div>';
+    const peak=pers.find(p=>byPer[p]===mx);
+    const others=pers.filter(p=>p!==peak).map(p=>byPer[p]);
+    const avg=others.reduce((a,b)=>a+b,0)/(others.length||1);
+    h+=_hmPanel('Sanctions by period','P'+peak+' runs '+Math.round(100*(mx-avg)/avg)+'% above the other periods.',body);
+  }
+
+  const THRESH=15;
+  const crossed=Object.entries(unprepBy).filter(([p,n])=>n>=THRESH)
+    .sort((a,b)=>b[1]-a[1]).slice(0,8);
+  if(crossed.length){
+    const body='<table style="width:100%;font-size:.72rem;border-collapse:collapse">'
+      +'<tr style="color:var(--tx2);text-align:left"><th style="font-weight:500;padding:.2rem 0">Pupil</th><th style="font-weight:500">Form</th><th style="font-weight:500;text-align:right">Unprepared</th><th style="font-weight:500;text-align:right">All</th><th style="font-weight:500;text-align:right">Flags</th></tr>'
+      +crossed.map(([p,n])=>'<tr><td style="padding:.22rem 0">'+_hmName(p)+'</td><td>'+_hmReg(p)+'</td>'
+        +'<td style="text-align:right;font-weight:600">'+n+'</td><td style="text-align:right;color:var(--tx2)">'+(totBy[p]||0)+'</td>'
+        +'<td style="text-align:right">'+_hmFlagChips(p)+'</td></tr>').join('')+'</table>';
+    h+=_hmPanel('Above the intervention threshold',
+      THRESH+'+ unprepared sanctions since '+ayStart.slice(0,7)+'. These are the homework-club and equipment candidates.',body);
+  }
+  return h;
+}
+
+// ---- SLT: gaps and trends, no individuals ----------------------------------
+function _hmSLT(){
+  const SAN=DD.sanctions||[], F=_hmFlags();
+  const end=_hmToday(), ayStart=(end.slice(5)>='09-01'?end.slice(0,4):(+end.slice(0,4)-1))+'-09-01';
+  const reg=DD.registry||{};
+  const all=Object.keys(reg).map(Number);
+  const grp={neither:[],ehcp:[],sen:[],fsm:[],both:[]};
+  all.forEach(p=>{
+    const f=F[String(p)]||{};
+    if(f.ehcp)grp.ehcp.push(p);
+    else if(f.send&&f.fsm)grp.both.push(p);
+    else if(f.send)grp.sen.push(p);
+    else if(f.fsm)grp.fsm.push(p);
+    else grp.neither.push(p);
+  });
+  const tot={},un={};
+  SAN.forEach((r,i)=>{ if(_hmDate(r)<ayStart)return; tot[r[0]]=(tot[r[0]]||0)+1; if(_hmIsUnprep(i))un[r[0]]=(un[r[0]]||0)+1; });
+  const sum=(list,m)=>list.reduce((a,p)=>a+(m[p]||0),0);
+  const base=grp.neither.length?sum(grp.neither,tot)/grp.neither.length:0;
+
+  const labels={neither:'Neither FSM nor SEN',ehcp:'EHCP',sen:'SEN support, no EHCP',fsm:'FSM, no SEN',both:'FSM and SEN'};
+  const order=['neither','ehcp','sen','fsm','both'];
+  const mxU=Math.max(...order.map(k=>grp[k].length?sum(grp[k],un)/grp[k].length:0))||1;
+  const body='<table style="width:100%;font-size:.72rem;border-collapse:collapse">'
+    +'<tr style="color:var(--tx2);text-align:left"><th style="font-weight:500;padding:.2rem 0">Group</th><th style="font-weight:500;text-align:right">n</th><th style="font-weight:500;padding-left:.8rem">Unprepared per pupil</th><th style="font-weight:500;text-align:right">All</th><th style="font-weight:500;text-align:right">vs base</th></tr>'
+    +order.filter(k=>grp[k].length).map(k=>{
+      const n=grp[k].length, u=sum(grp[k],un)/n, t=sum(grp[k],tot)/n;
+      const ratio=base?t/base:0;
+      return '<tr><td style="padding:.25rem 0">'+labels[k]+'</td><td style="text-align:right;color:var(--tx2)">'+n+'</td>'
+        +'<td style="padding-left:.8rem">'+_hmBar(100*u/mxU,u/mxU>0.7?'bad':u/mxU>0.4?'warn':'ok')+' <span style="color:var(--tx2)">'+u.toFixed(1)+'</span></td>'
+        +'<td style="text-align:right">'+t.toFixed(0)+'</td>'
+        +'<td style="text-align:right;font-weight:600;color:'+(ratio>=2?'var(--red)':ratio>=1.5?'var(--orange)':'var(--tx2)')+'">'+(ratio?ratio.toFixed(1)+'×':'—')+'</td></tr>';
+    }).join('')+'</table>';
+
+  const fsmAll=[...grp.fsm,...grp.both], fsmR=fsmAll.length&&base?(sum(fsmAll,tot)/fsmAll.length)/base:0;
+  let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
+    +_hmCard('Per pupil this year',(Object.values(tot).reduce((a,b)=>a+b,0)/(all.length||1)).toFixed(1),'')
+    +_hmCard('FSM gap',fsmR?fsmR.toFixed(1)+'×':'—','vs no FSM or SEN',fsmR>=2?'bad':'')
+    +_hmCard('Pupils with none',all.filter(p=>!tot[p]).length+' of '+all.length,'')
+    +'</div>';
+  h+=_hmPanel('Sanctions per pupil by group',
+    'Unprepared means equipment, uniform or homework — the incidents a school can design out.',body);
+
+  // A composition read is far more robust than a rate when a group is small.
+  const comp=order.filter(k=>grp[k].length>=5).map(k=>{
+    const t=sum(grp[k],tot),u=sum(grp[k],un);
+    return [labels[k],grp[k].length,t?Math.round(100*u/t):0];
+  }).sort((a,b)=>b[2]-a[2]);
+  if(comp.length){
+    const cb=comp.map(c=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+      +'<span style="width:150px;color:var(--tx2)">'+c[0]+'</span>'
+      +'<span style="flex:1">'+_hmBar(c[2],c[2]>45?'bad':c[2]>30?'warn':'ok')+'</span>'
+      +'<span style="width:36px;text-align:right">'+c[2]+'%</span></div>').join('');
+    h+=_hmPanel('What share of each group\u2019s sanctions is unpreparedness',
+      'Composition holds up better than a raw rate when a group is small \u2014 a single pupil moves a mean, not a share.',cb);
+  }
+  return h;
+}
 
 // ===== PLATFORM OWNER: ADD SCHOOL (owner-only) =====
 // Renders the create-a-school form. The privileged work (creating the user, writing the locked
