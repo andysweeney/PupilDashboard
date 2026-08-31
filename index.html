@@ -7312,6 +7312,11 @@ function _hmSLT(){
   return h;
 }
 
+// The whole script runs inside an async IIFE, so these are not global by
+// default and inline onchange="" handlers cannot see them. Export them the
+// same way sw() is exported.
+window.rHmTutor=rHmTutor; window.rHmYear=rHmYear; window.rHmSLT=rHmSLT;
+
 // ===== PLATFORM OWNER: ADD SCHOOL (owner-only) =====
 // Renders the create-a-school form. The privileged work (creating the user, writing the locked
 // tables, seeding the key) happens server-side in the provision-school Edge Function — the browser
