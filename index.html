@@ -2006,6 +2006,11 @@ let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0, SA_ENGAGE=3;
 let SAV_RATIO=2.0, SAV_MIN=3;
 let CL_MIN_PUPILS=5, CL_MIN_CODES=5, CL_RATIO_AMBER=2.0, CL_RATIO_RED=3.0;
 let TG_MIN_SIZE=5, TG_ABS_DELTA=2, TG_SAN_RATIO=1.5, TG_SAN_MIN=5, TG_PA_MIN=3;
+// Front-page thresholds. HM_RISE / HM_FALL: how much a pupil's weekly sanction
+// score must move before a tutor is shown it. HM_MIN_WK: ignore pupils below
+// this many this week, so a 0->1 blip is not "needs a word". HM_UNPREP: the
+// year leader's intervention trigger — unprepared sanctions this academic year.
+let HM_RISE=2, HM_FALL=2, HM_MIN_WK=2, HM_UNPREP=15;
 
 // ── Threshold persistence ──
 // Saved values survive hard refreshes (per browser, per origin).
@@ -2024,7 +2029,8 @@ function saveThresholds(){
       SAV_RATIO, SAV_MIN,
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
-      SW_CODE, SW_ONCALL, SW_DET
+      SW_CODE, SW_ONCALL, SW_DET,
+      HM_RISE, HM_FALL, HM_MIN_WK, HM_UNPREP
     };
     saveCfg('thresholds', _LS_KEY, obj);
   } catch(e){
@@ -2076,6 +2082,10 @@ function applyThresholdValues(v){
   if((n=safeI(v.SW_CODE))!=null) SW_CODE=n;
   if((n=safeI(v.SW_ONCALL))!=null) SW_ONCALL=n;
   if((n=safeI(v.SW_DET))!=null) SW_DET=n;
+  if((n=safeI(v.HM_RISE))!=null) HM_RISE=n;
+  if((n=safeI(v.HM_FALL))!=null) HM_FALL=n;
+  if((n=safeI(v.HM_MIN_WK))!=null) HM_MIN_WK=n;
+  if((n=safeI(v.HM_UNPREP))!=null) HM_UNPREP=n;
 }
 
 // Defaults — single source of truth. Used by reset and as fallback.
@@ -2087,7 +2097,8 @@ const _THRESHOLD_DEFAULTS = {
   SAV_RATIO:2.0, SAV_MIN:3,
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
   TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
-  SW_CODE:1, SW_ONCALL:3, SW_DET:5
+  SW_CODE:1, SW_ONCALL:3, SW_DET:5,
+  HM_RISE:2, HM_FALL:2, HM_MIN_WK:2, HM_UNPREP:15
 };
 
 // Map of global name → DOM input id. Used to push values into Admin inputs after reset.
@@ -2100,7 +2111,8 @@ const _THRESHOLD_INPUTS = {
   SAV_RATIO:'sav-ratio', SAV_MIN:'sav-min',
   CL_MIN_PUPILS:'cl-min-pupils', CL_MIN_CODES:'cl-min-codes', CL_RATIO_AMBER:'cl-ratio-amber', CL_RATIO_RED:'cl-ratio-red',
   TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
-  SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det'
+  SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det',
+  HM_RISE:'hm-rise', HM_FALL:'hm-fall', HM_MIN_WK:'hm-min-wk', HM_UNPREP:'hm-unprep'
 };
 
 // Refresh all header display spans from current globals.
@@ -2146,6 +2158,10 @@ function resetThresholds(){
   _refreshThresholdDisplays();
 }
 function applyCT(){
+  HM_RISE=parseInt(document.getElementById('hm-rise').value)||2;
+  HM_FALL=parseInt(document.getElementById('hm-fall').value)||2;
+  HM_MIN_WK=parseInt(document.getElementById('hm-min-wk').value)||2;
+  HM_UNPREP=parseInt(document.getElementById('hm-unprep').value)||15;
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
   CT_SC=parseFloat(document.getElementById('ct-sc').value)||1.5;
@@ -7140,30 +7156,34 @@ function _hmScopeEnd(px){
 function _hmTutor(){
   const px=_hmPupilsInScope(), SAN=DD.sanctions||[];
   const end=_hmScopeEnd(px), wkStart=_hmShift(end,-6), prevStart=_hmShift(end,-13), prevEnd=_hmShift(end,-7);
-  const now={},was={},unprep={};
+  // Weighted with the Admin values, so a detention counts more than a late mark.
+  const now={},was={},unprep={},cnt={};
   SAN.forEach((r,i)=>{
     if(!px.has(r[0]))return;
-    const dt=_hmDate(r);
-    if(dt>=wkStart&&dt<=end){now[r[0]]=(now[r[0]]||0)+1; if(_hmIsUnprep(i))unprep[r[0]]=(unprep[r[0]]||0)+1;}
-    else if(dt>=prevStart&&dt<=prevEnd)was[r[0]]=(was[r[0]]||0)+1;
+    const dt=_hmDate(r), w=sancWeight(r[1]);
+    if(dt>=wkStart&&dt<=end){
+      now[r[0]]=(now[r[0]]||0)+w; cnt[r[0]]=(cnt[r[0]]||0)+1;
+      if(_hmIsUnprep(i))unprep[r[0]]=(unprep[r[0]]||0)+1;
+    } else if(dt>=prevStart&&dt<=prevEnd)was[r[0]]=(was[r[0]]||0)+w;
   });
-  const rows=[...px].map(p=>({px:p,n:now[p]||0,p:was[p]||0,u:unprep[p]||0,d:(now[p]||0)-(was[p]||0)}))
+  const rows=[...px].map(p=>({px:p,n:now[p]||0,c:cnt[p]||0,p:was[p]||0,u:unprep[p]||0,d:(now[p]||0)-(was[p]||0)}))
                     .filter(r=>r.n||r.p);
-  const worse=rows.filter(r=>r.d>0).sort((a,b)=>b.d-a.d).slice(0,4);
-  const better=rows.filter(r=>r.d<0).sort((a,b)=>a.d-b.d).slice(0,2);
+  // HM_MIN_WK stops a 0->1 blip reading as "needs a word".
+  const worse=rows.filter(r=>r.d>=HM_RISE&&r.c>=HM_MIN_WK).sort((a,b)=>b.d-a.d).slice(0,4);
+  const better=rows.filter(r=>-r.d>=HM_FALL).sort((a,b)=>a.d-b.d).slice(0,2);
   const tot=rows.reduce((a,r)=>a+r.n,0), ptot=rows.reduce((a,r)=>a+r.p,0);
-  const totU=rows.reduce((a,r)=>a+r.u,0);
+  const totU=rows.reduce((a,r)=>a+r.u,0), totC=rows.reduce((a,r)=>a+r.c,0);
 
   const stale=end<_hmToday();
   let h=(stale?'<div style="font-size:.68rem;color:var(--tx2);margin-bottom:.5rem">Latest data for this group is '+end+'. The whole school runs to '+_hmToday()+'.</div>':'')
     +'<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
-    +_hmCard('Sanctions, week to '+end.slice(8)+'/'+end.slice(5,7),tot,(tot-ptot>0?'▲ ':'▼ ')+Math.abs(tot-ptot),tot>ptot?'bad':'good')
-    +_hmCard('Pupils involved',rows.filter(r=>r.n).length+' of '+px.size,'')
-    +_hmCard('Unprepared share',tot?Math.round(100*totU/tot)+'%':'—','')
+    +_hmCard('Sanctions, week to '+end.slice(8)+'/'+end.slice(5,7),rows.reduce((a,r)=>a+r.c,0),(tot-ptot>0?'▲ ':'▼ ')+Math.abs(Math.round(tot-ptot))+' weighted',tot>ptot?'bad':'good')
+    +_hmCard('Pupils involved',rows.filter(r=>r.c).length+' of '+px.size,'')
+    +_hmCard('Unprepared share',totC?Math.round(100*totU/totC)+'%':'—','')
     +'</div>';
 
   if(!worse.length&&!better.length){
-    h+=_hmPanel('Nothing unusual this week','','<div style="font-size:.75rem;color:var(--tx2)">No pupil has moved materially since last week.</div>');
+    h+=_hmPanel('Nothing unusual this week','','<div style="font-size:.75rem;color:var(--tx2)">No pupil moved by '+HM_RISE+' or more on the weighted score. Change the trigger in Admin &rsaquo; Thresholds.</div>');
     return h;
   }
   const line=r=>{
@@ -7176,8 +7196,10 @@ function _hmTutor(){
       +'<div style="flex:1;min-width:0">'
       +'<div style="font-size:.82rem;font-weight:600">'+_hmName(r.px)+' <span style="font-weight:400;color:var(--tx2)">'+_hmReg(r.px)+'</span></div>'
       +'<div style="font-size:.7rem;color:var(--tx2);line-height:1.5">'
-      +(r.d>0? r.n+' this week, up from '+r.p+(top?'. Mostly '+top.toLowerCase():'')+(tsub?', in '+tsub:'')+'.'
-             : r.n+' this week, down from '+r.p+'. Worth saying so.')
+      +(r.d>0? r.c+(r.c===1?' sanction':' sanctions')+' this week, up from '+r.p
+               +(top&&r.c>1?'. Mostly '+top.toLowerCase():top?'. '+top:'')
+               +(tsub&&r.c>1?', in '+tsub:'')+'.'
+             : r.c+(r.c===1?' sanction':' sanctions')+' this week, down from '+r.p+'. Worth saying so.')
       +'</div><div style="margin-top:.25rem">'+_hmFlagChips(r.px)+'</div></div>'
       +'<div style="font-size:1.1rem;font-weight:600;color:'+col+'">'+(r.d>0?'+':'')+r.d+'</div></div>';
   };
@@ -7238,7 +7260,7 @@ function _hmYearLeader(){
     h+=_hmPanel('Sanctions by period','P'+peak+' runs '+Math.round(100*(mx-avg)/avg)+'% above the other periods.',body);
   }
 
-  const THRESH=15;
+  const THRESH=HM_UNPREP;
   const crossed=Object.entries(unprepBy).filter(([p,n])=>n>=THRESH)
     .sort((a,b)=>b[1]-a[1]).slice(0,8);
   if(crossed.length){
@@ -11977,6 +11999,15 @@ function rPeer(){
           'Concerns tab → Pupil Concerns',
           inputRow('Avoidance ratio','sav-ratio',SAV_RATIO,{min:1,max:10,step:0.5,hint:'Pupil’s share of qualifying absences from a subject ÷ that subject’s share of their timetable. Default 2.0×.'})+
           inputRow('Minimum qualifying absences','sav-min',SAV_MIN,{min:1,max:20,step:1,hint:'Minimum count of qualifying absences (partial-day + P1 whole-day) from one subject. Default 3.'})
+        )}
+        ${groupPanel(
+          'Front Pages',
+          'Controls the Form Tutor and Year Leader front pages. The tutor page shows pupils whose weighted sanction score moved week on week; the year leader page lists pupils above the intervention trigger.',
+          'Form Tutor tab; Year Leader tab',
+          inputRow('Rise before a tutor sees it','hm-rise',HM_RISE,{min:1,max:20,step:1,hint:'Weighted score must rise by at least this much week on week. Uses the sanction weights below. Default 2.'})+
+          inputRow('Fall before it counts as improvement','hm-fall',HM_FALL,{min:1,max:20,step:1,hint:'Weighted score must fall by at least this much to appear under Worth acknowledging. Default 2.'})+
+          inputRow('Minimum sanctions this week','hm-min-wk',HM_MIN_WK,{min:1,max:10,step:1,hint:'Ignore pupils below this many sanctions this week, so a single blip is not flagged. Default 2.'})+
+          inputRow('Intervention trigger','hm-unprep',HM_UNPREP,{min:1,max:100,step:1,hint:'Unprepared sanctions this academic year — equipment, uniform or homework — before a pupil is listed as a homework-club or equipment candidate. Default 15.'})
         )}
         ${groupPanel(
           'Ability and Effort Drops',
