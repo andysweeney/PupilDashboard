@@ -580,6 +580,19 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   // teacher / slot). Once-per-pupil concern types use subkey ''.
   function dismKey(px,type,subkey){return px+'|'+type+'|'+(subkey||'');}
 
+  // Stable identity. px is an import-order index and could in principle be
+  // reassigned by a rebuild; UPN cannot. We keep px as the key (it is what
+  // every view already uses) but stamp the UPN onto each dismissal so a note
+  // can be re-pointed at the right child if px ever moves. Falls back to the
+  // admission number, which is stable in practice, then to px.
+  function pupilAnchor(px){
+    const r=(DD.registry||{})[String(px)]||{};
+    if(r.upn) return 'upn:'+r.upn;
+    const m=String(r.id||'').match(/^\s*(\d+)/);
+    if(m) return 'adm:'+m[1];
+    return 'px:'+px;
+  }
+
   function dsmLoadLocal(){try{const r=localStorage.getItem(dsmLsKey());return r?JSON.parse(r):{};}catch(e){return{};}}
   function dsmPersist(){try{localStorage.setItem(dsmLsKey(),JSON.stringify(DSM));}catch(e){console.warn('Could not save dismissals:',e);}}
 
@@ -597,7 +610,7 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
       const seen=new Set(),merged=[];
       hist.forEach(h=>{const sig=h.when+'|'+h.who+'|'+(h.note||'');if(!seen.has(sig)){seen.add(sig);merged.push(h);}});
       merged.sort((x,y)=>(x.when<y.when?-1:x.when>y.when?1:0));
-      out[k]={key:k,px:base.px,type:base.type,subkey:base.subkey,label:base.label,history:merged};
+      out[k]={key:k,px:base.px,anchor:base.anchor||null,type:base.type,subkey:base.subkey,label:base.label,history:merged};
     });
     return out;
   }
@@ -2006,11 +2019,11 @@ let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0, SA_ENGAGE=3;
 let SAV_RATIO=2.0, SAV_MIN=3;
 let CL_MIN_PUPILS=5, CL_MIN_CODES=5, CL_RATIO_AMBER=2.0, CL_RATIO_RED=3.0;
 let TG_MIN_SIZE=5, TG_ABS_DELTA=2, TG_SAN_RATIO=1.5, TG_SAN_MIN=5, TG_PA_MIN=3;
-// Front-page thresholds. HM_RISE / HM_FALL: how much a pupil's weekly sanction
-// score must move before a tutor is shown it. HM_MIN_WK: ignore pupils below
-// this many this week, so a 0->1 blip is not "needs a word". HM_UNPREP: the
-// year leader's intervention trigger — unprepared sanctions this academic year.
-let HM_RISE=2, HM_FALL=2, HM_MIN_WK=2, HM_UNPREP=15;
+// The front pages use the school's existing Concerns/Congrats triggers, so they
+// need no thresholds of their own. HM_UNPREP is the one exception: the year
+// leader's intervention list (equipment and homework candidates) has no
+// equivalent in the Concerns tab.
+let HM_UNPREP=15;
 
 // ── Threshold persistence ──
 // Saved values survive hard refreshes (per browser, per origin).
@@ -2030,7 +2043,7 @@ function saveThresholds(){
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
       SW_CODE, SW_ONCALL, SW_DET,
-      HM_RISE, HM_FALL, HM_MIN_WK, HM_UNPREP
+      HM_UNPREP
     };
     saveCfg('thresholds', _LS_KEY, obj);
   } catch(e){
@@ -2082,9 +2095,6 @@ function applyThresholdValues(v){
   if((n=safeI(v.SW_CODE))!=null) SW_CODE=n;
   if((n=safeI(v.SW_ONCALL))!=null) SW_ONCALL=n;
   if((n=safeI(v.SW_DET))!=null) SW_DET=n;
-  if((n=safeI(v.HM_RISE))!=null) HM_RISE=n;
-  if((n=safeI(v.HM_FALL))!=null) HM_FALL=n;
-  if((n=safeI(v.HM_MIN_WK))!=null) HM_MIN_WK=n;
   if((n=safeI(v.HM_UNPREP))!=null) HM_UNPREP=n;
 }
 
@@ -2098,7 +2108,7 @@ const _THRESHOLD_DEFAULTS = {
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
   TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
   SW_CODE:1, SW_ONCALL:3, SW_DET:5,
-  HM_RISE:2, HM_FALL:2, HM_MIN_WK:2, HM_UNPREP:15
+  HM_UNPREP:15
 };
 
 // Map of global name → DOM input id. Used to push values into Admin inputs after reset.
@@ -2112,7 +2122,7 @@ const _THRESHOLD_INPUTS = {
   CL_MIN_PUPILS:'cl-min-pupils', CL_MIN_CODES:'cl-min-codes', CL_RATIO_AMBER:'cl-ratio-amber', CL_RATIO_RED:'cl-ratio-red',
   TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
   SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det',
-  HM_RISE:'hm-rise', HM_FALL:'hm-fall', HM_MIN_WK:'hm-min-wk', HM_UNPREP:'hm-unprep'
+  HM_UNPREP:'hm-unprep'
 };
 
 // Refresh all header display spans from current globals.
@@ -2158,9 +2168,6 @@ function resetThresholds(){
   _refreshThresholdDisplays();
 }
 function applyCT(){
-  HM_RISE=parseInt(document.getElementById('hm-rise').value)||2;
-  HM_FALL=parseInt(document.getElementById('hm-fall').value)||2;
-  HM_MIN_WK=parseInt(document.getElementById('hm-min-wk').value)||2;
   HM_UNPREP=parseInt(document.getElementById('hm-unprep').value)||15;
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
@@ -7145,132 +7152,147 @@ function rHmTutor(){ _HM_SCOPE=_hmFill('hm-scope-tutor',_hmForms())||'all'; _hmR
 function rHmYear(){  _HM_SCOPE=_hmFill('hm-scope-year',_hmYears())||'all';  _hmRender('hm-out-year',_hmYearLeader); }
 function rHmSLT(){   _HM_SCOPE='all';                                       _hmRender('hm-out-slt',_hmSLT); }
 
-// ---- FORM TUTOR: who changed, not who is highest ----------------------------
-// The last date differs by year group — one cohort's export can end a fortnight
-// before another's. Anchor on the newest date for THESE pupils, not the school,
-// or a form group whose data stopped early shows an empty page.
-function _hmScopeEnd(px){
-  let m='';(DD.sanctions||[]).forEach(r=>{if(px.has(r[0])){const d=_hmDate(r);if(d>m)m=d}});
-  return m||_hmToday();
+// ---- FORM TUTOR ------------------------------------------------------------
+// Mirrors the Concerns and Congrats tabs exactly. The school sets its triggers
+// once in Admin; this page shows which of THIS tutor's pupils have fired them,
+// nothing more. No separate idea of "concern" lives here.
+function _hmItems(p){
+  let con=[],cong=[];
+  try{ con=(typeof pupilOtherConcernItems==='function')?pupilOtherConcernItems(p):[]; }catch(e){}
+  try{ cong=(typeof pupilCongratsItems==='function')?pupilCongratsItems(p):[]; }catch(e){}
+  const ann=con.map(it=>{
+    let key='',act=null;
+    try{ key=dismKey(p,it.type,it.subkey||''); act=dismActive(key); }catch(e){}
+    return Object.assign({},it,{_key:key,_dismissal:act});
+  });
+  return {live:ann.filter(a=>!a._dismissal), considered:ann.filter(a=>a._dismissal), good:cong};
+}
+function _hmConcernRow(px,it){
+  const col=it.severity==='red'?'var(--red)':'var(--orange)';
+  let btn='';
+  try{ btn=dsmConsiderBtn(px,it.type,it.subkey||'',it.label,it.detail,firstName(px)); }catch(e){}
+  return '<div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin:.15rem 0">'
+    +'<span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:'+col+';border:1px solid '+col+'99;border-radius:3px;padding:.02rem .3rem">'+it.severity+'</span>'
+    +'<span style="font-size:.7rem;font-weight:600;min-width:9rem">'+it.label+'</span>'
+    +'<span style="font-size:.68rem;color:var(--tx2);flex:1">'+it.detail+'</span>'+btn+'</div>';
+}
+function _hmGoodRow(it){
+  return '<div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin:.15rem 0">'
+    +'<span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:var(--green);border:1px solid var(--green)99;border-radius:3px;padding:.02rem .3rem">'
+    +(it.severity==='green-strong'?'standout':'improving')+'</span>'
+    +'<span style="font-size:.7rem;font-weight:600;min-width:9rem">'+it.label+'</span>'
+    +'<span style="font-size:.68rem;color:var(--tx2);flex:1">'+it.detail+'</span></div>';
+}
+function _hmPupilBlock(px,rows,extra){
+  return '<div style="padding:.5rem 0;border-bottom:1px solid var(--bd)">'
+    +'<div style="font-size:.82rem;font-weight:600;margin-bottom:.2rem">'+_hmName(px)
+    +' <span style="font-weight:400;color:var(--tx2)">'+_hmReg(px)+'</span> '+_hmFlagChips(px)
+    +(extra||'')+'</div>'+rows+'</div>';
 }
 function _hmTutor(){
-  const px=_hmPupilsInScope(), SAN=DD.sanctions||[];
-  const end=_hmScopeEnd(px), wkStart=_hmShift(end,-6), prevStart=_hmShift(end,-13), prevEnd=_hmShift(end,-7);
-  // Weighted with the Admin values, so a detention counts more than a late mark.
-  const now={},was={},unprep={},cnt={};
-  SAN.forEach((r,i)=>{
-    if(!px.has(r[0]))return;
-    const dt=_hmDate(r), w=sancWeight(r[1]);
-    if(dt>=wkStart&&dt<=end){
-      now[r[0]]=(now[r[0]]||0)+w; cnt[r[0]]=(cnt[r[0]]||0)+1;
-      if(_hmIsUnprep(i))unprep[r[0]]=(unprep[r[0]]||0)+1;
-    } else if(dt>=prevStart&&dt<=prevEnd)was[r[0]]=(was[r[0]]||0)+w;
+  const px=_hmPupilsInScope();
+  const con=[],good=[],handled=[];
+  px.forEach(p=>{
+    const r=_hmItems(p);
+    if(r.live.length)con.push({px:p,items:r.live,considered:r.considered.length});
+    else if(r.considered.length)handled.push({px:p,n:r.considered.length});
+    if(r.good.length)good.push({px:p,items:r.good});
   });
-  const rows=[...px].map(p=>({px:p,n:now[p]||0,c:cnt[p]||0,p:was[p]||0,u:unprep[p]||0,d:(now[p]||0)-(was[p]||0)}))
-                    .filter(r=>r.n||r.p);
-  // HM_MIN_WK stops a 0->1 blip reading as "needs a word".
-  const worse=rows.filter(r=>r.d>=HM_RISE&&r.c>=HM_MIN_WK).sort((a,b)=>b.d-a.d).slice(0,4);
-  const better=rows.filter(r=>-r.d>=HM_FALL).sort((a,b)=>a.d-b.d).slice(0,2);
-  const tot=rows.reduce((a,r)=>a+r.n,0), ptot=rows.reduce((a,r)=>a+r.p,0);
-  const totU=rows.reduce((a,r)=>a+r.u,0), totC=rows.reduce((a,r)=>a+r.c,0);
+  const red=con.filter(c=>c.items.some(i=>i.severity==='red')).length;
 
-  const stale=end<_hmToday();
-  let h=(stale?'<div style="font-size:.68rem;color:var(--tx2);margin-bottom:.5rem">Latest data for this group is '+end+'. The whole school runs to '+_hmToday()+'.</div>':'')
-    +'<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
-    +_hmCard('Sanctions, week to '+end.slice(8)+'/'+end.slice(5,7),rows.reduce((a,r)=>a+r.c,0),(tot-ptot>0?'▲ ':'▼ ')+Math.abs(Math.round(tot-ptot))+' weighted',tot>ptot?'bad':'good')
-    +_hmCard('Pupils involved',rows.filter(r=>r.c).length+' of '+px.size,'')
-    +_hmCard('Unprepared share',totC?Math.round(100*totU/totC)+'%':'—','')
+  let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
+    +_hmCard('Need attention',con.length+' of '+px.size,red?red+' red':'',con.length?'bad':'')
+    +_hmCard('Going well',good.length+' of '+px.size,'',good.length?'good':'')
+    +_hmCard('Already considered',handled.length,'')
     +'</div>';
 
-  if(!worse.length&&!better.length){
-    h+=_hmPanel('Nothing unusual this week','','<div style="font-size:.75rem;color:var(--tx2)">No pupil moved by '+HM_RISE+' or more on the weighted score. Change the trigger in Admin &rsaquo; Thresholds.</div>');
-    return h;
+  if(con.length){
+    con.sort((a,b)=>(b.items.some(i=>i.severity==='red')?1:0)-(a.items.some(i=>i.severity==='red')?1:0)
+                    ||b.items.length-a.items.length);
+    h+=_hmPanel('Needs attention',
+      'The Concerns tab triggers, for your form. Marking one considered here hides it there too.',
+      con.map(c=>_hmPupilBlock(c.px,c.items.map(it=>_hmConcernRow(c.px,it)).join(''),
+        c.considered?' <span style="font-size:.6rem;color:var(--tx2)">'+c.considered+' already considered</span>':'')).join(''));
   }
-  const line=r=>{
-    const codes={};SAN.forEach((s,i)=>{const d2=_hmDate(s);if(s[0]===r.px&&d2>=wkStart&&d2<=end){const c=(SANC_DET[i]||[])[0]||'Other';codes[c]=(codes[c]||0)+1}});
-    const top=Object.entries(codes).sort((a,b)=>b[1]-a[1]).slice(0,2).map(x=>x[0]).join(', ');
-    const subs={};SAN.forEach(s=>{const d3=_hmDate(s);if(s[0]===r.px&&d3>=wkStart&&d3<=end&&s[3])subs[s[3]]=(subs[s[3]]||0)+1});
-    const tsub=Object.entries(subs).sort((a,b)=>b[1]-a[1]).slice(0,2).map(x=>_hmSubj(x[0])).join(' and ');
-    const col=r.d>0?'var(--red)':'var(--green)';
-    return '<div style="display:flex;gap:.6rem;padding:.55rem 0;border-bottom:1px solid var(--bd)">'
-      +'<div style="flex:1;min-width:0">'
-      +'<div style="font-size:.82rem;font-weight:600">'+_hmName(r.px)+' <span style="font-weight:400;color:var(--tx2)">'+_hmReg(r.px)+'</span></div>'
-      +'<div style="font-size:.7rem;color:var(--tx2);line-height:1.5">'
-      +(r.d>0? r.c+(r.c===1?' sanction':' sanctions')+' this week, up from '+r.p
-               +(top&&r.c>1?'. Mostly '+top.toLowerCase():top?'. '+top:'')
-               +(tsub&&r.c>1?', in '+tsub:'')+'.'
-             : r.c+(r.c===1?' sanction':' sanctions')+' this week, down from '+r.p+'. Worth saying so.')
-      +'</div><div style="margin-top:.25rem">'+_hmFlagChips(r.px)+'</div></div>'
-      +'<div style="font-size:1.1rem;font-weight:600;color:'+col+'">'+(r.d>0?'+':'')+r.d+'</div></div>';
-  };
-  if(worse.length) h+=_hmPanel('Needs a word on Monday','Biggest increases since last week',worse.map(line).join(''));
-  if(better.length) h+=_hmPanel('Worth acknowledging','Improved most since last week',better.map(line).join(''));
+  if(good.length){
+    h+=_hmPanel('Going well','The Congrats triggers. Worth a word for the right reason.',
+      good.slice(0,6).map(g=>_hmPupilBlock(g.px,g.items.map(_hmGoodRow).join(''),'')).join(''));
+  }
+  if(handled.length){
+    h+=_hmPanel('Considered earlier','',
+      '<div style="font-size:.72rem;color:var(--tx2)">'
+      +handled.map(x=>_hmName(x.px)+' ('+x.n+')').join(' &middot; ')+'</div>');
+  }
+  if(!con.length&&!good.length&&!handled.length){
+    h+=_hmPanel('Nothing needs you this week','',
+      '<div style="font-size:.75rem;color:var(--tx2)">No pupil in this form has triggered a concern or a congratulation. The triggers are in Admin &rsaquo; Thresholds.</div>');
+  }
   return h;
 }
 
-// ---- YEAR LEADER: patterns, thresholds, departments -------------------------
+// ---- YEAR LEADER -----------------------------------------------------------
+// The same Concerns and Congrats triggers, counted rather than listed. A year
+// leader wants to know which concern types are firing, in which forms, and who
+// is carrying more than one — not a separate metric of their own.
 function _hmYearLeader(){
-  const px=_hmPupilsInScope(), SAN=DD.sanctions||[];
-  const end=_hmScopeEnd(px), ayStart=(end.slice(5)>='09-01'?end.slice(0,4):(+end.slice(0,4)-1))+'-09-01';
-  const wkStart=_hmShift(end,-6), prevStart=_hmShift(end,-13), prevEnd=_hmShift(end,-7);
-  let wk=0,pw=0; const bySub={},byPer={},unprepBy={},totBy={};
-  SAN.forEach((r,i)=>{
-    const dt=_hmDate(r);
-    if(!px.has(r[0])||dt<ayStart)return;
-    if(dt>=wkStart&&dt<=end)wk++; else if(dt>=prevStart&&dt<=prevEnd)pw++;
-    const up=_hmIsUnprep(i);
-    if(up){ if(r[3])bySub[r[3]]=(bySub[r[3]]||0)+1; unprepBy[r[0]]=(unprepBy[r[0]]||0)+1; }
-    if(r[4]!=null)byPer[r[4]]=(byPer[r[4]]||0)+1;
-    totBy[r[0]]=(totBy[r[0]]||0)+1;
+  const px=_hmPupilsInScope();
+  const byType={},byForm={},multi=[],goodN=[];
+  let conN=0,redN=0,consN=0;
+  px.forEach(p=>{
+    const r=_hmItems(p);
+    consN+=r.considered.length;
+    if(r.good.length)goodN.push(p);
+    if(!r.live.length)return;
+    conN++;
+    if(r.live.some(i=>i.severity==='red'))redN++;
+    const f=_hmReg(p)||'—';
+    byForm[f]=(byForm[f]||0)+1;
+    r.live.forEach(it=>{
+      const k=it.label;
+      if(!byType[k])byType[k]={n:0,red:0};
+      byType[k].n++; if(it.severity==='red')byType[k].red++;
+    });
+    if(r.live.length>1)multi.push({px:p,items:r.live});
   });
-  const totAll=Object.values(totBy).reduce((a,b)=>a+b,0);
-  const totUn=Object.values(unprepBy).reduce((a,b)=>a+b,0);
-  const ranked=Object.values(totBy).sort((a,b)=>b-a);
-  const top25=ranked.slice(0,25).reduce((a,b)=>a+b,0);
 
   let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
-    +_hmCard('Sanctions this week',wk,(wk-pw>0?'▲ ':'▼ ')+(pw?Math.abs(Math.round(100*(wk-pw)/pw))+'%':''),wk>pw?'bad':'good')
-    +_hmCard('Unprepared share',totAll?Math.round(100*totUn/totAll)+'%':'—','of all sanctions')
-    +_hmCard('Top 25 pupils hold',totAll?Math.round(100*top25/totAll)+'%':'—','')
+    +_hmCard('Pupils with a concern',conN+' of '+px.size,redN?redN+' with a red':'',conN?'bad':'')
+    +_hmCard('More than one',multi.length,'')
+    +_hmCard('Going well',goodN.length,'',goodN.length?'good':'')
+    +_hmCard('Considered',consN,'')
     +'</div>';
 
-  const subs=Object.entries(bySub).map(([k,v])=>[_hmSubj(k),v]).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  if(subs.length){
-    const mx=subs[0][1];
-    const body=subs.map(([n,v])=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
-      +'<span style="width:96px;color:var(--tx2)">'+n+'</span>'
-      +'<span style="flex:1">'+_hmBar(100*v/mx,v/mx>0.7?'bad':v/mx>0.4?'warn':'ok')+'</span>'
-      +'<span style="width:56px;text-align:right">'+Math.round(100*v/totUn)+'%</span></div>').join('');
-    const two=subs.slice(0,2);
-    const share=Math.round(100*(two.reduce((a,x)=>a+x[1],0))/totUn);
-    h+=_hmPanel('Unprepared sanctions by subject',
-      two.length>1?two[0][0]+' and '+two[1][0]+' are '+share+'% between them.':'',body);
+  const types=Object.entries(byType).sort((a,b)=>b[1].n-a[1].n);
+  if(types.length){
+    const mx=types[0][1].n;
+    h+=_hmPanel('Which triggers are firing','Counts of live concerns, not pupils — one pupil can appear in several.',
+      types.map(([k,v])=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+        +'<span style="width:150px;color:var(--tx2)">'+k+'</span>'
+        +'<span style="flex:1">'+_hmBar(100*v.n/mx,v.red?'bad':'warn')+'</span>'
+        +'<span style="width:64px;text-align:right">'+v.n+(v.red?' <span style="color:var(--red)">('+v.red+' red)</span>':'')+'</span></div>').join(''));
   }
 
-  const pers=Object.keys(byPer).sort();
-  if(pers.length){
-    const mx=Math.max(...pers.map(p=>byPer[p]));
-    const body='<div style="display:flex;align-items:flex-end;gap:.6rem;height:88px">'
-      +pers.map(p=>'<div style="flex:1;text-align:center">'
-        +'<div style="height:'+Math.round(76*byPer[p]/mx)+'px;background:'+(byPer[p]===mx?'var(--sky)':'var(--bd)')+';border-radius:4px 4px 0 0"></div>'
-        +'<div style="font-size:.64rem;color:var(--tx2);margin-top:.2rem">P'+p+'</div></div>').join('')+'</div>';
-    const peak=pers.find(p=>byPer[p]===mx);
-    const others=pers.filter(p=>p!==peak).map(p=>byPer[p]);
-    const avg=others.reduce((a,b)=>a+b,0)/(others.length||1);
-    h+=_hmPanel('Sanctions by period','P'+peak+' runs '+Math.round(100*(mx-avg)/avg)+'% above the other periods.',body);
+  const forms=Object.entries(byForm).sort((a,b)=>b[1]-a[1]);
+  if(forms.length>1){
+    const mx=forms[0][1];
+    h+=_hmPanel('By form group','Pupils with at least one live concern.',
+      forms.map(([k,v])=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+        +'<span style="width:80px;color:var(--tx2)">'+k+'</span>'
+        +'<span style="flex:1">'+_hmBar(100*v/mx,v/mx>0.7?'bad':'warn')+'</span>'
+        +'<span style="width:32px;text-align:right">'+v+'</span></div>').join(''));
   }
 
-  const THRESH=HM_UNPREP;
-  const crossed=Object.entries(unprepBy).filter(([p,n])=>n>=THRESH)
-    .sort((a,b)=>b[1]-a[1]).slice(0,8);
-  if(crossed.length){
-    const body='<table style="width:100%;font-size:.72rem;border-collapse:collapse">'
-      +'<tr style="color:var(--tx2);text-align:left"><th style="font-weight:500;padding:.2rem 0">Pupil</th><th style="font-weight:500">Form</th><th style="font-weight:500;text-align:right">Unprepared</th><th style="font-weight:500;text-align:right">All</th><th style="font-weight:500;text-align:right">Flags</th></tr>'
-      +crossed.map(([p,n])=>'<tr><td style="padding:.22rem 0">'+_hmName(p)+'</td><td>'+_hmReg(p)+'</td>'
-        +'<td style="text-align:right;font-weight:600">'+n+'</td><td style="text-align:right;color:var(--tx2)">'+(totBy[p]||0)+'</td>'
-        +'<td style="text-align:right">'+_hmFlagChips(p)+'</td></tr>').join('')+'</table>';
-    h+=_hmPanel('Above the intervention threshold',
-      THRESH+'+ unprepared sanctions since '+ayStart.slice(0,7)+'. These are the homework-club and equipment candidates.',body);
+  if(multi.length){
+    multi.sort((a,b)=>b.items.length-a.items.length);
+    h+=_hmPanel('Carrying more than one concern',
+      'These pupils have fired several triggers at once — usually the ones to look at first.',
+      multi.slice(0,10).map(m=>_hmPupilBlock(m.px,
+        m.items.map(it=>_hmConcernRow(m.px,it)).join(''),'')).join(''));
+  }
+
+  if(!conN&&!goodN.length){
+    h+=_hmPanel('Nothing firing','',
+      '<div style="font-size:.75rem;color:var(--tx2)">No pupil in this year group has triggered a concern. The triggers are in Admin &rsaquo; Thresholds.</div>');
   }
   return h;
 }
@@ -7315,6 +7337,21 @@ function _hmSLT(){
     +_hmCard('FSM gap',fsmR?fsmR.toFixed(1)+'×':'—','vs no FSM or SEN',fsmR>=2?'bad':'')
     +_hmCard('Pupils with none',all.filter(p=>!tot[p]).length+' of '+all.length,'')
     +'</div>';
+  // Concern rate by group, on the school's own triggers — the same question the
+  // gap table asks, but through the lens the school has already calibrated.
+  const conBy={};
+  order.forEach(k=>{
+    let n=0;
+    grp[k].forEach(p=>{ const r=_hmItems(p); if(r.live.length)n++; });
+    conBy[k]=grp[k].length?100*n/grp[k].length:0;
+  });
+  const mxC=Math.max(...Object.values(conBy))||1;
+  h+=_hmPanel('Pupils triggering a concern, by group',
+    'Using the school\u2019s own Concerns thresholds rather than a raw count.',
+    order.filter(k=>grp[k].length).map(k=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+      +'<span style="width:150px;color:var(--tx2)">'+labels[k]+'</span>'
+      +'<span style="flex:1">'+_hmBar(100*conBy[k]/mxC,conBy[k]/mxC>0.7?'bad':'warn')+'</span>'
+      +'<span style="width:44px;text-align:right">'+Math.round(conBy[k])+'%</span></div>').join(''));
   h+=_hmPanel('Sanctions per pupil by group',
     'Unprepared means equipment, uniform or homework — the incidents a school can design out.',body);
 
@@ -10710,8 +10747,15 @@ function rPeer(){
   // single bordered panel listing each one that has fired, with severity colour and
   // brief detail. Mirrors the Concerns tab logic so the same triggers apply.
   function pupilOtherConcernsAlert(px){
+    const items=pupilOtherConcernItems(px);
+    if(!items.length) return'';
+    return _pocRender(px,items);
+  }
+  // The item list on its own, so other views can reuse the same triggers,
+  // severities and dismissal keys. Returns [] when nothing fires.
+  function pupilOtherConcernItems(px){
     const yg=curYG(REG[String(px)]?.intake);
-    if(!yg) return'';
+    if(!yg) return[];
     const fn=firstName(px);
     const items=[];
     
@@ -10766,8 +10810,10 @@ function rPeer(){
       items.push({type:'sanc-conc',subkey:f.teacher,label:'Sanctions Concentration',severity:sev,detail});
     });
     
-    if(!items.length) return'';
-
+    return items;
+  }
+  function _pocRender(px,items){
+    const fn=firstName(px);
     // Annotate each concern with its key + dismissal state, KEEPING ORDER.
     // Considered concerns stay in place, just greyed — they don't move or hide.
     const annotated=items.map(it=>{
@@ -10807,8 +10853,14 @@ function rPeer(){
   // Positive mirror of pupilOtherConcernsAlert — surfaces the directional improvements and
   // 100% attendance on the pupil page. No dismissal (positives aren't "considered away").
   function pupilCongratsAlert(px){
+    const items=pupilCongratsItems(px);
+    if(!items.length) return'';
+    return _pcgRender(px,items);
+  }
+  // Items only, so other views reuse the same CG_* triggers.
+  function pupilCongratsItems(px){
     const yg=curYG(REG[String(px)]?.intake);
-    if(!yg) return'';
+    if(!yg) return[];
     const fn=firstName(px);
     const items=[];
     const _ay=`${CAY}-09-01`;
@@ -10844,7 +10896,9 @@ function rPeer(){
           detail:`${fn} has ${_pct.toFixed(1)}% attendance this year — only ${_abs} period${_abs===1?'':'s'} missed since September.`});
       }
     }
-    if(!items.length) return'';
+    return items;
+  }
+  function _pcgRender(px,items){
     const GREEN=PAL.green, GREEN2='#6bbf9a';
     const rows=items.map(it=>{
       const col=it.severity==='green-strong'?GREEN:GREEN2;
@@ -12002,11 +12056,8 @@ function rPeer(){
         )}
         ${groupPanel(
           'Front Pages',
-          'Controls the Form Tutor and Year Leader front pages. The tutor page shows pupils whose weighted sanction score moved week on week; the year leader page lists pupils above the intervention trigger.',
-          'Form Tutor tab; Year Leader tab',
-          inputRow('Rise before a tutor sees it','hm-rise',HM_RISE,{min:1,max:20,step:1,hint:'Weighted score must rise by at least this much week on week. Uses the sanction weights below. Default 2.'})+
-          inputRow('Fall before it counts as improvement','hm-fall',HM_FALL,{min:1,max:20,step:1,hint:'Weighted score must fall by at least this much to appear under Worth acknowledging. Default 2.'})+
-          inputRow('Minimum sanctions this week','hm-min-wk',HM_MIN_WK,{min:1,max:10,step:1,hint:'Ignore pupils below this many sanctions this week, so a single blip is not flagged. Default 2.'})+
+          'The Form Tutor, Year Leader and SLT pages use the Concerns and Congrats triggers above, so they need no separate settings. This is the one exception: the intervention list on the Year Leader page, which has no equivalent elsewhere.',
+          'Year Leader tab',
           inputRow('Intervention trigger','hm-unprep',HM_UNPREP,{min:1,max:100,step:1,hint:'Unprepared sanctions this academic year — equipment, uniform or homework — before a pupil is listed as a homework-club or equipment candidate. Default 15.'})
         )}
         ${groupPanel(
