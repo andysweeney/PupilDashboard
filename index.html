@@ -135,7 +135,9 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <button id="tab-admin" class="tb" style="display:none" onclick="sw('admin',this)">🔧 Admin</button>
 <button id="tab-upload" class="tb" style="display:none" onclick="sw('upload',this)">⬆️ Upload</button>
 <button id="tab-schools" class="tb" style="display:none" onclick="sw('schools',this)">🏫 Schools</button>
-<button class="tb on" onclick="sw('home',this)">🏠 Home</button>
+<button class="tb on" onclick="sw('hmtutor',this)">🏠 Form Tutor</button>
+<button class="tb" onclick="sw('hmyear',this)">🏠 Year Leader</button>
+<button class="tb" onclick="sw('hmslt',this)">🏠 SLT</button>
 <button class="tb" onclick="sw('pupil',this)">👤 Pupil</button>
 <button class="tb" onclick="sw('subject',this)">📚 Subject</button>
 <button class="tb" onclick="sw('class',this)">🏫 Class</button>
@@ -167,18 +169,24 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 </div>
 </header>
 
-<div id="vw-home" class="vw on">
+<div id="vw-hmtutor" class="vw on">
 <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">
-  <label style="font-size:.72rem;color:var(--tx2);font-weight:600">Viewing as</label>
-  <select id="hm-role" onchange="rHome()" style="font-size:.75rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)">
-    <option value="tutor">Form tutor</option>
-    <option value="year">Year leader</option>
-    <option value="slt">Senior leadership</option>
-  </select>
-  <select id="hm-scope" onchange="rHome()" style="font-size:.75rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)"></select>
-  <span style="font-size:.68rem;color:var(--tx2)">Role selection is temporary — this will follow the signed-in user.</span>
+  <label style="font-size:.72rem;color:var(--tx2);font-weight:600">Form group</label>
+  <select id="hm-scope-tutor" onchange="rHmTutor()" style="font-size:.75rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)"></select>
 </div>
-<div id="hm-out"></div>
+<div id="hm-out-tutor"></div>
+</div>
+
+<div id="vw-hmyear" class="vw">
+<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">
+  <label style="font-size:.72rem;color:var(--tx2);font-weight:600">Year group</label>
+  <select id="hm-scope-year" onchange="rHmYear()" style="font-size:.75rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)"></select>
+</div>
+<div id="hm-out-year"></div>
+</div>
+
+<div id="vw-hmslt" class="vw">
+<div id="hm-out-slt"></div>
 </div>
 <div id="vw-pupil" class="vw">
 <div class="ctl">
@@ -7004,7 +7012,7 @@ function sw(v,btn){
   // instead, because those also run when the dropdown changes — so switching from
   // 10A to 10B writes its own row, which a tab-level log would miss.
   try{ if(v!=='class'&&v!=='tutor') auditLog('view_opened',null,null,{view:v}); }catch(e){}
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='home')rHome();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='hmtutor')rHmTutor();else if(v==='hmyear')rHmYear();else if(v==='hmslt')rHmSLT();else rP();
 }
 
 
@@ -7083,28 +7091,11 @@ function _hmBar(pct,tone){
   return '<span style="display:inline-block;width:'+Math.max(2,Math.round(pct))+'%;height:7px;background:'+c+';border-radius:4px;vertical-align:middle"></span>';
 }
 
-// The scope dropdown depends on the role.
-function _hmPopScope(){
-  const role=document.getElementById('hm-role').value;
-  const sel=document.getElementById('hm-scope');
-  const prev=sel.value;
-  let opts=[];
-  if(role==='tutor'){
-    const regs=new Set();Object.values(DD.registry||{}).forEach(r=>{if(r.reg)regs.add(r.reg)});
-    opts=[...regs].sort().map(r=>['reg:'+r,r]);
-  }else if(role==='year'){
-    const ys=new Set();Object.values(DD.registry||{}).forEach(r=>{if(r.year)ys.add(r.year)});
-    opts=[...ys].sort().map(y=>['year:'+y,y]);
-  }else{ opts=[['all','Whole school']]; }
-  sel.innerHTML=opts.map(o=>'<option value="'+o[0]+'">'+o[1]+'</option>').join('');
-  if(opts.some(o=>o[0]===prev))sel.value=prev;
-  sel.style.display=opts.length>1?'':'none';
-}
-
+// Each view owns its own scope picker. The value is read straight off the
+// element rather than held in a variable, so a re-render always reflects the UI.
+let _HM_SCOPE='all';
 function _hmPupilsInScope(){
-  const v=(document.getElementById('hm-scope')||{}).value||'all';
-  const reg=DD.registry||{};
-  const out=new Set();
+  const v=_HM_SCOPE||'all', reg=DD.registry||{}, out=new Set();
   Object.entries(reg).forEach(([px,r])=>{
     if(v==='all')out.add(+px);
     else if(v.startsWith('reg:')&&r.reg===v.slice(4))out.add(+px);
@@ -7112,17 +7103,31 @@ function _hmPupilsInScope(){
   });
   return out;
 }
-
-function rHome(){
-  _hmPopScope();
-  const role=document.getElementById('hm-role').value;
-  const out=document.getElementById('hm-out');
-  try{
-    out.innerHTML = role==='tutor' ? _hmTutor() : role==='year' ? _hmYearLeader() : _hmSLT();
-  }catch(e){
-    out.innerHTML='<div style="color:var(--red);padding:1rem">Could not build this view: '+e.message+'</div>';
+function _hmFill(selId,values){
+  const sel=document.getElementById(selId);
+  if(!sel)return null;
+  if(!sel.options.length){
+    sel.innerHTML=values.map(v=>'<option value="'+v[0]+'">'+v[1]+'</option>').join('');
   }
+  return sel.value||(values[0]&&values[0][0]);
 }
+function _hmForms(){
+  const r=new Set();Object.values(DD.registry||{}).forEach(x=>{if(x.reg)r.add(x.reg)});
+  return [...r].sort().map(x=>['reg:'+x,x]);
+}
+function _hmYears(){
+  const y=new Set();Object.values(DD.registry||{}).forEach(x=>{if(x.year)y.add(x.year)});
+  return [...y].sort().map(x=>['year:'+x,x]);
+}
+function _hmRender(outId,fn){
+  const el=document.getElementById(outId);
+  if(!el)return;
+  try{ el.innerHTML=fn(); }
+  catch(e){ el.innerHTML='<div style="color:var(--red);padding:1rem">Could not build this view: '+e.message+'</div>'; }
+}
+function rHmTutor(){ _HM_SCOPE=_hmFill('hm-scope-tutor',_hmForms())||'all'; _hmRender('hm-out-tutor',_hmTutor); }
+function rHmYear(){  _HM_SCOPE=_hmFill('hm-scope-year',_hmYears())||'all';  _hmRender('hm-out-year',_hmYearLeader); }
+function rHmSLT(){   _HM_SCOPE='all';                                       _hmRender('hm-out-slt',_hmSLT); }
 
 // ---- FORM TUTOR: who changed, not who is highest ----------------------------
 // The last date differs by year group — one cohort's export can end a fortnight
