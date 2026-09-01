@@ -7091,9 +7091,24 @@ function _hmFlags(){
   _HM_FLAGS=f; return f;
 }
 function _hmFlagChips(px){
-  const f=_hmFlags()[String(px)]||{};const out=[];
-  if(f.fsm)out.push('FSM'); if(f.ehcp)out.push('EHCP'); else if(f.send)out.push('SEN support');
-  return out.map(t=>'<span style="font-size:.62rem;background:var(--sf2);border:1px solid var(--bd);color:var(--tx2);padding:.08rem .38rem;border-radius:4px">'+t+'</span>').join(' ');
+  const f=_hmFlags()[String(px)]||{}, out=[];
+  if(f.fsm)out.push(['FSM',null]);
+  // Use the school's own SEN code and its label rather than collapsing every
+  // status to "SEN support" — K and E are statutory and mean specific things,
+  // and a school may have renamed any of them in Admin.
+  const code=(DD.senStatus||{})[String(px)];
+  if(code){
+    const lab=(typeof SEN_LABELS!=='undefined'&&SEN_LABELS[code])||code;
+    const col=(typeof SEN_COLORS!=='undefined'&&SEN_COLORS[code])||null;
+    out.push([lab,col]);
+  } else if(f.ehcp) out.push(['EHCP',null]);
+  else if(f.send) out.push(['SEND',null]);
+  return out.map(t=>{
+    const c=t[1];
+    return '<span style="font-size:.62rem;background:var(--sf2);border:1px solid '
+      +(c?c+'66':'var(--bd)')+';color:'+(c||'var(--tx2)')
+      +';padding:.08rem .38rem;border-radius:4px">'+t[0]+'</span>';
+  }).join(' ');
 }
 
 function _hmCard(label,value,note,tone){
