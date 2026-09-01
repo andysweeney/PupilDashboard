@@ -2024,6 +2024,10 @@ let TG_MIN_SIZE=5, TG_ABS_DELTA=2, TG_SAN_RATIO=1.5, TG_SAN_MIN=5, TG_PA_MIN=3;
 // leader's intervention list (equipment and homework candidates) has no
 // equivalent in the Concerns tab.
 let HM_UNPREP=15;
+// Every red is always shown — those are the ones a tutor must not miss. Ambers
+// are capped, with the rest behind an expander, so a bad week does not bury the
+// page. Reds are never counted against the cap.
+let HM_AMBER_TG=4, HM_AMBER_YL=10;
 
 // ── Threshold persistence ──
 // Saved values survive hard refreshes (per browser, per origin).
@@ -2043,7 +2047,7 @@ function saveThresholds(){
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
       SW_CODE, SW_ONCALL, SW_DET,
-      HM_UNPREP
+      HM_UNPREP, HM_AMBER_TG, HM_AMBER_YL
     };
     saveCfg('thresholds', _LS_KEY, obj);
   } catch(e){
@@ -2096,6 +2100,8 @@ function applyThresholdValues(v){
   if((n=safeI(v.SW_ONCALL))!=null) SW_ONCALL=n;
   if((n=safeI(v.SW_DET))!=null) SW_DET=n;
   if((n=safeI(v.HM_UNPREP))!=null) HM_UNPREP=n;
+  if((n=safeI(v.HM_AMBER_TG))!=null) HM_AMBER_TG=n;
+  if((n=safeI(v.HM_AMBER_YL))!=null) HM_AMBER_YL=n;
 }
 
 // Defaults — single source of truth. Used by reset and as fallback.
@@ -2108,7 +2114,7 @@ const _THRESHOLD_DEFAULTS = {
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
   TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
   SW_CODE:1, SW_ONCALL:3, SW_DET:5,
-  HM_UNPREP:15
+  HM_UNPREP:15, HM_AMBER_TG:4, HM_AMBER_YL:10
 };
 
 // Map of global name → DOM input id. Used to push values into Admin inputs after reset.
@@ -2122,7 +2128,7 @@ const _THRESHOLD_INPUTS = {
   CL_MIN_PUPILS:'cl-min-pupils', CL_MIN_CODES:'cl-min-codes', CL_RATIO_AMBER:'cl-ratio-amber', CL_RATIO_RED:'cl-ratio-red',
   TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
   SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det',
-  HM_UNPREP:'hm-unprep'
+  HM_UNPREP:'hm-unprep', HM_AMBER_TG:'hm-amber-tg', HM_AMBER_YL:'hm-amber-yl'
 };
 
 // Refresh all header display spans from current globals.
@@ -2169,6 +2175,8 @@ function resetThresholds(){
 }
 function applyCT(){
   HM_UNPREP=parseInt(document.getElementById('hm-unprep').value)||15;
+  HM_AMBER_TG=parseInt(document.getElementById('hm-amber-tg').value)||4;
+  HM_AMBER_YL=parseInt(document.getElementById('hm-amber-yl').value)||10;
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
   CT_SC=parseFloat(document.getElementById('ct-sc').value)||1.5;
@@ -7191,12 +7199,76 @@ function _hmConcernRow(px,it){
     +'<span style="font-size:.7rem;font-weight:600;min-width:9rem">'+it.label+'</span>'
     +'<span style="font-size:.68rem;color:var(--tx2);flex:1">'+it.detail+'</span>'+btn+'</div>';
 }
+// subj-avoid repeats per subject and sanc-conc per teacher, so a pupil can
+// collect several rows of the same concern. Merge them onto one line — but each
+// keeps its own Considered button, because each has its own dismissal key and a
+// tutor may well have dealt with one subject and not another.
+function _hmMergedRows(px,items){
+  const groups=new Map();
+  items.forEach(it=>{
+    const k=it.type||it.label;
+    if(!groups.has(k))groups.set(k,[]);
+    groups.get(k).push(it);
+  });
+  const out=[];
+  groups.forEach(g=>{
+    if(g.length===1){ out.push(_hmConcernRow(px,g[0])); return; }
+    // Worst severity wins for the badge, and reds come first in the list.
+    g.sort((a,b)=>(b.severity==='red'?1:0)-(a.severity==='red'?1:0));
+    const worst=g.some(x=>x.severity==='red')?'red':'amber';
+    const col=worst==='red'?'var(--red)':'var(--orange)';
+    const parts=g.map(it=>{
+      let btn='';
+      try{ btn=dsmConsiderBtn(px,it.type,it.subkey||'',it.label,it.detail,firstName(px)); }catch(e){}
+      const dot=it.severity==='red'?'var(--red)':'var(--orange)';
+      return '<span style="display:inline-flex;align-items:center;gap:.25rem;background:var(--sf);border:1px solid var(--bd);border-radius:4px;padding:.05rem .3rem;margin:.1rem .15rem .1rem 0">'
+        +'<span style="width:5px;height:5px;border-radius:50%;background:'+dot+'"></span>'
+        +'<span style="font-size:.66rem;font-weight:600">'+(it.subkey||'—')+'</span>'
+        +'<span style="font-size:.62rem;color:var(--tx2)" title="'+String(it.detail||'').replace(/"/g,'&quot;')+'">'+_hmRatio(it.detail)+'</span>'
+        +btn+'</span>';
+    }).join('');
+    out.push('<div style="display:flex;align-items:flex-start;gap:.45rem;flex-wrap:wrap;margin:.15rem 0">'
+      +'<span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:'+col+';border:1px solid '+col+'99;border-radius:3px;padding:.02rem .3rem;margin-top:.15rem">'+worst+'</span>'
+      +'<span style="font-size:.7rem;font-weight:600;min-width:9rem;margin-top:.1rem">'+g[0].label
+      +' <span style="font-weight:400;color:var(--tx2)">&times;'+g.length+'</span></span>'
+      +'<span style="flex:1;min-width:12rem">'+parts+'</span></div>');
+  });
+  return out.join('');
+}
+// Pull the headline multiple out of a detail string for the compact chip, e.g.
+// "4.2x expectations" -> "4.2x". Falls back to nothing rather than guessing.
+function _hmRatio(detail){
+  const m=String(detail||'').match(/([\d.]+)\s*[x\u00d7]/i);
+  return m?m[1]+'\u00d7':'';
+}
 function _hmGoodRow(it){
   return '<div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin:.15rem 0">'
     +'<span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:var(--green);border:1px solid var(--green)99;border-radius:3px;padding:.02rem .3rem">'
     +(it.severity==='green-strong'?'standout':'improving')+'</span>'
     +'<span style="font-size:.7rem;font-weight:600;min-width:9rem">'+it.label+'</span>'
     +'<span style="font-size:.68rem;color:var(--tx2);flex:1">'+it.detail+'</span></div>';
+}
+// Split a list of flagged pupils into what is shown and what is hidden.
+// Anything with a red is always shown; ambers fill the remaining allowance.
+// Reading an undeclared let throws a ReferenceError, so the caps are fetched
+// through this rather than referenced directly. A threshold that failed to load
+// must not take the page down, nor silently hide every pupil.
+function _hmCap(name,dflt){
+  try{ const v=eval(name); return (typeof v==='number'&&v>0)?v:dflt; }
+  catch(e){ return dflt; }
+}
+function _hmCapBySeverity(list,cap){
+  const n=(typeof cap==='number'&&cap>0)?cap:4;
+  const red=list.filter(x=>x.items.some(i=>i.severity==='red'));
+  const amber=list.filter(x=>!x.items.some(i=>i.severity==='red'));
+  return {shown:red.concat(amber.slice(0,n)), hidden:amber.slice(n), reds:red.length};
+}
+// A details/summary expander needs no script and survives a re-render.
+function _hmMore(hiddenHtml,n){
+  if(!n)return '';
+  return '<details style="margin-top:.4rem"><summary style="cursor:pointer;font-size:.72rem;color:var(--tx2)">'
+    +'Show '+n+' more'+(n===1?' pupil':' pupils')+'</summary><div style="margin-top:.3rem">'
+    +hiddenHtml+'</div></details>';
 }
 function _hmPupilBlock(px,rows,extra){
   return '<div style="padding:.5rem 0;border-bottom:1px solid var(--bd)">'
@@ -7224,14 +7296,20 @@ function _hmTutor(){
   if(con.length){
     con.sort((a,b)=>(b.items.some(i=>i.severity==='red')?1:0)-(a.items.some(i=>i.severity==='red')?1:0)
                     ||b.items.length-a.items.length);
+    const blk=c=>_hmPupilBlock(c.px,_hmMergedRows(c.px,c.items),
+      c.considered?' <span style="font-size:.6rem;color:var(--tx2)">'+c.considered+' already considered</span>':'');
+    const cap=_hmCapBySeverity(con,_hmCap('HM_AMBER_TG',4));
     h+=_hmPanel('Needs attention',
-      'The Concerns tab triggers, for your form. Marking one considered here hides it there too.',
-      con.map(c=>_hmPupilBlock(c.px,c.items.map(it=>_hmConcernRow(c.px,it)).join(''),
-        c.considered?' <span style="font-size:.6rem;color:var(--tx2)">'+c.considered+' already considered</span>':'')).join(''));
+      'The Concerns tab triggers, for your form. Marking one considered here hides it there too.'
+      +(cap.hidden.length?' Every red is shown; '+cap.hidden.length+' amber '+(cap.hidden.length===1?'pupil is':'pupils are')+' below.':''),
+      cap.shown.map(blk).join('')+_hmMore(cap.hidden.map(blk).join(''),cap.hidden.length));
   }
   if(good.length){
+    const gblk=g=>_hmPupilBlock(g.px,g.items.map(_hmGoodRow).join(''),'');
+    const gcap=_hmCap('HM_AMBER_TG',4);
     h+=_hmPanel('Going well','The Congrats triggers. Worth a word for the right reason.',
-      good.slice(0,6).map(g=>_hmPupilBlock(g.px,g.items.map(_hmGoodRow).join(''),'')).join(''));
+      good.slice(0,gcap).map(gblk).join('')
+      +_hmMore(good.slice(gcap).map(gblk).join(''),Math.max(0,good.length-gcap)));
   }
   if(handled.length){
     h+=_hmPanel('Considered earlier','',
@@ -7298,11 +7376,14 @@ function _hmYearLeader(){
   }
 
   if(multi.length){
-    multi.sort((a,b)=>b.items.length-a.items.length);
+    multi.sort((a,b)=>(b.items.some(i=>i.severity==='red')?1:0)-(a.items.some(i=>i.severity==='red')?1:0)
+                      ||b.items.length-a.items.length);
+    const mblk=m=>_hmPupilBlock(m.px,_hmMergedRows(m.px,m.items),'');
+    const mcap=_hmCapBySeverity(multi,_hmCap('HM_AMBER_YL',10));
     h+=_hmPanel('Carrying more than one concern',
-      'These pupils have fired several triggers at once — usually the ones to look at first.',
-      multi.slice(0,10).map(m=>_hmPupilBlock(m.px,
-        m.items.map(it=>_hmConcernRow(m.px,it)).join(''),'')).join(''));
+      'These pupils have fired several triggers at once — usually the ones to look at first.'
+      +(mcap.hidden.length?' Every red is shown; '+mcap.hidden.length+' amber '+(mcap.hidden.length===1?'pupil is':'pupils are')+' below.':''),
+      mcap.shown.map(mblk).join('')+_hmMore(mcap.hidden.map(mblk).join(''),mcap.hidden.length));
   }
 
   if(!conN&&!goodN.length){
@@ -12073,6 +12154,8 @@ function rPeer(){
           'Front Pages',
           'The Form Tutor, Year Leader and SLT pages use the Concerns and Congrats triggers above, so they need no separate settings. This is the one exception: the intervention list on the Year Leader page, which has no equivalent elsewhere.',
           'Year Leader tab',
+          inputRow('Amber pupils shown, Form Tutor','hm-amber-tg',HM_AMBER_TG,{min:1,max:40,step:1,hint:'How many amber-only pupils appear before the rest go behind a Show all link. Red pupils are always shown and never count towards this. Default 4.'})+
+          inputRow('Amber pupils shown, Year Leader','hm-amber-yl',HM_AMBER_YL,{min:1,max:60,step:1,hint:'The same cap on the Year Leader page. Default 10.'})+
           inputRow('Intervention trigger','hm-unprep',HM_UNPREP,{min:1,max:100,step:1,hint:'Unprepared sanctions this academic year — equipment, uniform or homework — before a pupil is listed as a homework-club or equipment candidate. Default 15.'})
         )}
         ${groupPanel(
