@@ -7520,13 +7520,9 @@ function _hmPanelYTD(){
 }
 
 // ── sanctions by subject, split by what kind of sanction ──
-// Stacks on the school's incident categories (Uniform, Equipment, Home
-// Learning and so on) plus detentions. Until the codes are mapped to
-// categories in Admin every code resolves to Other, which makes a one-colour
-// chart, so while the mapping is empty this falls back to stacking on the
-// incident description itself and says so.
-const _HM_DESC_COLORS = [PAL.red, PAL.orange, PAL.gold, PAL.sky, PAL.cyan, PAL.lilac];
-
+// Stacks on the school's incident categories from Admin, plus detentions.
+// Unmapped codes go to Other, matching incCatKey() and every other breakdown
+// in the app, and the count is stated under the chart rather than hidden.
 function _hmPanelBySubject(){
   const pupils = [..._hmPupilsInScope()];
   if(!pupils.length) return '';
@@ -7537,52 +7533,30 @@ function _hmPanelBySubject(){
   (DD.sanctions || []).forEach((s, i) => {
     if(!set.has(s[0]) || _hmAyOf(s[2]) !== ay) return;
     const d = det[i] || null;
-    recs.push({
-      subj: s[3] || 'Non-Lesson',
-      type: s[1],
-      cat:  d ? d[1] : null,
-      desc: (d && d[0]) || 'Unrecorded'
-    });
+    recs.push({ subj: s[3] || 'Non-Lesson', type: s[1], cat: d ? d[1] : null });
   });
   if(!recs.length) return '';
 
   const codeRecs = recs.filter(r => r.type !== 2);
-  const known = c => c != null && typeof INC_BY_ID !== 'undefined' && !!INC_BY_ID[c];
-  const mapped = codeRecs.filter(r => known(r.cat)).length;
-  const byCategory = !codeRecs.length || mapped / codeRecs.length >= 0.5;
+  const unmapped = codeRecs.filter(r => !(r.cat && INC_BY_ID[r.cat])).length;
 
-  // Which stack segments exist, in a fixed order, each with a colour.
-  let segs;
-  if(byCategory){
-    const used = {};
-    codeRecs.forEach(r => { const k = incCatKey(r.cat); used[k] = (used[k]||0) + 1; });
-    segs = INC_CATS.filter(c => used[c.key])
-      .map(c => ({ id: c.key, label: c.id, color: c.color, of: r => incCatKey(r.cat) === c.key }));
-  } else {
-    const n = {};
-    codeRecs.forEach(r => { n[r.desc] = (n[r.desc]||0) + 1; });
-    const top = Object.keys(n).sort((a,b) => n[b] - n[a]).slice(0, 6);
-    const topSet = new Set(top);
-    segs = top.map((d, i) => ({ id: 'd'+i, label: d, color: _HM_DESC_COLORS[i % _HM_DESC_COLORS.length],
-                                of: r => r.desc === d }));
-    if(Object.keys(n).length > top.length)
-      segs.push({ id: 'rest', label: 'Other codes', color: _hmMuted(), of: r => !topSet.has(r.desc) });
-  }
+  const used = {};
+  codeRecs.forEach(r => { const k = incCatKey(r.cat); used[k] = (used[k]||0) + 1; });
+  const segs = INC_CATS.filter(c => used[c.key])
+    .map(c => ({ id: c.key, label: c.id, color: c.color, cat: true }));
   if(recs.some(r => r.type === 2))
-    segs.push({ id: 'det', label: 'Detention', color: PAL.violet, of: null });
+    segs.push({ id: 'det', label: 'Detention', color: PAL.violet, cat: false });
   if(!segs.length) return '';
 
-  // Count each segment against each subject.
   const subjects = {};
   recs.forEach(r => {
     const row = subjects[r.subj] = subjects[r.subj] || { total: 0 };
-    segs.forEach(sg => {
-      const hit = sg.id === 'det' ? r.type === 2 : (r.type !== 2 && sg.of(r));
-      if(hit) row[sg.id] = (row[sg.id] || 0) + 1;
-    });
+    const id = r.type === 2 ? 'det' : incCatKey(r.cat);
+    row[id] = (row[id] || 0) + 1;
     row.total++;
   });
-  const names = Object.keys(subjects).sort((a,b) => subjects[b].total - subjects[a].total).slice(0, 12);
+  const names = Object.keys(subjects)
+    .sort((a,b) => subjects[b].total - subjects[a].total).slice(0, 12);
 
   _hmChart(() => {
     const el = document.getElementById('hm-ig-subject');
@@ -7616,12 +7590,15 @@ function _hmPanelBySubject(){
     }));
   });
 
-  const sub = byCategory
-    ? 'Split by the school\u2019s incident categories. Counts are raw, so a subject your form has five times a week will sit higher than one it has once.'
-    : 'Split by incident description, because none of the incident codes have been given a category yet. Map them in Admin \u203a Incident codes and this will group into Uniform, Equipment, Home Learning and the rest.';
+  const note = unmapped
+    ? '<div style="font-size:.68rem;color:var(--orange);margin-top:.4rem">'
+      + unmapped + ' of ' + codeRecs.length + ' codes have no category yet and are counted under '
+      + incName('o') + '. Map them in Admin \u203a Incident codes.</div>'
+    : '';
 
-  return _hmPanel('Sanctions in your form, by subject', sub,
-    _hmCanvas('hm-ig-subject', Math.max(170, names.length * 24 + 46)));
+  return _hmPanel('Sanctions in your form, by subject',
+    'Split by incident category. Counts are raw, so a subject your form has five times a week will sit higher than one it has once.',
+    _hmCanvas('hm-ig-subject', Math.max(170, names.length * 24 + 46)) + note);
 }
 
 // ── effort, this collection against the one before ──
