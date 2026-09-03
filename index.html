@@ -7175,6 +7175,558 @@ function rHmTutor(){ _HM_SCOPE=_hmFill('hm-scope-tutor',_hmForms())||'all'; _hmR
 function rHmYear(){  _HM_SCOPE=_hmFill('hm-scope-year',_hmYears())||'all';  _hmRender('hm-out-year',_hmYearLeader); }
 function rHmSLT(){   _HM_SCOPE='all';                                       _hmRender('hm-out-slt',_hmSLT); }
 
+// ---- FORM TUTOR — INFOGRAPHICS ---------------------------------------------
+// Seven visuals for the tutor's own form, all scoped by _hmPupilsInScope().
+// Panels reuse _hmPanel so they sit in the same visual language as the lists
+// below them. Charts are built after innerHTML lands, because _hmRender()
+// assigns a string and the canvases do not exist until it returns.
+//
+// Every chart is registered through dc()/sc2() so a re-render destroys the old
+// instance rather than leaking one per scope change.
+
+let _HM_CQ = [];
+function _hmChart(fn){ _HM_CQ.push(fn); }
+function _hmFlushCharts(){
+  const q = _HM_CQ; _HM_CQ = [];
+  q.forEach(f => { try { f(); } catch(e){ console.warn('[hm chart]', e); } });
+}
+
+// ── shared chart chrome, matched to the existing charts in this file ──
+const _HM_TICK = '#6e7686', _HM_GRID = '#d4d4d444', _HM_BORDER = '#e6dfd0';
+// Chart.js draws to a canvas, and canvas fillStyle cannot read a CSS custom
+// property — 'var(--bd)' silently renders as transparent. Resolve at draw time
+// so a theme change is picked up on the next render.
+function _hmCssVar(name, fallback){
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  } catch(e){ return fallback; }
+}
+function _hmMuted(){ return _hmCssVar('--bd', '#e6dfd0'); }
+const _HM_FONT = { family: 'Hanken Grotesk' };
+function _hmScale(extra){
+  return Object.assign({
+    ticks: { color: _HM_TICK, font: _HM_FONT },
+    grid:  { color: _HM_GRID },
+    border:{ color: _HM_BORDER }
+  }, extra || {});
+}
+function _hmNoLegend(){ return { legend:{ display:false } }; }
+function _hmLegend(){
+  return { legend:{ labels:{ color:_HM_TICK, font:_HM_FONT, boxWidth:10, padding:8 } } };
+}
+function _hmCanvas(id, h){
+  return '<div style="position:relative;height:' + h + 'px"><canvas id="' + id + '"></canvas></div>';
+}
+function _hmNote(txt){
+  return '<div style="font-size:.72rem;color:var(--tx2);padding:.6rem .2rem">' + txt + '</div>';
+}
+
+// ── academic-year helpers ──
+function _hmAY(){ return String((DD.config && DD.config.current_acad_year) || ''); }
+function _hmAyOf(iso){ const y = +iso.slice(0,4), m = +iso.slice(5,7); return String(m >= 9 ? y : y - 1); }
+
+// School days in the current academic year, from weekLessons, capped at today.
+let _HM_SD = null, _HM_PPD = null;
+function _hmSchoolDays(){
+  if(_HM_SD) return _HM_SD;
+  const WLK = DD.weekLessons || {}, ayStart = _hmAY() + '-09-01';
+  const t = new Date();
+  const todayISO = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0');
+  const out = [];
+  Object.keys(WLK).sort().forEach(wk => {
+    if(wk < ayStart) return;
+    for(let off = 0; off < 5; off++){
+      const d = new Date(wk + 'T12:00:00'); d.setDate(d.getDate() + off);
+      const iso = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      if(iso <= todayISO) out.push(iso);
+    }
+  });
+  out.sort();
+  const vals = Object.values(WLK);
+  _HM_PPD = vals.length ? (vals.reduce((a,b) => a+b, 0) / vals.length) / 5 : 5;
+  return (_HM_SD = out);
+}
+function _hmPerPerDay(){ _hmSchoolDays(); return _HM_PPD; }
+
+// ── form index: every form in the school, and the forms in one year group ──
+function _hmFormIndex(){
+  const out = {};
+  Object.entries(DD.registry || {}).forEach(([px, r]) => {
+    if(!r.reg) return;
+    (out[r.reg] = out[r.reg] || { pupils: [], year: r.year }).pupils.push(+px);
+  });
+  return out;
+}
+// The comparison set is the tutor's own year group, not the whole school —
+// comparing a Year 10 form against Year 11 compares two different timetables,
+// two different sanction cultures and, here, two different data histories.
+function _hmScopeForm(){
+  const v = _HM_SCOPE || '';
+  return v.startsWith('reg:') ? v.slice(4) : null;
+}
+function _hmPeerForms(){
+  const idx = _hmFormIndex(), me = _hmScopeForm();
+  if(!me || !idx[me]) return { me: null, forms: [] };
+  const yr = idx[me].year;
+  const forms = Object.entries(idx)
+    .filter(([, v]) => v.year === yr)
+    .map(([reg, v]) => ({ reg, pupils: v.pupils }))
+    .sort((a, b) => a.reg.localeCompare(b.reg));
+  return { me, year: yr, forms };
+}
+
+// ── per-form aggregates for the current academic year ──
+function _hmFormStats(pupils){
+  const ay = _hmAY(), sd = _hmSchoolDays(), n = pupils.length;
+  if(!n || !sd.length) return { att: null, pos: null, neg: null, n: n };
+  let absent = 0;
+  pupils.forEach(px => { absent += countAbsPeriods(px, sd[0], sd[sd.length-1]).total; });
+  const scheduled = n * sd.length * _hmPerPerDay();
+  const set = new Set(pupils);
+  let pos = 0, neg = 0;
+  (DD.housePoints || []).forEach(r => { if(set.has(r[0]) && _hmAyOf(r[2]) === ay) pos++; });
+  (DD.sanctions   || []).forEach(r => { if(set.has(r[0]) && _hmAyOf(r[2]) === ay) neg++; });
+  return {
+    att: scheduled > 0 ? 100 - (absent / scheduled * 100) : null,
+    pos: pos / n, neg: neg / n, n: n
+  };
+}
+
+// A bar chart of one metric across the year group, the tutor's own form picked
+// out, with the year-group mean drawn across it. The mean line is what makes a
+// dynamic axis honest: without it, a 92–97% range rescaled to fill the panel
+// reads as a chasm.
+function _hmPeerBar(canvasId, key, rows, me, opts){
+  const labels = rows.map(r => r.reg);
+  const vals   = rows.map(r => r.v);
+  const live   = vals.filter(v => v != null);
+  if(!live.length || (opts.zeroMeansMissing && live.every(v => v === 0))) return null;
+  const mean = live.reduce((a,b) => a+b, 0) / live.length;
+
+  let min, max;
+  if(opts.fromZero){
+    min = 0; max = Math.max.apply(null, live) * 1.12 || 1;
+  } else {
+    // Dynamic, but padded and rounded outward so the bars never touch the frame.
+    const lo = Math.min.apply(null, live), hi = Math.max.apply(null, live);
+    const pad = Math.max((hi - lo) * 0.35, 0.4);
+    min = Math.max(0, Math.floor((lo - pad) * 2) / 2);
+    max = Math.min(opts.hardMax != null ? opts.hardMax : Infinity, Math.ceil((hi + pad) * 2) / 2);
+  }
+
+  _hmChart(() => {
+    const el = document.getElementById(canvasId);
+    if(!el) return;
+    dc(key);
+    sc2(key, new Chart(el, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: opts.label,
+            data: vals,
+            backgroundColor: labels.map(l => l === me ? opts.color : _hmMuted()),
+            borderColor:     labels.map(l => l === me ? opts.color : _HM_BORDER),
+            borderWidth: 1, borderRadius: 3, order: 2
+          },
+          {
+            type: 'line', label: 'Year group mean',
+            data: labels.map(() => mean),
+            borderColor: _HM_TICK, borderWidth: 1, borderDash: [4,3],
+            pointRadius: 0, fill: false, order: 1
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + opts.fmt(c.parsed.y) } }
+        },
+        scales: {
+          x: _hmScale({ ticks: { color: _HM_TICK, font: _HM_FONT, autoSkip: false, maxRotation: 0 } }),
+          y: _hmScale({ min: min, max: max, ticks: { color: _HM_TICK, font: _HM_FONT, callback: opts.fmt } })
+        }
+      }
+    }));
+  });
+  return { mean: mean };
+}
+
+function _hmPanelPeers(){
+  const peers = _hmPeerForms();
+  if(!peers.me) return _hmPanel('Your form against the year group',
+    'Pick a single form in the selector above to see this comparison.', '');
+
+  const stats = {};
+  peers.forms.forEach(f => { stats[f.reg] = _hmFormStats(f.pupils); });
+  const mk = field => peers.forms.map(f => ({ reg: f.reg, v: stats[f.reg][field] }));
+
+  const cols = [
+    { id: 'hm-ig-att', key: 'hmIgAtt', field: 'att', title: 'Attendance',
+      opts: { label: 'Attendance', color: PAL.sky, fromZero: false, hardMax: 100,
+              fmt: v => (Math.round(v * 10) / 10) + '%' } },
+    { id: 'hm-ig-pos', key: 'hmIgPos', field: 'pos', title: 'Positives per pupil',
+      opts: { label: 'Positives per pupil', color: PAL.green, fromZero: true,
+              zeroMeansMissing: true, fmt: v => Math.round(v * 10) / 10 } },
+    { id: 'hm-ig-neg', key: 'hmIgNeg', field: 'neg', title: 'Sanctions per pupil',
+      opts: { label: 'Sanctions per pupil', color: PAL.red, fromZero: true,
+              fmt: v => Math.round(v * 10) / 10 } }
+  ];
+
+  const body = cols.map(c => {
+    const rows = mk(c.field);
+    const built = _hmPeerBar(c.id, c.key, rows, peers.me, c.opts);
+    const inner = built
+      ? _hmCanvas(c.id, 150)
+      : _hmNote(c.field === 'pos'
+          ? 'No positive behaviour has been recorded for ' + peers.year + ' in this academic year, so there is nothing to compare. This is a gap in the data, not a result for your form.'
+          : 'Not enough data to compare.');
+    return '<div style="flex:1;min-width:230px">'
+      + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + c.title + '</div>'
+      + inner + '</div>';
+  }).join('');
+
+  return _hmPanel('Your form against the year group',
+    peers.me + ' is picked out; the dashed line is the ' + peers.year + ' mean. Bars for attendance use a zoomed scale, so read them against that line rather than against each other.',
+    '<div style="display:flex;gap:.9rem;flex-wrap:wrap">' + body + '</div>');
+}
+
+// ── YTD: three small lines, form against the median form in the year group ──
+function _hmMonthBuckets(){
+  const sd = _hmSchoolDays(), by = {};
+  sd.forEach(d => { (by[d.slice(0,7)] = by[d.slice(0,7)] || []).push(d); });
+  return Object.keys(by).sort().map(m => ({ m: m, days: by[m] }));
+}
+function _hmMonthLabel(m){
+  const N = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return N[+m.slice(5,7) - 1];
+}
+function _hmSeries(pupils, buckets){
+  const n = pupils.length, set = new Set(pupils), ppd = _hmPerPerDay();
+  const att = [], pos = [], neg = [];
+  const hp = {}, sn = {};
+  (DD.housePoints || []).forEach(r => { if(set.has(r[0])) hp[r[2].slice(0,7)] = (hp[r[2].slice(0,7)] || 0) + 1; });
+  (DD.sanctions   || []).forEach(r => { if(set.has(r[0])) sn[r[2].slice(0,7)] = (sn[r[2].slice(0,7)] || 0) + 1; });
+  buckets.forEach(b => {
+    let absent = 0;
+    pupils.forEach(px => { absent += countAbsPeriods(px, b.days[0], b.days[b.days.length-1]).total; });
+    const sched = n * b.days.length * ppd;
+    att.push(sched > 0 ? 100 - (absent / sched * 100) : null);
+    pos.push(n ? (hp[b.m] || 0) / n : null);
+    neg.push(n ? (sn[b.m] || 0) / n : null);
+  });
+  return { att: att, pos: pos, neg: neg };
+}
+function _hmMedian(arrs, i){
+  const v = arrs.map(a => a[i]).filter(x => x != null).sort((a,b) => a-b);
+  if(!v.length) return null;
+  return v.length % 2 ? v[(v.length-1)/2] : (v[v.length/2 - 1] + v[v.length/2]) / 2;
+}
+function _hmLineChart(canvasId, key, labels, mine, median, color, fmt){
+  _hmChart(() => {
+    const el = document.getElementById(canvasId);
+    if(!el) return;
+    dc(key);
+    sc2(key, new Chart(el, {
+      type: 'line',
+      data: { labels: labels, datasets: [
+        { label: 'Year group median', data: median, borderColor: _HM_BORDER, borderWidth: 1.5,
+          pointRadius: 0, tension: .35, fill: false },
+        { label: 'Your form', data: mine, borderColor: color, borderWidth: 2.5,
+          pointRadius: 3, tension: .35, fill: false }
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + fmt(c.parsed.y) } } },
+        scales: { x: _hmScale(), y: _hmScale({ ticks: { color:_HM_TICK, font:_HM_FONT, callback: fmt } }) }
+      }
+    }));
+  });
+  return _hmCanvas(canvasId, 130);
+}
+function _hmPanelYTD(){
+  const peers = _hmPeerForms();
+  if(!peers.me) return '';
+  const buckets = _hmMonthBuckets();
+  if(buckets.length < 2) return '';
+  const labels = buckets.map(b => _hmMonthLabel(b.m));
+  const all = peers.forms.map(f => ({ reg: f.reg, s: _hmSeries(f.pupils, buckets) }));
+  const mine = all.find(a => a.reg === peers.me).s;
+  const med = f => buckets.map((_, i) => _hmMedian(all.map(a => a.s[f]), i));
+
+  const one = (title, id, key, data, medData, color, fmt, missing) => {
+    const live = data.filter(v => v != null && v !== 0);
+    const inner = live.length ? _hmLineChart(id, key, labels, data, medData, color, fmt) : _hmNote(missing);
+    return '<div style="flex:1;min-width:230px">'
+      + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
+      + inner + '</div>';
+  };
+
+  return _hmPanel('This year, month by month',
+    'Your form in colour, the median form in ' + peers.year + ' in grey.',
+    '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
+    + one('Attendance', 'hm-ig-yatt', 'hmIgYAtt', mine.att, med('att'), PAL.sky,
+          v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
+    + one('Positives per pupil', 'hm-ig-ypos', 'hmIgYPos', mine.pos, med('pos'), PAL.green,
+          v => Math.round(v*10)/10, 'No positive behaviour recorded for this year group.')
+    + one('Sanctions per pupil', 'hm-ig-yneg', 'hmIgYNeg', mine.neg, med('neg'), PAL.red,
+          v => Math.round(v*10)/10, 'No sanctions recorded yet.')
+    + '</div>');
+}
+
+// ── one dot per pupil: the spread a form average hides ──
+function _hmPanelSpread(){
+  const peers = _hmPeerForms();
+  if(!peers.me) return '';
+  const sd = _hmSchoolDays();
+  if(!sd.length) return '';
+  const ppd = _hmPerPerDay(), sched = sd.length * ppd;
+  const rate = px => {
+    const a = countAbsPeriods(px, sd[0], sd[sd.length-1]).total;
+    return sched > 0 ? 100 - (a / sched * 100) : null;
+  };
+  const mineSet = new Set((_hmFormIndex()[peers.me] || {}).pupils || []);
+  const mine = [], others = [];
+  peers.forms.forEach(f => f.pupils.forEach(px => {
+    const v = rate(px); if(v == null) return;
+    const j = 0.16 * (Math.random() - 0.5);
+    (mineSet.has(px) ? mine : others).push({ x: v, y: (mineSet.has(px) ? 1 : 0) + j, px: px });
+  }));
+  if(!mine.length) return '';
+
+  _hmChart(() => {
+    const el = document.getElementById('hm-ig-spread');
+    if(!el) return;
+    dc('hmIgSpread');
+    sc2('hmIgSpread', new Chart(el, {
+      type: 'scatter',
+      data: { datasets: [
+        { label: peers.year, data: others, backgroundColor: _hmMuted(), pointRadius: 3 },
+        { label: peers.me,   data: mine,   backgroundColor: PAL.sky,     pointRadius: 5 }
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => {
+            const r = (DD.registry || {})[String(c.raw.px)] || {};
+            return ' ' + (r.id || c.raw.px) + ' · ' + (Math.round(c.parsed.x * 10) / 10) + '%';
+          } } }
+        },
+        scales: {
+          x: _hmScale({ title: { display: true, text: 'Attendance this year', color: _HM_TICK, font: _HM_FONT },
+                        ticks: { color: _HM_TICK, font: _HM_FONT, callback: v => v + '%' } }),
+          y: { min: -0.45, max: 1.45, grid: { display: false }, border: { color: _HM_BORDER },
+               ticks: { color: _HM_TICK, font: _HM_FONT, stepSize: 1,
+                        callback: v => v === 1 ? peers.me : (v === 0 ? 'Rest of ' + peers.year : '') } }
+        }
+      }
+    }));
+  });
+
+  const sorted = mine.map(m => m.x).sort((a,b) => a-b);
+  const lo = sorted[0], med = sorted[Math.floor(sorted.length/2)];
+  return _hmPanel('Every pupil in your form',
+    'One dot per pupil. An average of ' + (Math.round(med*10)/10) + '% can be everyone near it, or most of the form high and a few very low — this shows which.',
+    _hmCanvas('hm-ig-spread', 150)
+    + '<div style="font-size:.7rem;color:var(--tx2);margin-top:.35rem">Lowest in your form: '
+    + (Math.round(lo*10)/10) + '%. Median: ' + (Math.round(med*10)/10) + '%.</div>');
+}
+
+// ── sanctions by teacher, against what their share of the timetable predicts ──
+// Raw counts punish whoever teaches the form most. The paler bar is the count
+// you would expect from lessons taught, so only the gap between the two is
+// worth a conversation.
+function _hmPanelByTeacher(){
+  const pupils = [..._hmPupilsInScope()];
+  if(!pupils.length) return '';
+  const ay = _hmAY();
+  const TT = DD.timetables || {};
+  const actual = {}, expShare = {};
+  let total = 0;
+  const sanByPx = {};
+  (DD.sanctions || []).forEach(s => {
+    if(s[3] == null || _hmAyOf(s[2]) !== ay) return;
+    (sanByPx[s[0]] = sanByPx[s[0]] || []).push(s);
+  });
+
+  pupils.forEach(px => {
+    const grid = TT[String(px)];
+    const enrols = [];
+    Object.values(DD.enrolments || {}).forEach(list =>
+      list.forEach(r => { if(r.t === 'cls' && r.x === px && r.u === null) enrols.push(r); }));
+    const lpw = {};
+    if(grid) for(let d = 0; d < 5; d++) for(let p = 0; p < 5; p++){
+      const c = grid[d] && grid[d][p];
+      if(c) lpw[c[0]] = (lpw[c[0]] || 0) + 1;
+    }
+    const totLpw = Object.values(lpw).reduce((a,b) => a+b, 0);
+    const mine = sanByPx[px] || [];
+    mine.forEach(s => {
+      const cls = enrols.find(e => e.s === s[3]);
+      const t = cls ? cls.tc : 'Unrecorded';
+      actual[t] = (actual[t] || 0) + 1; total++;
+    });
+    if(totLpw > 0) enrols.forEach(e => {
+      expShare[e.tc] = (expShare[e.tc] || 0) + (lpw[e.s] || 0) / totLpw;
+    });
+  });
+  if(!total) return '';
+
+  const shareTot = Object.values(expShare).reduce((a,b) => a+b, 0) || 1;
+  const rows = Object.keys(actual)
+    .map(t => ({ t: t, a: actual[t], e: total * (expShare[t] || 0) / shareTot }))
+    .sort((x,y) => (y.a - y.e) - (x.a - x.e))
+    .slice(0, 10);
+
+  _hmChart(() => {
+    const el = document.getElementById('hm-ig-teacher');
+    if(!el) return;
+    dc('hmIgTeacher');
+    sc2('hmIgTeacher', new Chart(el, {
+      type: 'bar',
+      data: { labels: rows.map(r => r.t), datasets: [
+        { label: 'Expected from lessons taught', data: rows.map(r => Math.round(r.e * 10) / 10),
+          backgroundColor: _hmMuted(), borderRadius: 3 },
+        { label: 'Actual sanctions', data: rows.map(r => r.a),
+          backgroundColor: PAL.red, borderRadius: 3 }
+      ]},
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: _hmLegend().legend },
+        scales: { x: _hmScale({ beginAtZero: true }), y: _hmScale({ grid: { display: false } }) }
+      }
+    }));
+  });
+
+  return _hmPanel('Sanctions in your form, by teacher',
+    'Ordered by the gap between the two bars. A teacher who sees your form five times a week will always sit near the top on raw count, so the pale bar is what their timetable share predicts.',
+    _hmCanvas('hm-ig-teacher', Math.max(150, rows.length * 26 + 40)));
+}
+
+// ── effort, this collection against the one before ──
+function _hmPanelEffort(){
+  const pupils = [..._hmPupilsInScope()];
+  if(!pupils.length) return '';
+  const order = (DD.config && DD.config.periods) || [];
+  const rowsFor = {};
+  pupils.forEach(px => {
+    const r = (DD.registry || {})[String(px)];
+    if(r) rowsFor[px] = getProg(r.intake, px);
+  });
+  const filled = order.filter(p =>
+    pupils.some(px => rowsFor[px] && rowsFor[px][p] && Object.keys(rowsFor[px][p].sc || {}).length));
+  if(filled.length < 2) return _hmPanel('Effort since the last collection',
+    'Two collections with effort grades are needed for a comparison. Only ' + filled.length + ' found.', '');
+
+  const cur = filled[filled.length - 1], prev = filled[filled.length - 2];
+  // Effort is inverted in this dataset: 1 is the best grade, so a fall in the
+  // number is an improvement.
+  let up = 0, flat = 0, down = 0, n = 0;
+  pupils.forEach(px => {
+    const a = rowsFor[px] && rowsFor[px][prev], b = rowsFor[px] && rowsFor[px][cur];
+    if(!a || !b) return;
+    const ea = efAvg(a, SUBS), eb = efAvg(b, SUBS);
+    if(ea == null || eb == null) return;
+    n++;
+    const d = eb - ea;
+    if(d <= -0.2) up++; else if(d >= 0.2) down++; else flat++;
+  });
+  if(!n) return _hmPanel('Effort since the last collection',
+    'No pupil in this form has an effort grade in both ' + prev + ' and ' + cur + '.', '');
+
+  const seg = (v, col, lab) => v ? '<div title="' + lab + '" style="width:' + (v/n*100)
+    + '%;background:' + col + ';height:22px;display:flex;align-items:center;justify-content:center;'
+    + 'font-size:.66rem;font-weight:600;color:#fff">' + v + '</div>' : '';
+
+  return _hmPanel('Effort since the last collection',
+    prev + ' to ' + cur + ', averaged across each pupil\u2019s subjects. ' + n + ' of ' + pupils.length + ' pupils have a grade in both.',
+    '<div style="display:flex;border-radius:5px;overflow:hidden;border:1px solid var(--bd)">'
+    + seg(up, PAL.green, 'Improved') + seg(flat, 'var(--bd)', 'Unchanged') + seg(down, PAL.red, 'Declined')
+    + '</div>'
+    + '<div style="display:flex;gap:1rem;font-size:.7rem;color:var(--tx2);margin-top:.35rem">'
+    + '<span><b style="color:' + PAL.green + '">' + up + '</b> improved</span>'
+    + '<span><b>' + flat + '</b> unchanged</span>'
+    + '<span><b style="color:' + PAL.red + '">' + down + '</b> declined</span></div>'
+    // A collection that is a near-copy of the one before produces a wall of
+    // "unchanged" that looks like a finding. Say which it is.
+    + (flat / n >= 0.8
+        ? '<div style="font-size:.68rem;color:var(--orange);margin-top:.4rem">'
+          + Math.round(flat/n*100) + '% of grades are identical to ' + prev
+          + '. Worth checking that ' + cur + ' is a fresh collection rather than a copy.</div>'
+        : ''));
+}
+
+// ── when the form is absent: day against period ──
+function _hmPanelHeatmap(){
+  const pupils = [..._hmPupilsInScope()];
+  const den = DD.slotDenominators;
+  if(!pupils.length || !den || den.length !== 5) return '';
+  const ay = _hmAY();
+  const grid = [0,0,0,0,0].map(() => [0,0,0,0,0]);
+  let any = 0;
+  pupils.forEach(px => {
+    const supp = getSuppressed(px), seen = new Set();
+    ((DD.attAbsSubj || {})[String(px)] || []).forEach(r => {
+      if(_hmAyOf(r[0]) !== ay) return;
+      const k = r[0] + '|' + r[2];
+      if(supp.has(k) || seen.has(k)) return;
+      seen.add(k);
+      const dow = new Date(r[0] + 'T12:00:00').getDay() - 1, per = (r[2] || 1) - 1;
+      if(dow >= 0 && dow < 5 && per >= 0 && per < 5){ grid[dow][per]++; any++; }
+    });
+  });
+  if(!any) return '';
+
+  const n = pupils.length, rates = [];
+  for(let d = 0; d < 5; d++) for(let p = 0; p < 5; p++){
+    const dn = (den[d][p] || 0) * n;
+    rates.push(dn > 0 ? grid[d][p] / dn * 100 : 0);
+  }
+  const max = Math.max.apply(null, rates) || 1;
+  const PL2 = (DD.config && DD.config.period_labels) || null;
+
+  let html = '<table style="width:100%;border-collapse:separate;border-spacing:3px;font-size:.68rem">'
+    + '<tr><td></td>' + [1,2,3,4,5].map(p => '<td style="text-align:center;color:var(--tx2)">P' + p + '</td>').join('') + '</tr>';
+  for(let d = 0; d < 5; d++){
+    html += '<tr><td style="color:var(--tx2);padding-right:.3rem">' + TT_DAYS[d] + '</td>';
+    for(let p = 0; p < 5; p++){
+      const dn = (den[d][p] || 0) * n;
+      const rate = dn > 0 ? grid[d][p] / dn * 100 : 0;
+      const a = max > 0 ? Math.min(0.85, rate / max * 0.85) : 0;
+      html += '<td style="text-align:center;padding:.3rem 0;border-radius:4px;'
+        + 'background:rgba(181,72,59,' + a.toFixed(3) + ');'
+        + 'color:' + (a > 0.45 ? '#fff' : 'var(--tx)') + '" '
+        + 'title="' + TT_DAYS[d] + ' P' + (p+1) + ' \u2014 ' + grid[d][p] + ' absences, ' + (Math.round(rate*10)/10) + '% of the form\u2019s lessons">'
+        + (Math.round(rate * 10) / 10) + '%</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</table>';
+
+  return _hmPanel('When your form is absent',
+    'Share of the form\u2019s lessons missed in each slot this year. Darker is worse. A single dark column usually means one timetabled lesson, not a scatter of illness.',
+    html);
+}
+
+// ── the block, and the one call that mounts it ──
+function _hmInfographics(){
+  const parts = [
+    _hmPanelPeers(), _hmPanelYTD(), _hmPanelSpread(),
+    _hmPanelByTeacher(), _hmPanelEffort(), _hmPanelHeatmap()
+  ].filter(Boolean).join('');
+  if(!parts) return '';
+  setTimeout(_hmFlushCharts, 0);
+  // details/summary needs no script and survives a re-render, matching _hmMore.
+  return '<details open style="margin-bottom:.7rem">'
+    + '<summary style="cursor:pointer;font-size:.8rem;font-weight:600;margin-bottom:.5rem">How your form is doing</summary>'
+    + parts + '</details>';
+}
+
 // ---- FORM TUTOR ------------------------------------------------------------
 // Mirrors the Concerns and Congrats tabs exactly. The school sets its triggers
 // once in Admin; this page shows which of THIS tutor's pupils have fired them,
@@ -7286,6 +7838,10 @@ function _hmTutor(){
     +_hmCard('Going well',good.length+' of '+px.size,'',good.length?'good':'')
     +_hmCard('Already considered',handled.length,'')
     +'</div>';
+
+  // Charts first: how the form is doing as a group, above the pupils who need
+  // action today. Move this line below the `handled` block to reverse that.
+  h+=_hmInfographics();
 
   if(con.length){
     con.sort((a,b)=>(b.items.some(i=>i.severity==='red')?1:0)-(a.items.some(i=>i.severity==='red')?1:0)
