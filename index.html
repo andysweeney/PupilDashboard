@@ -289,12 +289,15 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div id="tg-infographics" style="margin-bottom:1.25rem"></div>
 <div id="tg-alerts" style="margin-bottom:1.25rem"></div>
 <div id="tg-pupils" style="margin-bottom:1.25rem"></div>
-<div id="tg-abs-pattern" style="margin-bottom:1.25rem"></div>
 <div id="tg-network" style="margin-bottom:1.25rem"></div>
 <div style="page-break-before:always"></div>
-<div id="tg-perf-title" style="margin-bottom:.5rem"></div>
-<div class="crd-g tt-hide" id="tg-cards"></div>
-<div class="ch-g tt-hide" id="tg-charts"></div>
+<div id="tg-perf" class="dw" style="padding:0;overflow:hidden;display:none">
+<div id="tg-perf-title"></div>
+<div id="tg-perf-body" class="tt-hide" style="padding:0 .75rem .75rem">
+<div class="crd-g" id="tg-cards"></div>
+<div class="ch-g" id="tg-charts"></div>
+</div>
+</div>
 </div>
 
 <div id="vw-classcomp" class="vw">
@@ -2706,152 +2709,6 @@ function renderAbsencePattern(px,containerId,ay){
 }
 
 // Render TG-level absence pattern heatmap with pupil tooltips
-function renderTGAbsencePattern(tgPupilPxSet,containerId){
-  const el=document.getElementById(containerId);
-  if(!el) return;
-  const DAYS=['Mon','Tue','Wed','Thu','Fri'];
-  const WLK=DD.weekLessons||{};
-  const weekCount=Object.keys(WLK).length;
-
-  // Aggregate absences across all TG pupils
-  const slotAbs=Array.from({length:5},()=>Array(5).fill(0));
-  const slotUnauth=Array.from({length:5},()=>Array(5).fill(0));
-  const slotPupils=Array.from({length:5},()=>Array.from({length:5},()=>({})));// {px: {count, unauth}}
-  let totalAbs=0;
-
-  tgPupilPxSet.forEach(px=>{
-    const pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
-    const _seen2=new Set();
-    pAbsSubj.forEach(r=>{
-      const dt=new Date(r[0]+'T12:00:00');
-      const dow=dt.getDay()-1;
-      const per=(r[2]||1)-1;
-      if(dow>=0&&dow<5&&per>=0&&per<5){
-        const sk=r[0]+'|'+dow+'|'+per;
-        if(_seen2.has(sk)) return;
-        _seen2.add(sk);
-        slotAbs[dow][per]++;
-        totalAbs++;
-        if(!slotPupils[dow][per][px]) slotPupils[dow][per][px]={count:0,unauth:0};
-        slotPupils[dow][per][px].count++;
-        if(r[3]&&isUnauth(r[3])){
-          slotUnauth[dow][per]++;
-          slotPupils[dow][per][px].unauth++;
-        }
-      }
-    });
-  });
-
-  if(totalAbs<1){el.innerHTML='';return}
-
-  const maxSlot=Math.max(...slotAbs.flat(),1);
-  const tgSize=tgPupilPxSet.size;
-  // Expected per slot = totalAbs / 25
-  const expected=totalAbs/25;
-
-  function absHeat(count){
-    if(!count)return'';
-    const i=Math.min(count/maxSlot,1);
-    if(i<0.15)return'background:rgba(78,107,200,0.06)';
-    if(i<0.3)return'background:rgba(78,107,200,0.12)';
-    if(i<0.5)return'background:rgba(78,107,200,0.2)';
-    if(i<0.7)return'background:rgba(78,107,200,0.3)';
-    if(i<0.85)return'background:rgba(111,75,192,0.3)';
-    return'background:rgba(111,75,192,0.4)';
-  }
-
-  // Build tooltip HTML for each slot
-  function slotTooltip(d,p){
-    const pupils=slotPupils[d][p];
-    const entries=Object.entries(pupils).sort((a,b)=>b[1].count-a[1].count);
-    if(!entries.length) return'';
-    const total=slotAbs[d][p];
-    const pupilCount=entries.length;
-    let tip=`${DAYS[d]} P${p+1} — ${total} absence${total!==1?'s':''} (${pupilCount} pupil${pupilCount!==1?'s':''})\\n`;
-    entries.slice(0,10).forEach(([px,data])=>{
-      const name=((DD.registry||{})[String(px)]?.id||px).replace(/\s*\([^)]+\)\s*$/,'');
-      tip+=`${name}: ${data.count}${data.unauth?' ('+data.unauth+' unauth)':''}\\n`;
-    });
-    if(entries.length>10) tip+=`... and ${entries.length-10} more`;
-    return tip;
-  }
-
-  let html=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Absence Patterns</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">— ${totalAbs} total absences across ${tgSize} pupils · ${weekCount} weeks</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
-  html+=`<div class="tt-hide" style="padding:.5rem 1rem .75rem">`;
-
-  // Heatmap grid
-  html+=`<div class="tt-grid">`;
-  html+=`<div class="tt-per"></div>`;DAYS.forEach(d=>{html+=`<div class="tt-day">${d}</div>`});
-
-  // Day-level flags
-  const dayAbs=[0,0,0,0,0];
-  for(let d=0;d<5;d++) for(let p=0;p<5;p++) dayAbs[d]+=slotAbs[d][p];
-  const dayFlags=[];
-  DAYS.forEach((dn,i)=>{
-    const dayTotal=dayAbs[i];
-    if(dayTotal>=AP_MIN&&totalAbs>0){
-      const pct=dayTotal/totalAbs*100;
-      if(pct>=AP_PCT) dayFlags.push({day:dn,count:dayTotal,total:totalAbs,pct});
-    }
-  });
-
-  // Slot-level flags
-  const slotFlags=[];
-  for(let d=0;d<5;d++){
-    for(let p=0;p<5;p++){
-      if(slotAbs[d][p]>=AP_MIN&&weekCount>0){
-        const rate=slotAbs[d][p]/(weekCount*tgSize)*100;// per pupil per week
-        const rawRate=slotAbs[d][p]/weekCount;// avg absences per week in this slot
-        // Flag if concentration is high relative to expected
-        const ratio=expected>0?slotAbs[d][p]/expected:0;
-        if(ratio>=1.5&&slotAbs[d][p]>=AP_MIN) slotFlags.push({day:DAYS[d],dayIdx:d,per:p+1,perIdx:p,count:slotAbs[d][p],ratio,pupils:Object.keys(slotPupils[d][p]).length});
-      }
-    }
-  }
-
-  for(let p=0;p<5;p++){
-    html+=`<div class="tt-per">P${p+1}</div>`;
-    for(let d=0;d<5;d++){
-      const count=slotAbs[d][p];
-      const unauth=slotUnauth[d][p];
-      const heat=absHeat(count);
-      const nPupils=Object.keys(slotPupils[d][p]).length;
-      const isFlagged=slotFlags.some(f=>f.dayIdx===d&&f.perIdx===p);
-      const border=isFlagged?'border:2px solid var(--red);':'border-left:2px solid transparent;';
-      const tipData=slotPupils[d][p];
-      const tipEntries=Object.entries(tipData).sort((a,b)=>b[1].count-a[1].count);
-
-      if(count){
-        // Store tooltip data as JSON in a data attribute to avoid quote escaping
-        const tipJson=JSON.stringify({title:`${DAYS[d]} P${p+1} — ${count} abs (${nPupils}p)`,entries:tipEntries.slice(0,10).map(([px2,data])=>({name:((DD.registry||{})[String(px2)]?.id||px2).replace(/\s*\([^)]+\)\s*$/,''),count:data.count,unauth:data.unauth})),more:tipEntries.length>10?tipEntries.length-10:0}).replace(/"/g,'&quot;');
-        html+=`<div class="tt-cell" style="${border}${heat};cursor:help;position:relative" data-tipjson="${tipJson}" onmouseenter="const d2=JSON.parse(this.dataset.tipjson);const t=document.createElement('div');let h2='<div style=font-weight:600;margin-bottom:.3rem>'+d2.title+'</div>';d2.entries.forEach(e=>{h2+='<div style=display:flex;justify-content:space-between;gap:1rem;padding:.1rem_0;border-bottom:1px_solid_var(--bd)><span>'+e.name+'</span><span style=font-family:IBM_Plex_Mono,monospace>'+e.count+(e.unauth?' <span style=color:var(--red-band)>('+e.unauth+'u)</span>':'')+'</span></div>'});if(d2.more)h2+='<div style=color:var(--mu);font-size:.6rem>+'+d2.more+' more</div>';t.innerHTML=h2;t.style.cssText='position:fixed;z-index:9999;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.6rem .8rem;font-size:.68rem;color:var(--tx);box-shadow:0 4px 16px rgba(40,34,20,.2);pointer-events:none;white-space:nowrap';const _r2=this.getBoundingClientRect();t.style.left=(_r2.left+_r2.width/2)+'px';t.style.top=(_r2.top-4)+'px';t.style.transform='translate(-50%,-100%)';document.body.appendChild(t);this._t=t" onmouseleave="if(this._t)this._t.remove()">`;
-        html+=`<span style="font-size:.8rem;font-weight:700;color:var(--tx)">${count}</span>`;
-        html+=`<span style="font-size:.6rem;font-weight:500;color:#1b2231">${nPupils}p</span>`;
-        if(unauth) html+=`<span style="font-size:.6rem;font-weight:600;color:var(--red-band)">${unauth}u</span>`;
-        html+=`</div>`;
-      }else{
-        html+=`<div class="tt-cell" style="border-left:2px solid transparent"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
-      }
-    }
-  }
-  html+=`</div>`;
-
-  // Flags
-  if(dayFlags.length||slotFlags.length){
-    html+=`<div style="margin-top:.6rem;display:flex;flex-direction:column;gap:.3rem">`;
-    dayFlags.forEach(f=>{
-      html+=`<div style="font-size:.72rem;padding:.3rem .6rem;border-radius:4px;background:rgba(181,72,59,.08);border:1px solid rgba(181,72,59,.2)"><span style="color:var(--red);font-weight:600">⚠ ${f.pct.toFixed(0)}% of absences fall on ${f.day}s</span> <span style="color:var(--mu)">(${f.count} of ${f.total})</span></div>`;
-    });
-    slotFlags.forEach(f=>{
-      html+=`<div style="font-size:.72rem;padding:.3rem .6rem;border-radius:4px;background:rgba(181,72,59,.08);border:1px solid rgba(181,72,59,.2)"><span style="color:var(--red);font-weight:600">⚠ ${f.day} P${f.per}: ${f.ratio.toFixed(1)}× expected rate</span> <span style="color:var(--mu)">(${f.count} absences, ${f.pupils} pupils)</span></div>`;
-    });
-    html+=`</div>`;
-  }
-
-  html+=`<div style="font-size:.55rem;color:var(--mu);margin-top:.4rem">Cells show total absences / number of pupils / unauthorised count. Hover for pupil breakdown. Red borders = flagged patterns.</div>`;
-  html+=`</div></div>`;
-  el.innerHTML=html;
-}
 
 // SEND breakdown: "147 SEND (40K · 21E · 41Add · 32Strat · 13N) · 59 FSM"
 function sendBreakdown(rows,pxField){
@@ -10505,7 +10362,8 @@ function rPeer(){
 
   if(!tgRows.length){
     document.getElementById('tg-title').innerHTML=`<div style="color:var(--mu)">No pupils in ${tgDisplayName}</div>`;
-    ['tg-summary','tg-alerts','tg-pupils','tg-abs-pattern','tg-network','tg-perf-title','tg-cards','tg-charts'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
+    ['tg-summary','tg-alerts','tg-pupils','tg-network','tg-perf-title','tg-cards','tg-charts'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
+    const _pf=document.getElementById('tg-perf');if(_pf)_pf.style.display='none';
     return;
   }
 
@@ -10631,7 +10489,6 @@ function rPeer(){
     </tr></thead><tbody>${alertRows}</tbody></table></div></div>`:'';
 
   // ── ABSENCE PATTERNS ──
-  renderTGAbsencePattern(tgPupilPx,'tg-abs-pattern');
 
   // ── NETWORK GRAPH ──
   const tgNetDiv=document.getElementById('tg-network');
@@ -10717,9 +10574,9 @@ function rPeer(){
     // Make 'Effort and Ability Summary' a clickable collapse header that hides
     // the Cards (tg-cards) and Charts (tg-charts) below it. Default collapsed
     // (re-collapse on each render so arrow state and content visibility stay in sync).
-    document.getElementById('tg-cards').classList.add('tt-hide');
-    document.getElementById('tg-charts').classList.add('tt-hide');
-    document.getElementById('tg-perf-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd);cursor:pointer;display:flex;align-items:center;gap:.6rem" onclick="['tg-cards','tg-charts'].forEach(id=>{const e=document.getElementById(id);if(e)e.classList.toggle('tt-hide')});this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Effort and Ability Summary</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
+    document.getElementById('tg-perf').style.display='';
+    document.getElementById('tg-perf-body').classList.add('tt-hide');
+    document.getElementById('tg-perf-title').innerHTML=`<div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=document.getElementById('tg-perf-body');bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Effort and Ability Summary</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
 
     const labs=pp.map(p=>PL[PER.indexOf(p)]);
     const abDatasets=[{label:`${tgDisplayName} Avg Ability`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgAb(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
