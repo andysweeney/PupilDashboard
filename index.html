@@ -281,17 +281,12 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div id="vw-tutor" class="vw">
 <div class="ctl">
 <div class="cg"><label>Year Group</label><select id="tg-yg" onchange="popTG()"></select></div>
-<div class="cg"><label>Tutor Group</label><select id="tg-sel" onchange="rTG()"></select></div>
+<div class="cg"><label>Tutor Group</label><select id="tg-sel" onchange="rTG();window._hmTgCharts()"></select></div>
+<div id="tg-flags" style="font-size:.72rem;display:flex;align-items:center;margin-left:auto"></div>
 </div>
-<!-- tg-host is a single node that moves between this tab and the Form Tutor
-     tab, so there is only ever one instance and the two cannot diverge.
-     tg-anchor is where it lives when this tab is showing it, and is also where
-     it must be parked before any innerHTML render that would otherwise
-     destroy it. -->
-<div id="tg-anchor"><div id="tg-host">
-<div id="tg-flags" style="font-size:.72rem;display:flex;align-items:center;margin-bottom:.6rem"></div>
 <div id="tg-title" style="margin-bottom:.5rem"></div>
 <div id="tg-summary" style="margin-bottom:1.25rem"></div>
+<div id="tg-infographics" style="margin-bottom:1.25rem"></div>
 <div id="tg-alerts" style="margin-bottom:1.25rem"></div>
 <div id="tg-pupils" style="margin-bottom:1.25rem"></div>
 <div id="tg-abs-pattern" style="margin-bottom:1.25rem"></div>
@@ -300,7 +295,6 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div id="tg-perf-title" style="margin-bottom:.5rem"></div>
 <div class="crd-g tt-hide" id="tg-cards"></div>
 <div class="ch-g tt-hide" id="tg-charts"></div>
-</div></div>
 </div>
 
 <div id="vw-classcomp" class="vw">
@@ -7050,7 +7044,7 @@ function sw(v,btn){
   // instead, because those also run when the dropdown changes — so switching from
   // 10A to 10B writes its own row, which a tab-level log would miss.
   try{ if(v!=='class'&&v!=='tutor') auditLog('view_opened',null,null,{view:v}); }catch(e){}
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor'){_hmTgHome();popTG()}else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='hmtutor')rHmTutor();else if(v==='hmyear')rHmYear();else if(v==='hmslt')rHmSLT();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='hmtutor')rHmTutor();else if(v==='hmyear')rHmYear();else if(v==='hmslt')rHmSLT();else rP();
 }
 
 
@@ -7178,15 +7172,7 @@ function _hmRender(outId,fn){
   try{ el.innerHTML=fn(); }
   catch(e){ el.innerHTML='<div style="color:var(--red);padding:1rem">Could not build this view: '+e.message+'</div>'; }
 }
-function rHmTutor(){
-  // Park the shared node back at its anchor FIRST. _hmRender replaces the
-  // innerHTML of this view, and tg-host lives inside it once adopted, so
-  // rendering without parking would destroy the only copy.
-  _hmTgHome();
-  _HM_SCOPE=_hmFill('hm-scope-tutor',_hmTutorScopes())||'all';
-  _hmRender('hm-out-tutor',_hmTutor);
-  _hmTgAdopt();
-}
+function rHmTutor(){ _HM_SCOPE=_hmFill('hm-scope-tutor',_hmForms())||'all'; _hmRender('hm-out-tutor',_hmTutor); }
 function rHmYear(){  _HM_SCOPE=_hmFill('hm-scope-year',_hmYears())||'all';  _hmRender('hm-out-year',_hmYearLeader); }
 function rHmSLT(){   _HM_SCOPE='all';                                       _hmRender('hm-out-slt',_hmSLT); }
 
@@ -7681,98 +7667,32 @@ function _hmInfographics(){
     + '<summary style="cursor:pointer;font-size:.8rem;font-weight:600;margin-bottom:.5rem">How your form is doing</summary>'
     + parts + '</details>';
 }
-// ---- FORM TUTOR — the tutor group panels, merged in --------------------------
-// The Tutor Group tab keeps its own button, so its panels cannot simply be
-// copied here: two live copies would mean duplicate element ids and two
-// renderers drifting apart. Instead #tg-host is ONE node that moves between the
-// two views. rTG() is untouched — it writes to the same ids wherever they sit.
 
-// Scope options: every form first, so the tab still opens on a real form, then
-// the whole-year options that replace the Tutor Group tab's "All Tutor Groups".
-function _hmTutorScopes(){
-  const idx = _hmFormIndex();
-  const forms = Object.keys(idx).sort().map(reg => ['reg:' + reg, reg]);
-  const years = [...new Set(Object.values(idx).map(v => v.year).filter(Boolean))].sort();
-  return forms.concat(years.map(y => ['year:' + y, 'All of ' + y]));
-}
-
-function _hmYearNum(v){
-  const n = parseInt(String(v == null ? '' : v).replace(/\D+/g, ''), 10);
-  return isNaN(n) ? null : n;
-}
-
-// Point the Tutor Group selectors at whatever the Form Tutor picker is showing.
-function _hmTgSync(){
+// ---- mounting the charts on the Tutor Group tab ------------------------------
+// The charts describe the form as a group, which is the Tutor Group tab's job.
+// The Form Tutor tab stays short and actionable: triggers only.
+function _hmScopeFromTG(){
   const yg = document.getElementById('tg-yg'), sel = document.getElementById('tg-sel');
-  if(!yg || !sel || typeof popTG !== 'function') return false;
-  const v = _HM_SCOPE || '';
-  let year = null, want = null;
-  if(v.startsWith('reg:')){
-    const reg = v.slice(4);
-    const idx = _hmFormIndex()[reg];
-    year = idx ? _hmYearNum(idx.year) : null;
-    want = reg;
-  } else if(v.startsWith('year:')){
-    year = _hmYearNum(v.slice(5));
-    want = '__all';
-  }
-  if(year == null) return false;
-  yg.value = String(year);
-  window._HM_TG_SILENT = true;
-  try { popTG(); } finally { window._HM_TG_SILENT = false; }
-  const has = [...sel.options].some(o => o.value === want);
-  sel.value = has ? want : '__all';
-  return true;
+  if(!yg || !sel) return 'all';
+  const v = sel.value;
+  if(v && v !== '__all') return 'reg:' + v;
+  const y = parseInt(yg.value, 10);
+  return isNaN(y) ? 'all' : 'year:Year ' + y;   // registry.year reads "Year 10"
 }
 
-// Charts laid out while the view was hidden measure zero, so resize on arrival.
-function _hmTgResize(){
-  try {
-    document.querySelectorAll('#tg-host canvas').forEach(cv => {
-      const c = (window.Chart && Chart.getChart) ? Chart.getChart(cv) : null;
-      if(c) c.resize();
-    });
-  } catch(e){}
+// Called after rTG(), not from inside it: rTG has several early returns and the
+// charts should still draw when it bails.
+function _hmTgCharts(){
+  const el = document.getElementById('tg-infographics');
+  if(!el) return;
+  _HM_SCOPE = _hmScopeFromTG();
+  try { el.innerHTML = _hmInfographics(); }
+  catch(e){ console.warn('[hm] charts', e); el.innerHTML = ''; }
 }
 
-// Move the node into the Form Tutor view and render it for the current scope.
-function _hmTgAdopt(){
-  const host = document.getElementById('tg-host'),
-        dest = document.getElementById('hm-tg-mount');
-  if(!host || !dest) return;
-  if(host.parentNode !== dest) dest.appendChild(host);
-  if(_hmTgSync() && typeof rTG === 'function'){
-    try { rTG(); } catch(e){ console.warn('[hm] rTG', e); }
-  }
-  _hmTgResize();
-}
-
-// Move it back when the Tutor Group tab is opened.
-function _hmTgHome(){
-  const host = document.getElementById('tg-host'),
-        anchor = document.getElementById('tg-anchor');
-  if(host && anchor && host.parentNode !== anchor) anchor.appendChild(host);
-  _hmTgResize();
-}
-
-function _hmTgSection(){
-  const scope = _hmScopeForm();
-  return '<details style="margin-top:.2rem" ontoggle="if(this.open)window._hmTgResize()">'
-    + '<summary style="cursor:pointer;font-size:.8rem;font-weight:600;margin-bottom:.5rem">'
-    + 'The full picture for ' + (scope || 'this year group') + '</summary>'
-    + '<div style="font-size:.7rem;color:var(--tx2);margin-bottom:.6rem">'
-    + 'Roster, discipline, absence patterns, problem groups, ability and effort over time, '
-    + 'and the subject and class analytics. The same panels as the Tutor Group tab, following this scope picker.'
-    + '</div>'
-    + '<div id="hm-tg-mount"></div></details>';
-}
-
-// Inline handlers (ontoggle=, onclick=) are evaluated in global scope, so any
-// function an HTML attribute calls has to be on window. This is the same
-// reason the app exposes window.popTG and window.rTG further down the file.
-window._hmTgResize = _hmTgResize;
-window._hmTgAdopt  = _hmTgAdopt;
-window._hmTgHome   = _hmTgHome;
+// Inline handlers are evaluated in global scope, the same reason the app does
+// window.popTG = popTG further down the file.
+window._hmTgCharts = _hmTgCharts;
 
 // ---- FORM TUTOR ------------------------------------------------------------
 // Mirrors the Concerns and Congrats tabs exactly. The school sets its triggers
@@ -7913,7 +7833,6 @@ function _hmTutor(){
     h+=_hmPanel('Nothing needs you this week','',
       '<div style="font-size:.75rem;color:var(--tx2)">No pupil in this form has triggered a concern or a congratulation. The triggers are in Admin &rsaquo; Thresholds.</div>');
   }
-  h+=_hmTgSection();
   return h;
 }
 
@@ -10543,13 +10462,10 @@ function rPeer(){
   });
   if(prev==='__all'||[...tgs].includes(prev))sel.value=prev;
   rTG();
+  _hmTgCharts();
 }
 
   function rTG(){
-  // popTG() re-renders as a side effect of repopulating the dropdown. When the
-  // Form Tutor scope picker drives it we want the repopulation without the
-  // render, because the render costs two scatters and a network graph.
-  if(window._HM_TG_SILENT) return;
   const yearGroup=parseInt(document.getElementById('tg-yg').value);
   const tgName=document.getElementById('tg-sel').value;
   if(!yearGroup||!tgName) return;
