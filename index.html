@@ -284,8 +284,10 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <div class="cg"><label>Tutor Group</label><select id="tg-sel" onchange="rTG()"></select></div>
 </div>
 <!-- tg-host is a single node that moves between this tab and the Form Tutor
-     tab, so there is only ever one instance and the two can never diverge.
-     tg-anchor is where it lives when this tab is showing it. -->
+     tab, so there is only ever one instance and the two cannot diverge.
+     tg-anchor is where it lives when this tab is showing it, and is also where
+     it must be parked before any innerHTML render that would otherwise
+     destroy it. -->
 <div id="tg-anchor"><div id="tg-host">
 <div id="tg-flags" style="font-size:.72rem;display:flex;align-items:center;margin-bottom:.6rem"></div>
 <div id="tg-title" style="margin-bottom:.5rem"></div>
@@ -7177,6 +7179,10 @@ function _hmRender(outId,fn){
   catch(e){ el.innerHTML='<div style="color:var(--red);padding:1rem">Could not build this view: '+e.message+'</div>'; }
 }
 function rHmTutor(){
+  // Park the shared node back at its anchor FIRST. _hmRender replaces the
+  // innerHTML of this view, and tg-host lives inside it once adopted, so
+  // rendering without parking would destroy the only copy.
+  _hmTgHome();
   _HM_SCOPE=_hmFill('hm-scope-tutor',_hmTutorScopes())||'all';
   _hmRender('hm-out-tutor',_hmTutor);
   _hmTgAdopt();
@@ -7751,7 +7757,7 @@ function _hmTgHome(){
 
 function _hmTgSection(){
   const scope = _hmScopeForm();
-  return '<details style="margin-top:.2rem" ontoggle="if(this.open)_hmTgResize()">'
+  return '<details style="margin-top:.2rem" ontoggle="if(this.open)window._hmTgResize()">'
     + '<summary style="cursor:pointer;font-size:.8rem;font-weight:600;margin-bottom:.5rem">'
     + 'The full picture for ' + (scope || 'this year group') + '</summary>'
     + '<div style="font-size:.7rem;color:var(--tx2);margin-bottom:.6rem">'
@@ -7760,6 +7766,13 @@ function _hmTgSection(){
     + '</div>'
     + '<div id="hm-tg-mount"></div></details>';
 }
+
+// Inline handlers (ontoggle=, onclick=) are evaluated in global scope, so any
+// function an HTML attribute calls has to be on window. This is the same
+// reason the app exposes window.popTG and window.rTG further down the file.
+window._hmTgResize = _hmTgResize;
+window._hmTgAdopt  = _hmTgAdopt;
+window._hmTgHome   = _hmTgHome;
 
 // ---- FORM TUTOR ------------------------------------------------------------
 // Mirrors the Concerns and Congrats tabs exactly. The school sets its triggers
