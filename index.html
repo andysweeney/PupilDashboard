@@ -7203,6 +7203,30 @@ function _hmCssVar(name, fallback){
   } catch(e){ return fallback; }
 }
 function _hmMuted(){ return _hmCssVar('--bd', '#e6dfd0'); }
+// Canvas needs a concrete colour, so build rgba() from the palette hex rather
+// than relying on an opacity property Chart.js would apply to the whole set.
+function _hmAlpha(c, a){
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(c||'').trim());
+  if(!m) return c;
+  let h = m[1];
+  if(h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  return 'rgba(' + parseInt(h.slice(0,2),16) + ',' + parseInt(h.slice(2,4),16)
+    + ',' + parseInt(h.slice(4,6),16) + ',' + a + ')';
+}
+
+// Winsorised mean: the extreme values are pulled in to the 10th and 90th
+// percentile rather than dropped, so the pupil count stays the same and a
+// count metric keeps its denominator. One pupil at 78% in a form of 29 moves
+// the plain mean by most of a point; here it moves it by a fraction of one.
+function _hmWinsorMean(vals, p){
+  const v = (vals||[]).filter(x => x != null).slice().sort((a,b) => a-b);
+  if(!v.length) return null;
+  const k = Math.floor(v.length * (p == null ? 0.1 : p));
+  if(k < 1) return v.reduce((a,b) => a+b, 0) / v.length;
+  const lo = v[k], hi = v[v.length - 1 - k];
+  const w = v.map(x => x < lo ? lo : (x > hi ? hi : x));
+  return w.reduce((a,b) => a+b, 0) / w.length;
+}
 const _HM_FONT = { family: 'Hanken Grotesk' };
 function _hmScale(extra){
   return Object.assign({
@@ -7279,18 +7303,25 @@ function _hmPeerForms(){
 // ── per-form aggregates for the current academic year ──
 function _hmFormStats(pupils){
   const ay = _hmAY(), sd = _hmSchoolDays(), n = pupils.length;
-  if(!n || !sd.length) return { att: null, pos: null, neg: null, n: n };
-  let absent = 0;
-  pupils.forEach(px => { absent += countAbsPeriods(px, sd[0], sd[sd.length-1]).total; });
-  const scheduled = n * sd.length * _hmPerPerDay();
-  const set = new Set(pupils);
-  let pos = 0, neg = 0;
-  (DD.housePoints || []).forEach(r => { if(set.has(r[0]) && _hmAyOf(r[2]) === ay) pos++; });
-  (DD.sanctions   || []).forEach(r => { if(set.has(r[0]) && _hmAyOf(r[2]) === ay) neg++; });
-  return {
-    att: scheduled > 0 ? 100 - (absent / scheduled * 100) : null,
-    pos: pos / n, neg: neg / n, n: n
-  };
+  const empty = { n: n, att: null, attW: null, pos: null, posW: null, neg: null, negW: null };
+  if(!n || !sd.length) return empty;
+  const sched = sd.length * _hmPerPerDay();
+  const set = new Set(pupils), hp = {}, sn = {};
+  (DD.housePoints || []).forEach(r => { if(set.has(r[0]) && _hmAyOf(r[2]) === ay) hp[r[0]] = (hp[r[0]]||0) + 1; });
+  (DD.sanctions   || []).forEach(r => { if(set.has(r[0]) && _hmAyOf(r[2]) === ay) sn[r[0]] = (sn[r[0]]||0) + 1; });
+  const attV = [], posV = [], negV = [];
+  pupils.forEach(px => {
+    const a = countAbsPeriods(px, sd[0], sd[sd.length-1]).total;
+    attV.push(sched > 0 ? 100 - (a / sched * 100) : null);
+    posV.push(hp[px] || 0);
+    negV.push(sn[px] || 0);
+  });
+  const mean = v => { const w = v.filter(x => x != null);
+    return w.length ? w.reduce((a,b) => a+b, 0) / w.length : null; };
+  return { n: n,
+    att: mean(attV), attW: _hmWinsorMean(attV),
+    pos: mean(posV), posW: _hmWinsorMean(posV),
+    neg: mean(negV), negW: _hmWinsorMean(negV) };
 }
 
 // A bar chart of one metric across the year group, the tutor's own form picked
@@ -7299,10 +7330,11 @@ function _hmFormStats(pupils){
 // reads as a chasm.
 function _hmPeerBar(canvasId, key, rows, me, opts){
   const labels = rows.map(r => r.reg);
-  const vals   = rows.map(r => r.v);
-  const live   = vals.filter(v => v != null);
+  const raw = rows.map(r => r.v), win = rows.map(r => r.w);
+  const live = raw.concat(win).filter(v => v != null);
   if(!live.length || (opts.zeroMeansMissing && live.every(v => v === 0))) return null;
-  const mean = live.reduce((a,b) => a+b, 0) / live.length;
+  const liveW = win.filter(v => v != null);
+  const mean = liveW.length ? liveW.reduce((a,b) => a+b, 0) / liveW.length : null;
 
   let min, max;
   if(opts.fromZero){
@@ -7318,6 +7350,7 @@ function _hmPeerBar(canvasId, key, rows, me, opts){
   _hmChart(() => {
     const el = document.getElementById(canvasId);
     if(!el) return;
+    const muted = _hmMuted();
     dc(key);
     sc2(key, new Chart(el, {
       type: 'bar',
@@ -7325,14 +7358,20 @@ function _hmPeerBar(canvasId, key, rows, me, opts){
         labels: labels,
         datasets: [
           {
-            label: opts.label,
-            data: vals,
-            backgroundColor: labels.map(l => l === me ? opts.color : _hmMuted()),
-            borderColor:     labels.map(l => l === me ? opts.color : _HM_BORDER),
-            borderWidth: 1, borderRadius: 3, order: 2
+            label: 'Mean',
+            data: raw,
+            backgroundColor: labels.map(l => _hmAlpha(l === me ? opts.color : muted, 0.32)),
+            borderColor:     labels.map(l => l === me ? opts.color : muted),
+            borderWidth: 1, borderRadius: 3, order: 3
           },
           {
-            type: 'line', label: 'Year group mean',
+            label: 'Winsorised mean',
+            data: win,
+            backgroundColor: labels.map(l => l === me ? opts.color : muted),
+            borderWidth: 0, borderRadius: 3, order: 2
+          },
+          {
+            type: 'line', label: 'Year group',
             data: labels.map(() => mean),
             borderColor: _HM_TICK, borderWidth: 1, borderDash: [4,3],
             pointRadius: 0, fill: false, order: 1
@@ -7342,7 +7381,8 @@ function _hmPeerBar(canvasId, key, rows, me, opts){
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
-          legend: { display: false },
+          legend: { labels: { color: _HM_TICK, font: _HM_FONT, boxWidth: 9,
+            padding: 7, filter: i => i.text !== 'Year group' } },
           tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + opts.fmt(c.parsed.y) } }
         },
         scales: {
@@ -7362,25 +7402,26 @@ function _hmPanelPeers(){
 
   const stats = {};
   peers.forms.forEach(f => { stats[f.reg] = _hmFormStats(f.pupils); });
-  const mk = field => peers.forms.map(f => ({ reg: f.reg, v: stats[f.reg][field] }));
+  const mk = (field, wfield) => peers.forms.map(f =>
+    ({ reg: f.reg, v: stats[f.reg][field], w: stats[f.reg][wfield] }));
 
   const cols = [
-    { id: 'hm-ig-att', key: 'hmIgAtt', field: 'att', title: 'Attendance',
+    { id: 'hm-ig-att', key: 'hmIgAtt', field: 'att', wfield: 'attW', title: 'Attendance',
       opts: { label: 'Attendance', color: PAL.sky, fromZero: false, hardMax: 100,
               fmt: v => (Math.round(v * 10) / 10) + '%' } },
-    { id: 'hm-ig-pos', key: 'hmIgPos', field: 'pos', title: 'Positives per pupil',
+    { id: 'hm-ig-pos', key: 'hmIgPos', field: 'pos', wfield: 'posW', title: 'Positives per pupil',
       opts: { label: 'Positives per pupil', color: PAL.green, fromZero: true,
               zeroMeansMissing: true, fmt: v => Math.round(v * 10) / 10 } },
-    { id: 'hm-ig-neg', key: 'hmIgNeg', field: 'neg', title: 'Sanctions per pupil',
+    { id: 'hm-ig-neg', key: 'hmIgNeg', field: 'neg', wfield: 'negW', title: 'Sanctions per pupil',
       opts: { label: 'Sanctions per pupil', color: PAL.red, fromZero: true,
               fmt: v => Math.round(v * 10) / 10 } }
   ];
 
   const body = cols.map(c => {
-    const rows = mk(c.field);
+    const rows = mk(c.field, c.wfield);
     const built = _hmPeerBar(c.id, c.key, rows, peers.me, c.opts);
     const inner = built
-      ? _hmCanvas(c.id, 150)
+      ? _hmCanvas(c.id, 172)
       : _hmNote(c.field === 'pos'
           ? 'No positive behaviour has been recorded for ' + peers.year + ' in this academic year, so there is nothing to compare. This is a gap in the data, not a result for your form.'
           : 'Not enough data to compare.');
@@ -7390,7 +7431,7 @@ function _hmPanelPeers(){
   }).join('');
 
   return _hmPanel('Your form against the year group',
-    peers.me + ' is picked out; the dashed line is the ' + peers.year + ' mean. Bars for attendance use a zoomed scale, so read them against that line rather than against each other.',
+    peers.me + ' is picked out. The solid bar is the Winsorised mean, which pulls the highest and lowest tenth of pupils in to the 10th and 90th percentile; the pale bar behind it is the plain mean. A wide gap between the two means one or two pupils are carrying the figure. The dashed line is the ' + peers.year + ' Winsorised mean.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">' + body + '</div>');
 }
 
@@ -7433,8 +7474,8 @@ function _hmLineChart(canvasId, key, labels, mine, median, color, fmt){
     sc2(key, new Chart(el, {
       type: 'line',
       data: { labels: labels, datasets: [
-        { label: 'Year group median', data: median, borderColor: _HM_BORDER, borderWidth: 1.5,
-          pointRadius: 0, tension: .35, fill: false },
+        { label: 'Year group median', data: median, borderColor: PAL.slate, borderWidth: 1.5,
+          borderDash: [5,3], pointRadius: 0, tension: .35, fill: false },
         { label: 'Your form', data: mine, borderColor: color, borderWidth: 2.5,
           pointRadius: 3, tension: .35, fill: false }
       ]},
@@ -7467,7 +7508,7 @@ function _hmPanelYTD(){
   };
 
   return _hmPanel('This year, month by month',
-    'Your form in colour, the median form in ' + peers.year + ' in grey.',
+    'Your form is the solid line. The dashed line is the median form in ' + peers.year + '.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-yatt', 'hmIgYAtt', mine.att, med('att'), PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -7476,65 +7517,6 @@ function _hmPanelYTD(){
     + one('Sanctions per pupil', 'hm-ig-yneg', 'hmIgYNeg', mine.neg, med('neg'), PAL.red,
           v => Math.round(v*10)/10, 'No sanctions recorded yet.')
     + '</div>');
-}
-
-// ── one dot per pupil: the spread a form average hides ──
-function _hmPanelSpread(){
-  const peers = _hmPeerForms();
-  if(!peers.me) return '';
-  const sd = _hmSchoolDays();
-  if(!sd.length) return '';
-  const ppd = _hmPerPerDay(), sched = sd.length * ppd;
-  const rate = px => {
-    const a = countAbsPeriods(px, sd[0], sd[sd.length-1]).total;
-    return sched > 0 ? 100 - (a / sched * 100) : null;
-  };
-  const mineSet = new Set((_hmFormIndex()[peers.me] || {}).pupils || []);
-  const mine = [], others = [];
-  peers.forms.forEach(f => f.pupils.forEach(px => {
-    const v = rate(px); if(v == null) return;
-    const j = 0.16 * (Math.random() - 0.5);
-    (mineSet.has(px) ? mine : others).push({ x: v, y: (mineSet.has(px) ? 1 : 0) + j, px: px });
-  }));
-  if(!mine.length) return '';
-
-  _hmChart(() => {
-    const el = document.getElementById('hm-ig-spread');
-    if(!el) return;
-    dc('hmIgSpread');
-    sc2('hmIgSpread', new Chart(el, {
-      type: 'scatter',
-      data: { datasets: [
-        { label: peers.year, data: others, backgroundColor: _hmMuted(), pointRadius: 3 },
-        { label: peers.me,   data: mine,   backgroundColor: PAL.sky,     pointRadius: 5 }
-      ]},
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: c => {
-            const r = (DD.registry || {})[String(c.raw.px)] || {};
-            return ' ' + (r.id || c.raw.px) + ' · ' + (Math.round(c.parsed.x * 10) / 10) + '%';
-          } } }
-        },
-        scales: {
-          x: _hmScale({ title: { display: true, text: 'Attendance this year', color: _HM_TICK, font: _HM_FONT },
-                        ticks: { color: _HM_TICK, font: _HM_FONT, callback: v => v + '%' } }),
-          y: { min: -0.45, max: 1.45, grid: { display: false }, border: { color: _HM_BORDER },
-               ticks: { color: _HM_TICK, font: _HM_FONT, stepSize: 1,
-                        callback: v => v === 1 ? peers.me : (v === 0 ? 'Rest of ' + peers.year : '') } }
-        }
-      }
-    }));
-  });
-
-  const sorted = mine.map(m => m.x).sort((a,b) => a-b);
-  const lo = sorted[0], med = sorted[Math.floor(sorted.length/2)];
-  return _hmPanel('Every pupil in your form',
-    'One dot per pupil. An average of ' + (Math.round(med*10)/10) + '% can be everyone near it, or most of the form high and a few very low — this shows which.',
-    _hmCanvas('hm-ig-spread', 150)
-    + '<div style="font-size:.7rem;color:var(--tx2);margin-top:.35rem">Lowest in your form: '
-    + (Math.round(lo*10)/10) + '%. Median: ' + (Math.round(med*10)/10) + '%.</div>');
 }
 
 // ── sanctions by teacher, against what their share of the timetable predicts ──
@@ -7661,63 +7643,10 @@ function _hmPanelEffort(){
         : ''));
 }
 
-// ── when the form is absent: day against period ──
-function _hmPanelHeatmap(){
-  const pupils = [..._hmPupilsInScope()];
-  const den = DD.slotDenominators;
-  if(!pupils.length || !den || den.length !== 5) return '';
-  const ay = _hmAY();
-  const grid = [0,0,0,0,0].map(() => [0,0,0,0,0]);
-  let any = 0;
-  pupils.forEach(px => {
-    const supp = getSuppressed(px), seen = new Set();
-    ((DD.attAbsSubj || {})[String(px)] || []).forEach(r => {
-      if(_hmAyOf(r[0]) !== ay) return;
-      const k = r[0] + '|' + r[2];
-      if(supp.has(k) || seen.has(k)) return;
-      seen.add(k);
-      const dow = new Date(r[0] + 'T12:00:00').getDay() - 1, per = (r[2] || 1) - 1;
-      if(dow >= 0 && dow < 5 && per >= 0 && per < 5){ grid[dow][per]++; any++; }
-    });
-  });
-  if(!any) return '';
-
-  const n = pupils.length, rates = [];
-  for(let d = 0; d < 5; d++) for(let p = 0; p < 5; p++){
-    const dn = (den[d][p] || 0) * n;
-    rates.push(dn > 0 ? grid[d][p] / dn * 100 : 0);
-  }
-  const max = Math.max.apply(null, rates) || 1;
-  const PL2 = (DD.config && DD.config.period_labels) || null;
-
-  let html = '<table style="width:100%;border-collapse:separate;border-spacing:3px;font-size:.68rem">'
-    + '<tr><td></td>' + [1,2,3,4,5].map(p => '<td style="text-align:center;color:var(--tx2)">P' + p + '</td>').join('') + '</tr>';
-  for(let d = 0; d < 5; d++){
-    html += '<tr><td style="color:var(--tx2);padding-right:.3rem">' + TT_DAYS[d] + '</td>';
-    for(let p = 0; p < 5; p++){
-      const dn = (den[d][p] || 0) * n;
-      const rate = dn > 0 ? grid[d][p] / dn * 100 : 0;
-      const a = max > 0 ? Math.min(0.85, rate / max * 0.85) : 0;
-      html += '<td style="text-align:center;padding:.3rem 0;border-radius:4px;'
-        + 'background:rgba(181,72,59,' + a.toFixed(3) + ');'
-        + 'color:' + (a > 0.45 ? '#fff' : 'var(--tx)') + '" '
-        + 'title="' + TT_DAYS[d] + ' P' + (p+1) + ' \u2014 ' + grid[d][p] + ' absences, ' + (Math.round(rate*10)/10) + '% of the form\u2019s lessons">'
-        + (Math.round(rate * 10) / 10) + '%</td>';
-    }
-    html += '</tr>';
-  }
-  html += '</table>';
-
-  return _hmPanel('When your form is absent',
-    'Share of the form\u2019s lessons missed in each slot this year. Darker is worse. A single dark column usually means one timetabled lesson, not a scatter of illness.',
-    html);
-}
-
 // ── the block, and the one call that mounts it ──
 function _hmInfographics(){
   const parts = [
-    _hmPanelPeers(), _hmPanelYTD(), _hmPanelSpread(),
-    _hmPanelByTeacher(), _hmPanelEffort(), _hmPanelHeatmap()
+    _hmPanelPeers(), _hmPanelYTD(), _hmPanelByTeacher(), _hmPanelEffort()
   ].filter(Boolean).join('');
   if(!parts) return '';
   setTimeout(_hmFlushCharts, 0);
