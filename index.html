@@ -11342,6 +11342,9 @@ function rPeer(){
         <span style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${col};padding:.05rem .35rem;border:1px solid ${col}99;border-radius:3px;background:var(--sf)">${it.severity==='green-strong'?'standout':'improving'}</span>
       </div>`;
     }).join('');
+    // fn was never defined in this scope, unlike the three sibling builders
+    // which all derive it the same way. Threw for any pupil with a congrats item.
+    const fn=firstName(px);
     const titleNote=`${items.length} positive${items.length===1?'':'s'} for ${fn}`;
     return`<div class="dw" style="margin-top:.7rem;border-left:3px solid ${GREEN}"><div class="dwt" style="color:${GREEN}">🎉 Going Well <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.65rem;color:var(--mu)">${titleNote}</span></div>${rows}</div>`;
   }
