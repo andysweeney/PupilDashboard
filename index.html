@@ -7459,63 +7459,10 @@ function _hmPanelBySubject(){
     _hmCanvas('hm-ig-subject', Math.max(170, names.length * 24 + 46)) + note);
 }
 
-// ── effort, this collection against the one before ──
-function _hmPanelEffort(){
-  const pupils = [..._hmPupilsInScope()];
-  if(!pupils.length) return '';
-  const order = (DD.config && DD.config.periods) || [];
-  const rowsFor = {};
-  pupils.forEach(px => {
-    const r = (DD.registry || {})[String(px)];
-    if(r) rowsFor[px] = getProg(r.intake, px);
-  });
-  const filled = order.filter(p =>
-    pupils.some(px => rowsFor[px] && rowsFor[px][p] && Object.keys(rowsFor[px][p].sc || {}).length));
-  if(filled.length < 2) return _hmPanel('Effort since the last collection',
-    'Two collections with effort grades are needed for a comparison. Only ' + filled.length + ' found.', '');
-
-  const cur = filled[filled.length - 1], prev = filled[filled.length - 2];
-  // Effort is inverted in this dataset: 1 is the best grade, so a fall in the
-  // number is an improvement.
-  let up = 0, flat = 0, down = 0, n = 0;
-  pupils.forEach(px => {
-    const a = rowsFor[px] && rowsFor[px][prev], b = rowsFor[px] && rowsFor[px][cur];
-    if(!a || !b) return;
-    const ea = efAvg(a, SUBS), eb = efAvg(b, SUBS);
-    if(ea == null || eb == null) return;
-    n++;
-    const d = eb - ea;
-    if(d <= -0.2) up++; else if(d >= 0.2) down++; else flat++;
-  });
-  if(!n) return _hmPanel('Effort since the last collection',
-    'No pupil in this form has an effort grade in both ' + prev + ' and ' + cur + '.', '');
-
-  const seg = (v, col, lab) => v ? '<div title="' + lab + '" style="width:' + (v/n*100)
-    + '%;background:' + col + ';height:22px;display:flex;align-items:center;justify-content:center;'
-    + 'font-size:.66rem;font-weight:600;color:#fff">' + v + '</div>' : '';
-
-  return _hmPanel('Effort since the last collection',
-    prev + ' to ' + cur + ', averaged across each pupil\u2019s subjects. ' + n + ' of ' + pupils.length + ' pupils have a grade in both.',
-    '<div style="display:flex;border-radius:5px;overflow:hidden;border:1px solid var(--bd)">'
-    + seg(up, PAL.green, 'Improved') + seg(flat, 'var(--bd)', 'Unchanged') + seg(down, PAL.red, 'Declined')
-    + '</div>'
-    + '<div style="display:flex;gap:1rem;font-size:.7rem;color:var(--tx2);margin-top:.35rem">'
-    + '<span><b style="color:' + PAL.green + '">' + up + '</b> improved</span>'
-    + '<span><b>' + flat + '</b> unchanged</span>'
-    + '<span><b style="color:' + PAL.red + '">' + down + '</b> declined</span></div>'
-    // A collection that is a near-copy of the one before produces a wall of
-    // "unchanged" that looks like a finding. Say which it is.
-    + (flat / n >= 0.8
-        ? '<div style="font-size:.68rem;color:var(--orange);margin-top:.4rem">'
-          + Math.round(flat/n*100) + '% of grades are identical to ' + prev
-          + '. Worth checking that ' + cur + ' is a fresh collection rather than a copy.</div>'
-        : ''));
-}
-
 // ── the block, and the one call that mounts it ──
 function _hmInfographics(){
   const parts = [
-    _hmPanelPeers(), _hmPanelYTD(), _hmPanelBySubject(), _hmPanelEffort()
+    _hmPanelPeers(), _hmPanelYTD(), _hmPanelBySubject()
   ].filter(Boolean).join('');
   if(!parts) return '';
   setTimeout(_hmFlushCharts, 0);
@@ -7663,13 +7610,17 @@ function _hmTutor(){
     +_hmCard('Already considered',handled.length,'')
     +'</div>';
 
+  // Concerns and Congrats sit side by side. flex-basis 380px means they drop to
+  // a single column on a narrow window rather than squeezing the pupil rows,
+  // and align-items:flex-start stops the shorter panel stretching to match.
+  let conPanel='',goodPanel='';
   if(con.length){
     con.sort((a,b)=>(b.items.some(i=>i.severity==='red')?1:0)-(a.items.some(i=>i.severity==='red')?1:0)
                     ||b.items.length-a.items.length);
     const blk=c=>_hmPupilBlock(c.px,_hmMergedRows(c.px,c.items),
       c.considered?' <span style="font-size:.6rem;color:var(--tx2)">'+c.considered+' already considered</span>':'');
     const cap=_hmCapBySeverity(con,_hmCap('HM_AMBER_TG',4));
-    h+=_hmPanel('Needs attention',
+    conPanel=_hmPanel('Needs attention',
       'The Concerns tab triggers, for your form. Marking one considered here hides it there too.'
       +(cap.hidden.length?' Every red is shown; '+cap.hidden.length+' amber '+(cap.hidden.length===1?'pupil is':'pupils are')+' below.':''),
       cap.shown.map(blk).join('')+_hmMore(cap.hidden.map(blk).join(''),cap.hidden.length));
@@ -7677,9 +7628,14 @@ function _hmTutor(){
   if(good.length){
     const gblk=g=>_hmPupilBlock(g.px,g.items.map(_hmGoodRow).join(''),'');
     const gcap=_hmCap('HM_AMBER_TG',4);
-    h+=_hmPanel('Going well','The Congrats triggers. Worth a word for the right reason.',
+    goodPanel=_hmPanel('Going well','The Congrats triggers. Worth a word for the right reason.',
       good.slice(0,gcap).map(gblk).join('')
       +_hmMore(good.slice(gcap).map(gblk).join(''),Math.max(0,good.length-gcap)));
+  }
+  if(conPanel||goodPanel){
+    const col=inner=>'<div style="flex:1 1 380px;min-width:0">'+inner+'</div>';
+    h+='<div style="display:flex;gap:.7rem;align-items:flex-start;flex-wrap:wrap">'
+      +(conPanel?col(conPanel):'')+(goodPanel?col(goodPanel):'')+'</div>';
   }
   if(handled.length){
     h+=_hmPanel('Considered earlier','',
@@ -10340,14 +10296,16 @@ function rPeer(){
   // Local helpers for ability/effort averaging across ALL subjects
   const AS2=CFG.ability_map||{};
   const AM2={};Object.entries(AS2).forEach(([k,v],i)=>{AM2[k]=i+1});
-  function avgAb(rs){
-    const vals=rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?abRk(r[3][s])||0:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null);
-    return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
-  }
-  function avgEf(rs){
-    const vals=rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?r[3][s][1]:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null);
-    return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
-  }
+  // One value per pupil: their mean across the subjects they have a grade in.
+  function abVals(rs){return rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?abRk(r[3][s])||0:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null)}
+  function efVals(rs){return rs.map(r=>{const scores=SUBS.map(s=>r[3][s]?r[3][s][1]:0).filter(v=>v>0);return scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null}).filter(v=>v!=null)}
+  const _mean=v=>v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
+  function avgAb(rs){return _mean(abVals(rs))}
+  function avgEf(rs){return _mean(efVals(rs))}
+  // Winsorised at 10%: one pupil with no grades in most subjects, or a single
+  // outlier in a form of thirty, otherwise drags a whole term's point.
+  function winAb(rs){return _hmWinsorMean(abVals(rs))}
+  function winEf(rs){return _hmWinsorMean(efVals(rs))}
   function fN(v){return v!=null?v.toFixed(1):'—'}
   function aC(v){if(v==null)return'var(--mu)';if(v<=2)return'var(--exc)';if(v<=3)return'var(--skl)';if(v<=4)return'var(--con)';if(v<=5)return'var(--met)';if(v<=6)return'var(--wrk)';return'var(--bel)'}
   function eC(v){if(v==null)return'var(--mu)';if(v<=1.5)return'var(--exc)';if(v<=2)return'var(--con)';if(v<=3)return'var(--wrk)';return'var(--bel)'}
@@ -10579,8 +10537,19 @@ function rPeer(){
     document.getElementById('tg-perf-title').innerHTML=`<div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=document.getElementById('tg-perf-body');bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Effort and Ability Summary</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
 
     const labs=pp.map(p=>PL[PER.indexOf(p)]);
-    const abDatasets=[{label:`${tgDisplayName} Avg Ability`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgAb(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
-    const efDatasets=[{label:`${tgDisplayName} Avg Effort`,data:pp.map(p=>{const rs=ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));return avgEf(rs)}),borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false}];
+    const _tgRowsAt=p=>ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));
+    const _ygRowsAt=p=>ygRows(yearGroup,p);
+    const _ygLabel=`Year ${yearGroup}`;
+    const _peerLine={borderColor:PAL.slate,backgroundColor:PAL.slate,borderWidth:1.5,borderDash:[5,3],pointRadius:0,tension:.3,fill:false};
+    const _tgLine={borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false};
+    const abDatasets=[
+      Object.assign({label:`${_ygLabel} Winsorised`,data:pp.map(p=>winAb(_ygRowsAt(p)))},_peerLine),
+      Object.assign({label:`${tgDisplayName} Winsorised`,data:pp.map(p=>winAb(_tgRowsAt(p)))},_tgLine)
+    ];
+    const efDatasets=[
+      Object.assign({label:`${_ygLabel} Winsorised`,data:pp.map(p=>winEf(_ygRowsAt(p)))},_peerLine),
+      Object.assign({label:`${tgDisplayName} Winsorised`,data:pp.map(p=>winEf(_tgRowsAt(p)))},_tgLine)
+    ];
 
     const allAbVals=abDatasets.flatMap(d=>d.data.filter(v=>v!=null));
     const allEfVals=efDatasets.flatMap(d=>d.data.filter(v=>v!=null));
