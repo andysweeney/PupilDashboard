@@ -11406,13 +11406,10 @@ function rPeer(){
     // 6. Sanctions Concentration (per-teacher)
     const scFlags=getSanctionsConcentration(px);
     const engFlags=getSubjectEngagement(px);
-    const allCodes=(DD.sanctions||[]).filter(s=>s[0]===px&&s[1]===0).length;
     scFlags.forEach(f=>{
       const sev=parseFloat(f.ratio)>=4?'red':'amber';
       const subjLabel=f.subjects.length>1?`${f.subjects.slice(0,-1).join(', ')} & ${f.subjects.slice(-1)}`:f.subjects[0];
-      let detail=`${fn} is receiving more sanctions from ${f.teacher} (${f.subjects.join(', ')}) than expected, given sanctions in other lessons. ${f.codes}/${f.totalCodes} subject codes are in ${subjLabel} (${f.actualPct}% vs expected ${f.expectedPct}%). This is ${f.ratio}×`;
-      if(allCodes!==f.totalCodes) detail+=` (${f.codes}/${allCodes} all codes)`;
-      detail+='.';
+      let detail=`${fn} is receiving more sanctions from ${f.teacher} (${f.subjects.join(', ')}) than expected, given sanctions in other lessons. ${f.codes}/${f.totalCodes} subject codes are in ${subjLabel} (${f.actualPct}% vs expected ${f.expectedPct}%).`;
       const eng=engFlags.find(e=>e.subj===f.subjects[0]);
       if(eng){
         detail+=` There may also be an Engagement issue because there are ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''}).`;
@@ -11528,15 +11525,13 @@ function rPeer(){
     const flags=getSanctionsConcentration(px);
     const engFlags=getSubjectEngagement(px);
     if(!flags.length) return'';
-    const allCodes=(DD.sanctions||[]).filter(s=>s[0]===px&&s[1]===0).length;
     const rows=flags.map(f=>{
-      const allNote=allCodes!==f.totalCodes?` <span style="font-size:.6rem;color:var(--mu)">(${f.codes}/${allCodes} all codes)</span>`:'';
       const eng=engFlags.find(e=>e.subj===f.subjects[0]);
       const engLine=eng?`<div style="font-size:.62rem;color:var(--red);margin-top:.15rem">⚠ Subject Engagement Concern: ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''})</div>`:'';
       return`<div style="padding:.25rem 0;border-bottom:1px solid rgba(40,34,20,.2)"><div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
       <span style="font-family:'IBM Plex Mono',monospace;font-size:.72rem;font-weight:500">${f.teacher}</span>
       <span style="font-size:.68rem;color:var(--mu)">${f.subjects.join(', ')}</span>
-      <span style="margin-left:auto;font-size:.72rem;font-weight:600;color:var(--orange)">${f.codes}/${f.totalCodes} lesson codes (${f.actualPct}%)${allNote}</span>
+      <span style="margin-left:auto;font-size:.72rem;font-weight:600;color:var(--orange)">${f.codes}/${f.totalCodes} lesson codes (${f.actualPct}%)</span>
       <span style="font-size:.68rem;color:var(--mu)">exp ${f.expectedPct}%</span>
       <span style="font-size:.72rem;font-weight:700;color:${parseFloat(f.ratio)>=3?PAL.red:PAL.orange}">${f.ratio}×</span>
     </div>${engLine}</div>`}).join('');
