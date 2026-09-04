@@ -1254,6 +1254,33 @@ async function authRefresh(){
 // while the machine is asleep or the tab is heavily throttled, so a call made
 // on wake can carry an expired token. Anything hitting an authed endpoint
 // should go through this rather than authToken() directly.
+async // A picker with a single option is not a choice, it is a label wearing a
+// dropdown. Scoped accounts see this on every selector, so handle it in one
+// place rather than per control.
+function _lockSingleSelect(sel){
+  try{
+    if(typeof sel === 'string') sel = document.getElementById(sel);
+    if(!sel) return;
+    const cg = sel.closest('.cg'); if(!cg) return;
+    const id = sel.id + '-fixed';
+    let lbl = document.getElementById(id);
+    if(sel.options.length === 1){
+      sel.style.display = 'none';
+      if(!lbl){
+        lbl = document.createElement('div');
+        lbl.id = id;
+        lbl.style.cssText = 'font-size:.8rem;font-weight:600;color:var(--tx);padding:.35rem 0';
+        cg.appendChild(lbl);
+      }
+      lbl.textContent = sel.options[0].textContent;
+    }else{
+      sel.style.display = '';
+      if(lbl) lbl.remove();
+    }
+  }catch(e){}
+}
+window._lockSingleSelect = _lockSingleSelect;
+
 async function authTokenFresh(){
   if(authExpired()) await authRefresh();
   return authToken();
@@ -7169,7 +7196,11 @@ function _hmRender(outId,fn){
   try{ el.innerHTML=fn(); }
   catch(e){ el.innerHTML='<div style="color:var(--red);padding:1rem">Could not build this view: '+e.message+'</div>'; }
 }
-function rHmTutor(){ _HM_SCOPE=_hmFill('hm-scope-tutor',_hmForms())||'all'; _hmRender('hm-out-tutor',_hmTutor); }
+function rHmTutor(){
+  _HM_SCOPE=_hmFill('hm-scope-tutor',_hmForms())||'all';
+  _lockSingleSelect('hm-scope-tutor');
+  _hmRender('hm-out-tutor',_hmTutor);
+}
 function rHmYear(){  _HM_SCOPE=_hmFill('hm-scope-year',_hmYears())||'all';  _hmRender('hm-out-year',_hmYearLeader); }
 function rHmSLT(){   _HM_SCOPE='all';                                       _hmRender('hm-out-slt',_hmSLT); }
 
@@ -10152,7 +10183,16 @@ function rTGC(){
   popCL();
 
   // Populate year group dropdowns dynamically from available intakes
-  const availYGs=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)).sort((a,b)=>a-b);
+  // CFG.intakes is school-level config and is shared verbatim into a scoped
+  // file, so on its own it would advertise year groups this account has no
+  // pupils for. Keep only the years actually present in the registry.
+  const _ygPresent=new Set();
+  Object.values(DD.registry||{}).forEach(r=>{
+    const n=parseInt(String(r&&r.year||'').replace(/\D+/g,''),10);
+    if(!isNaN(n)) _ygPresent.add(n);
+  });
+  const availYGs=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink))
+    .filter(y=>!_ygPresent.size||_ygPresent.has(y)).sort((a,b)=>a-b);
   const ygDropdowns={
     'sv-yg':{hasAll:false,onChange:'rSV()'},
     'cl-yg':{hasAll:false,onChange:'popCL()'},
@@ -10193,7 +10233,19 @@ function rTGC(){
   // silently uses the stricter saved thresholds, making borderline concerns "disappear".
   loadThresholds();
   try{_applyBranding(loadCfg('branding',BRANDING_LS));}catch(e){}
+  // rP() populates the Pupil view, which the rest of boot depends on. But the
+  // landing tab is Form Tutor (vw-hmtutor carries class "on" in the markup), and
+  // nothing rendered it — so the first thing anyone saw was an empty panel until
+  // they clicked the tab. Render whatever is actually on screen as well.
   rP();
+  try{
+    const _open=document.querySelector('.vw.on');
+    const _v=_open?_open.id.replace(/^vw-/,''):null;
+    if(_v==='hmtutor') rHmTutor();
+    else if(_v==='hmyear') rHmYear();
+    else if(_v==='hmslt') rHmSLT();
+    else if(_v==='tutor') popTG();
+  }catch(e){ console.warn('[boot] initial view render',e); }
   // Initialise concern threshold display
   document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
@@ -10500,33 +10552,18 @@ function rPeer(){
   const enrols=ygEnrol(yearGroup);
   const tgs=new Set();
   enrols.filter(r=>r.t==='tg'&&r.u===null).forEach(r=>tgs.add(r.v));
-  // Add an 'All' option at the top so the whole year can be viewed in one go
-  const allOpt=document.createElement('option');allOpt.value='__all';allOpt.textContent='All Tutor Groups';sel.appendChild(allOpt);
+  // Add an 'All' option at the top so the whole year can be viewed in one go.
+  // With a single group there is nothing to aggregate, and leaving it in would
+  // stop the picker collapsing to a label.
+  if(tgs.size>1){
+    const allOpt=document.createElement('option');allOpt.value='__all';allOpt.textContent='All Tutor Groups';sel.appendChild(allOpt);
+  }
   [...tgs].sort().forEach(tg=>{
     const o=document.createElement('option');o.value=tg;o.textContent=tg;sel.appendChild(o);
   });
   if(prev==='__all'||[...tgs].includes(prev))sel.value=prev;
-  // A scoped file holds one tutor group, so the picker offers a choice of one.
-  // Show the group as a label rather than a control that does nothing.
-  try{
-    const only = tgs.size===1 ? [...tgs][0] : null;
-    const cg = sel.closest('.cg'), lbl = document.getElementById('tg-sel-fixed');
-    if(cg){
-      if(only){
-        sel.value = only; sel.style.display='none';
-        if(!lbl){
-          const d=document.createElement('div');
-          d.id='tg-sel-fixed';
-          d.style.cssText='font-size:.8rem;font-weight:600;color:var(--tx);padding:.35rem 0';
-          cg.appendChild(d);
-        }
-        document.getElementById('tg-sel-fixed').textContent = only;
-      }else{
-        sel.style.display='';
-        if(lbl) lbl.remove();
-      }
-    }
-  }catch(e){}
+  _lockSingleSelect(sel);
+  _lockSingleSelect('tg-yg');
   rTG();
   _hmTgCharts();
 }
