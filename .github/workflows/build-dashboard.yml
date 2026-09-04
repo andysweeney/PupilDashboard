@@ -8,6 +8,11 @@ name: Rebuild dashboard data
 # /home/claude/import_input, takes its key via SCHOOL_KEY_PATH, and writes
 # /home/claude/data_real.json (+ flags via FLAGS_PATH). This job's whole job is to
 # materialise that exact layout around it, never to modify it.
+#
+# Role scoping (Sept 2026): the engine also writes per-scope copies under
+# SCOPED_OUT_DIR — year/{n}/data.json and tutor/{form}/data.json. These are pushed
+# alongside the school-wide file and are what a scoped account actually reads; the
+# storage policy is what stops anyone reading a folder that is not theirs.
 
 on:
   repository_dispatch:
@@ -37,6 +42,7 @@ jobs:
       DATA_BUCKET: dashboard-data
       SCHOOL_ID: ${{ github.event.client_payload.school_id || inputs.school_id }}
       ACADEMIC_YEAR_IN: ${{ github.event.client_payload.academic_year || inputs.academic_year }}
+      SCOPED_OUT_DIR: /home/claude/scoped
 
     steps:
       - name: Validate inputs (fail closed)
@@ -73,7 +79,7 @@ jobs:
       - name: Materialise the engine's expected paths
         run: |
           set -euo pipefail
-          sudo mkdir -p /home/claude/import_input
+          sudo mkdir -p /home/claude/import_input /home/claude/scoped
           sudo chown -R "$USER" /home/claude
 
       - name: Pull this school's raw store + key from Supabase
@@ -100,3 +106,81 @@ jobs:
             --school "$SCHOOL_ID" \
             --data /home/claude/data_real.json \
             --flags /home/claude/flags.json
+
+      # Uploads year/{n}/data.json and tutor/{form}/data.json, then removes any
+      # scoped file the engine did not produce this run. Pruning is not tidiness:
+      # a form that has been renamed or dropped would otherwise leave a readable
+      # file behind, and anyone still holding that scope claim could read it.
+      - name: Push the scoped files (and prune orphans)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, json, pathlib, urllib.request, urllib.error
+
+          BASE   = os.environ['SUPABASE_URL'].rstrip('/')
+          KEY    = os.environ['SUPABASE_SERVICE_ROLE_KEY']
+          BUCKET = os.environ['DATA_BUCKET']
+          SCHOOL = os.environ['SCHOOL_ID']
+          SRC    = pathlib.Path(os.environ.get('SCOPED_OUT_DIR', '/home/claude/scoped'))
+
+          def call(method, url, body=None, ctype=None):
+              req = urllib.request.Request(url, data=body, method=method)
+              req.add_header('Authorization', 'Bearer ' + KEY)
+              req.add_header('apikey', KEY)
+              if ctype:
+                  req.add_header('Content-Type', ctype)
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return r.status, r.read()
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read()
+
+          if not SRC.exists():
+              print('::error::no scoped output at %s — is the engine up to date?' % SRC)
+              raise SystemExit(1)
+
+          local = sorted(p for p in SRC.rglob('data.json') if p.is_file())
+          if not local:
+              print('::error::scoped directory is empty — nothing to push')
+              raise SystemExit(1)
+
+          pushed = set()
+          for path in local:
+              rel = path.relative_to(SRC).as_posix()          # tutor/10E1/data.json
+              key = f'{SCHOOL}/{rel}'
+              status, resp = call(
+                  'POST', f'{BASE}/storage/v1/object/{BUCKET}/{key}',
+                  path.read_bytes(), 'application/json')
+              if status == 400 and b'Duplicate' in resp:       # already there: replace it
+                  status, resp = call(
+                      'PUT', f'{BASE}/storage/v1/object/{BUCKET}/{key}',
+                      path.read_bytes(), 'application/json')
+              if status not in (200, 201):
+                  print('::error::upload failed %s -> HTTP %s %s' % (key, status, resp[:300]))
+                  raise SystemExit(1)
+              pushed.add(key)
+              print('  pushed %-40s %6.2f MB' % (key, path.stat().st_size / 1048576))
+
+          # Anything under the scoped prefixes that this run did not write is stale.
+          for prefix in ('tutor', 'year'):
+              status, resp = call(
+                  'POST', f'{BASE}/storage/v1/object/list/{BUCKET}',
+                  json.dumps({'prefix': f'{SCHOOL}/{prefix}/', 'limit': 1000,
+                              'sortBy': {'column': 'name', 'order': 'asc'}}).encode(),
+                  'application/json')
+              if status != 200:
+                  print('::warning::could not list %s/%s (HTTP %s) — skipping prune'
+                        % (SCHOOL, prefix, status))
+                  continue
+              for obj in json.loads(resp):
+                  name = obj.get('name') or ''
+                  # the list API returns folder entries with no id; ignore those
+                  if obj.get('id') is None:
+                      continue
+                  key = f'{SCHOOL}/{prefix}/{name}'
+                  if key not in pushed:
+                      st, _ = call('DELETE', f'{BASE}/storage/v1/object/{BUCKET}/{key}')
+                      print('  pruned %s (HTTP %s)' % (key, st))
+
+          print('\n%d scoped files pushed for %s' % (len(pushed), SCHOOL))
+          PY
