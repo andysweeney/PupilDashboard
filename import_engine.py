@@ -11,6 +11,14 @@ Enrichment steps (added May 2026):
 - attAbsSubj includes mark codes for each absence record
 - SEN/incident code configs embedded in data.json
 - Duplicate registration detection and reporting
+
+Role scoping (added September 2026):
+- Writes one data.json per role scope as well as the school-wide file:
+    {school}/data.json                SLT and platform owner
+    {school}/year/{n}/data.json       year leader
+    {school}/tutor/{form}/data.json   form tutor
+- peerStats: per-form aggregates with no pupil-level data, so a tutor's file
+  can still draw the year-group comparison charts without holding the year.
 """
 
 import pandas as pd
@@ -1776,3 +1784,265 @@ _flags_path = os.environ.get("FLAGS_PATH", "/home/claude/flags.json")
 _emitted = dump_flags(_flags_path, _flag_sources)
 print("\nFlags for Admin panel -> " + _flags_path + ": "
       + (", ".join(f"{f['type']}={len(f['values'])}" for f in _emitted) if _emitted else "none"))
+
+
+# ── SCOPED OUTPUTS ────────────────────────────────────────────────────────────
+# One data.json per role scope, written alongside the school-wide file:
+#
+#   {school}/data.json                  SLT and platform owner  (unchanged)
+#   {school}/year/{n}/data.json         year leader
+#   {school}/tutor/{form}/data.json     form tutor
+#
+# The storage policy is what enforces who reads which; this only decides what
+# each file contains. A pupil absent from a file cannot be reached from the
+# browser at all, which is the whole point — hiding tabs never was a boundary.
+#
+# Append this to import_engine.py after the json.dump of the school-wide file.
+# It reads `output` and `registry` from memory and adds nothing to the main pass.
+
+import statistics
+from datetime import date as _date
+# os, json, timedelta and defaultdict are already imported at the top of this file.
+
+SCOPED_OUT_DIR = os.environ.get('SCOPED_OUT_DIR', '/home/claude/scoped')
+
+# Keys whose top level is the pupil id.
+_PUPIL_KEYED = ['registry', 'attendance', 'attendanceMarks', 'attByPeriod',
+                'attByPeriodSubj', 'attAbsSubj', 'senStatus', 'suppressedAbsences']
+
+# Flat arrays with a parallel detail array. The two are joined by position, so a
+# filter that touches one and not the other silently reattributes every row.
+_PAIRED = [('sanctions', 'sanctionDetails', 0),
+           ('housePoints', 'housePointDetails', 0)]
+
+# Everything else is school-level and carries no pupil identity, so it is shared
+# verbatim: config, subjectKeys, periodKeys, dateIndex, teacherIndex,
+# weekLessons, slotDenominators, schoolDayCounts, slotTeachers, splitSlotMeta.
+
+
+def _slice_output(full, keep_px):
+    """Return a copy of `full` containing only the pupils in keep_px."""
+    keep_i = {int(p) for p in keep_px}
+    keep_s = {str(p) for p in keep_px}
+    out = {}
+
+    for key, val in full.items():
+        if key in _PUPIL_KEYED:
+            out[key] = {p: v for p, v in val.items() if str(p) in keep_s}
+
+        elif key == 'timetables':                      # AY -> px -> grid
+            out[key] = {ay: {p: g for p, g in per.items() if str(p) in keep_s}
+                        for ay, per in val.items()}
+
+        elif key == 'progress':                        # intake -> period -> rows[px at 0]
+            out[key] = {ik: {pk: [r for r in rows if int(r[0]) in keep_i]
+                             for pk, rows in per.items()}
+                        for ik, per in val.items()}
+
+        elif key == 'enrolments':                      # intake -> rows[px at 1]
+            out[key] = {ik: [r for r in rows if int(r[1]) in keep_i]
+                        for ik, rows in val.items()}
+
+        elif key in ('sanctions', 'sanctionDetails', 'housePoints', 'housePointDetails'):
+            continue                                   # handled below, in lockstep
+
+        else:
+            out[key] = val                             # school-level, shared as is
+
+    for arr, det, ix in _PAIRED:
+        rows, details = full.get(arr) or [], full.get(det) or []
+        idx = [i for i, r in enumerate(rows) if int(r[ix]) in keep_i]
+        out[arr] = [rows[i] for i in idx]
+        out[det] = [details[i] for i in idx] if len(details) == len(rows) else details
+        if len(details) != len(rows):
+            print(f"  ⚠ {arr}/{det} lengths differ ({len(rows)} vs {len(details)}); "
+                  f"details left unfiltered — check the build")
+
+    return out
+
+
+# ── Peer statistics ───────────────────────────────────────────────────────────
+# A tutor's file holds only their own form, so the Form Tutor comparison charts
+# have nothing to compare against. Rather than widen the file to the whole year
+# — which would defeat the scoping — every file carries a small precomputed
+# block of per-form figures with no pupil-level data in it.
+#
+# The definitions mirror the client exactly: attendance is absent periods over
+# school days x mean periods per day, positives and sanctions are per-pupil
+# counts in the current academic year, and the Winsorised mean clamps the top
+# and bottom tenth.
+
+def _winsor_mean(vals, p=0.10):
+    v = sorted(x for x in vals if x is not None)
+    if not v:
+        return None
+    k = int(len(v) * p)
+    if k < 1:
+        return sum(v) / len(v)
+    lo, hi = v[k], v[-1 - k]
+    return sum(min(max(x, lo), hi) for x in v) / len(v)
+
+
+def _ay_of(iso):
+    y, m = int(iso[:4]), int(iso[5:7])
+    return str(y if m >= 9 else y - 1)
+
+
+def _build_peer_stats(full):
+    cfg = full['config']
+    cay = str(cfg['current_acad_year'])
+    week_lessons = full.get('weekLessons') or {}
+    date_index = full['dateIndex']
+    reg = full['registry']
+
+    # School days in the current AY, and the mean periods per day, exactly as
+    # _hmSchoolDays()/_hmPerPerDay() derive them in the browser.
+    ay_start = f'{cay}-09-01'
+    today = _date.today().isoformat()
+    school_days = []
+    for wk in sorted(week_lessons):
+        if wk < ay_start:
+            continue
+        d0 = _date.fromisoformat(wk)
+        for off in range(5):
+            iso = (d0 + timedelta(days=off)).isoformat()
+            if iso <= today:
+                school_days.append(iso)
+    school_days.sort()
+    if not school_days:
+        return None
+    vals = list(week_lessons.values())
+    per_day = (sum(vals) / len(vals)) / 5 if vals else 5
+
+    # Absent periods per pupil, deduplicated by date+period and net of
+    # suppressed slots, matching countAbsPeriods().
+    supp = {str(k): set(v) for k, v in (full.get('suppressedAbsences') or {}).items()}
+    skr = {v: k for k, v in full['subjectKeys'].items()}
+    first, last = school_days[0], school_days[-1]
+
+    absent = defaultdict(int)
+    for px, by_date in (full.get('attAbsSubj') or {}).items():
+        seen, s = set(), supp.get(str(px), set())
+        for dk, lessons in by_date.items():
+            iso = date_index[int(dk)] if int(dk) < len(date_index) else None
+            if not iso or iso < first or iso > last:
+                continue
+            for lesson in lessons:
+                k = f'{iso}|{lesson[1]}'
+                if k in s or k in seen:
+                    continue
+                seen.add(k)
+                absent[str(px)] += 1
+
+    # Current-year counts, plus a month bucket for the trend lines.
+    pos, neg = defaultdict(int), defaultdict(int)
+    pos_m = defaultdict(lambda: defaultdict(int))
+    neg_m = defaultdict(lambda: defaultdict(int))
+    for arr, tot, mon in (('housePoints', pos, pos_m), ('sanctions', neg, neg_m)):
+        for r in (full.get(arr) or []):
+            iso = date_index[r[2]] if isinstance(r[2], int) else r[2]
+            if _ay_of(iso) != cay:
+                continue
+            tot[str(r[0])] += 1
+            mon[str(r[0])][iso[:7]] += 1
+
+    # Absent periods per pupil per month, for the attendance trend.
+    months = sorted({d[:7] for d in school_days})
+    days_in_month = {m: [d for d in school_days if d.startswith(m)] for m in months}
+    abs_m = defaultdict(lambda: defaultdict(int))
+    for px, by_date in (full.get('attAbsSubj') or {}).items():
+        seen, s = set(), supp.get(str(px), set())
+        for dk, lessons in by_date.items():
+            iso = date_index[int(dk)] if int(dk) < len(date_index) else None
+            if not iso or iso < first or iso > last:
+                continue
+            for lesson in lessons:
+                k = f'{iso}|{lesson[1]}'
+                if k in s or k in seen:
+                    continue
+                seen.add(k)
+                abs_m[str(px)][iso[:7]] += 1
+
+    forms = defaultdict(list)
+    for px, r in reg.items():
+        if r.get('reg'):
+            forms[r['reg']].append(str(px))
+
+    scheduled = len(school_days) * per_day
+    by_form = {}
+    for form, pxs in forms.items():
+        att = [100 - (absent[p] / scheduled * 100) for p in pxs] if scheduled else []
+        pv = [pos[p] for p in pxs]
+        nv = [neg[p] for p in pxs]
+        month_rows = {}
+        for m in months:
+            sched_m = len(days_in_month[m]) * per_day
+            if not sched_m:
+                continue
+            month_rows[m] = {
+                'att': round(statistics.fmean(
+                    [100 - (abs_m[p][m] / sched_m * 100) for p in pxs]), 3),
+                'pos': round(sum(pos_m[p][m] for p in pxs) / len(pxs), 3),
+                'neg': round(sum(neg_m[p][m] for p in pxs) / len(pxs), 3),
+            }
+        rnd = lambda x: None if x is None else round(x, 3)
+        by_form[form] = {
+            'year':   reg[pxs[0]].get('year'),
+            'n':      len(pxs),
+            'att':    rnd(statistics.fmean(att) if att else None),
+            'attW':   rnd(_winsor_mean(att)),
+            'pos':    rnd(statistics.fmean(pv) if pv else None),
+            'posW':   rnd(_winsor_mean(pv)),
+            'neg':    rnd(statistics.fmean(nv) if nv else None),
+            'negW':   rnd(_winsor_mean(nv)),
+            'months': month_rows,
+        }
+
+    return {'builtAt': today, 'months': months, 'byForm': by_form}
+
+
+# ── Write the scoped files ────────────────────────────────────────────────────
+def write_scoped_outputs(full, out_dir=SCOPED_OUT_DIR):
+    reg = full['registry']
+
+    peer = _build_peer_stats(full)
+    if peer:
+        full = dict(full, peerStats=peer)     # school-wide file gets it too
+
+    by_form, by_year = defaultdict(set), defaultdict(set)
+    for px, r in reg.items():
+        if r.get('reg'):
+            by_form[r['reg']].add(px)
+        yr = ''.join(ch for ch in str(r.get('year') or '') if ch.isdigit())
+        if yr:
+            by_year[yr].add(px)
+
+    written = []
+
+    def _write(rel, data):
+        path = os.path.join(out_dir, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump(data, f, separators=(',', ':'))
+        mb = os.path.getsize(path) / 1024 / 1024
+        written.append((rel, len(data['registry']), mb))
+        return mb
+
+    _write('data.json', full)
+    for yr, pxs in sorted(by_year.items()):
+        _write(f'year/{yr}/data.json', _slice_output(full, pxs))
+    for form, pxs in sorted(by_form.items()):
+        _write(f'tutor/{form}/data.json', _slice_output(full, pxs))
+
+    print(f"\n{'='*58}")
+    print(f"Scoped files -> {out_dir}")
+    print(f"{'path':<34}{'pupils':>8}{'MB':>8}")
+    for rel, n, mb in written:
+        print(f"{rel:<34}{n:>8}{mb:>8.2f}")
+    print(f"{'-'*58}")
+    print(f"{len(written)} files, {sum(m for _, _, m in written):.1f} MB total")
+    print(f"{'='*58}")
+    return written
+
+
+write_scoped_outputs(output)
