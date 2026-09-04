@@ -1232,6 +1232,21 @@ function applyRoleUI(){
   });
   var cur=document.querySelector('.vw.on');
   if(cur&&!tabAllowed(cur.id.replace(/^vw-/,''))&&first) first.click();
+
+  // The Concerns tab lets you read the same data as SLT, a year leader or a
+  // tutor. Hiding a tab is pointless if this selector hands the view back, so
+  // an account can only choose its own level or narrower.
+  try{
+    var rl=userRole(), cn=document.getElementById('cn-role');
+    if(cn && rl!=='slt'){
+      var allow = rl==='year_leader' ? ['yl','tutor'] : ['tutor'];
+      Array.prototype.slice.call(cn.options).forEach(function(o){
+        if(allow.indexOf(o.value)<0) o.remove();
+      });
+      if(allow.indexOf(cn.value)<0) cn.value=allow[0];
+      _lockSingleSelect(cn);
+    }
+  }catch(e){ console.warn('[role] concerns role selector',e); }
 }
 window.userRole=userRole; window.userScope=userScope;
 
@@ -7068,7 +7083,7 @@ function sw(v,btn){
   // instead, because those also run when the dropdown changes — so switching from
   // 10A to 10B writes its own row, which a tab-level log would miss.
   try{ if(v!=='class'&&v!=='tutor') auditLog('view_opened',null,null,{view:v}); }catch(e){}
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class')rCL();else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour')rBC();else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='hmtutor')rHmTutor();else if(v==='hmyear')rHmYear();else if(v==='hmslt')rHmSLT();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class'){popCL();rCL()}else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour'){popBCTG();rBC()}else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='hmtutor')rHmTutor();else if(v==='hmyear')rHmYear();else if(v==='hmslt')rHmSLT();else rP();
 }
 
 
@@ -7272,7 +7287,16 @@ function _hmNoLegend(){ return { legend:{ display:false } }; }
 function _hmLegend(){
   return { legend:{ labels:{ color:_HM_TICK, font:_HM_FONT, boxWidth:10, padding:8 } } };
 }
+// The same panels render on the Year Leader page and inside the Tutor Group
+// tab. Without a namespace both mounts emit the same canvas ids, and
+// getElementById returns whichever comes first in the document — so one mount
+// draws twice and the other stays blank. Set once per render, before any panel
+// is built, and captured synchronously by each builder.
+let _HM_NS = '';
+function _hmId(id){ return _HM_NS + id; }
+
 function _hmCanvas(id, h){
+  id = _hmId(id);
   return '<div style="position:relative;height:' + h + 'px"><canvas id="' + id + '"></canvas></div>';
 }
 function _hmNote(txt){
@@ -7417,6 +7441,7 @@ function _hmFormStats(pupils){
 // dynamic axis honest: without it, a 92–97% range rescaled to fill the panel
 // reads as a chasm.
 function _hmPeerBar(canvasId, key, rows, me, opts){
+  canvasId = _hmId(canvasId); key = _HM_NS + key;
   const labels = rows.map(r => r.reg);
   const raw = rows.map(r => r.v), win = rows.map(r => r.w);
   const live = raw.concat(win).filter(v => v != null);
@@ -7571,6 +7596,7 @@ function _hmMedian(arrs, i){
 // and a Winsorised mean in the other — which reads as a bug rather than a
 // comparison.
 function _hmLineChart(canvasId, key, labels, mine, median, color, fmt, nameMine, namePeer){
+  canvasId = _hmId(canvasId); key = _HM_NS + key;
   _hmChart(() => {
     const el = document.getElementById(canvasId);
     if(!el) return;
@@ -7595,6 +7621,43 @@ function _hmLineChart(canvasId, key, labels, mine, median, color, fmt, nameMine,
   });
   return _hmCanvas(canvasId, 130);
 }
+// Eight forms need eight hues that stay apart. Chart.js toggles a series when
+// its legend entry is clicked, which is the "remove or include" behaviour — no
+// extra controls needed.
+const _HM_FORM_COLORS = [PAL.sky, PAL.green, PAL.orange, PAL.violet,
+                         PAL.teal, PAL.gold, PAL.plum, PAL.indigo];
+
+function _hmMultiLine(canvasId, key, labels, series, fmt){
+  canvasId = _hmId(canvasId); key = _HM_NS + key;
+  _hmChart(() => {
+    const el = document.getElementById(canvasId);
+    if(!el) return;
+    dc(key);
+    sc2(key, new Chart(el, {
+      type: 'line',
+      data: { labels: labels, datasets: series.map(sd => ({
+        label: sd.name, data: sd.data,
+        borderColor: sd.color, backgroundColor: sd.color,
+        borderWidth: sd.bold ? 3 : 1.5,
+        borderDash: sd.bold ? undefined : [4,3],
+        pointRadius: sd.bold ? 3 : 0,
+        tension: .35, fill: false, order: sd.bold ? 0 : 1
+      })) },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          legend: { labels: { color: _HM_TICK, font: _HM_FONT, boxWidth: 16,
+                              boxHeight: 1, padding: 6 } },
+          tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + fmt(c.parsed.y) } }
+        },
+        scales: { x: _hmScale(), y: _hmScale({ ticks: { color:_HM_TICK, font:_HM_FONT, callback: fmt } }) }
+      }
+    }));
+  });
+  return _hmCanvas(canvasId, 190);
+}
+
 function _hmPanelYTD(){
   const peers = _hmPeerForms();
   if(!peers.forms.length) return '';
@@ -7623,6 +7686,31 @@ function _hmPanelYTD(){
   if(!mine) return '';
   // labels, not buckets: the peerStats branch never builds buckets.
   const med = f => labels.map((_, i) => _hmMedian(all.map(a => a.s[f]), i));
+
+  // A year scope compared against the median of its own forms is the year
+  // compared with itself, and the two lines sat on top of each other. Plot the
+  // forms individually instead: that answers which one is drifting, and when.
+  if(!peers.me){
+    const yrRow2 = _hmPeerYear(peers.year);
+    const build = field => peers.forms.map((f, i) => ({
+      name: f.reg,
+      data: all.find(a => a.reg === f.reg).s[field],
+      color: _HM_FORM_COLORS[i % _HM_FORM_COLORS.length]
+    })).concat(yrRow2 ? [{ name: 'All of ' + peers.year, bold: true, color: PAL.slate,
+                           data: _hmYearSeries(yrRow2, field) }] : []);
+    const oneF = (title, id, key, field, fmt) =>
+      '<div style="flex:1;min-width:280px">'
+      + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
+      + _hmMultiLine(id, key, labels, build(field), fmt) + '</div>';
+    return _hmPanel('Each form, month by month',
+      'Every form in ' + peers.year + ', with the year mean in bold over the top. '
+      + 'Click a form in the key to hide or show it.',
+      '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
+      + oneF('Attendance', 'hm-ig-fatt', 'hmIgFAtt', 'att', v => (Math.round(v*10)/10) + '%')
+      + oneF('Positives per pupil', 'hm-ig-fpos', 'hmIgFPos', 'pos', v => Math.round(v*10)/10)
+      + oneF('Sanctions per pupil', 'hm-ig-fneg', 'hmIgFNeg', 'neg', v => Math.round(v*10)/10)
+      + '</div>') + _hmPanelYTDWinsorised(peers, labels, ps);
+  }
 
   const nameMine = peers.me || ('All of ' + peers.year);
   const namePeer = peers.me ? (peers.year + ' median form') : 'Median form';
@@ -7749,11 +7837,12 @@ function _hmPanelBySubject(){
   const names = Object.keys(subjects)
     .sort((a,b) => subjects[b].total - subjects[a].total).slice(0, 12);
 
+  const _subjId = _hmId('hm-ig-subject'), _subjKey = _HM_NS + 'hmIgSubject';
   _hmChart(() => {
-    const el = document.getElementById('hm-ig-subject');
+    const el = document.getElementById(_subjId);
     if(!el) return;
-    dc('hmIgSubject');
-    sc2('hmIgSubject', new Chart(el, {
+    dc(_subjKey);
+    sc2(_subjKey, new Chart(el, {
       type: 'bar',
       data: {
         labels: names,
@@ -7794,7 +7883,8 @@ function _hmPanelBySubject(){
 }
 
 // ── the block, and the one call that mounts it ──
-function _hmInfographics(){
+function _hmInfographics(ns){
+  _HM_NS = ns || '';
   const parts = [
     _hmPanelPeers(), _hmPanelYTD(), _hmPanelBySubject()
   ].filter(Boolean).join('');
@@ -7824,7 +7914,7 @@ function _hmTgCharts(){
   const el = document.getElementById('tg-infographics');
   if(!el) return;
   _HM_SCOPE = _hmScopeFromTG();
-  try { el.innerHTML = _hmInfographics(); }
+  try { el.innerHTML = _hmInfographics('tg-'); }
   catch(e){ console.warn('[hm] charts', e); el.innerHTML = ''; }
 }
 
@@ -8017,7 +8107,7 @@ function _hmYearLeader(){
 
   // The same charts the Tutor Group tab carries, scoped to the whole year:
   // every form compared, and the year's own trend against its Winsorised mean.
-  h+=_hmInfographics();
+  h+=_hmInfographics('yl-');
 
   const types=Object.entries(byType).sort((a,b)=>b[1].n-a[1].n);
   if(types.length){
