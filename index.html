@@ -6931,14 +6931,18 @@ function renderNet(){
 
   const lessonMap2={};
   SAN2.forEach(s=>{const key=`${s[2]}|${s[4]}`;if(!lessonMap2[key])lessonMap2[key]=[];lessonMap2[key].push(s[0])});
+  const pairWhen={};   // pair -> { 'P3': n } so the tooltip can say when it recurs
 
   const pairW={};
-  for(const[,pupils] of Object.entries(lessonMap2)){
+  for(const[slotKey,pupils] of Object.entries(lessonMap2)){
     const unique=[...new Set(pupils)];
     if(unique.length<2) continue;
+    const per='P'+slotKey.split('|')[1];      // date|period
     for(let i=0;i<unique.length;i++) for(let j=i+1;j<unique.length;j++){
       const a=Math.min(unique[i],unique[j]),b=Math.max(unique[i],unique[j]);
       pairW[`${a}|${b}`]=(pairW[`${a}|${b}`]||0)+1;
+      if(!pairWhen[`${a}|${b}`]) pairWhen[`${a}|${b}`]={};
+      pairWhen[`${a}|${b}`][per]=(pairWhen[`${a}|${b}`][per]||0)+1;
     }
   }
 
@@ -7009,7 +7013,16 @@ function renderNet(){
     nodes.forEach(n=>{n.x+=(W/2-n.x)*0.003*alpha;n.y+=(H/2-n.y)*0.003*alpha;n.x=Math.max(n.r+5,Math.min(W-n.r-5,n.x));n.y=Math.max(n.r+25,Math.min(H-n.r-15,n.y))});
   }
 
-  const edgeSvg=edges.map(e=>{const nA=nodeMap[e.a],nB=nodeMap[e.b];if(!nA||!nB)return'';const sw2=Math.max(1.5,Math.min(8,e.w/maxEdgeW*8));const op=Math.max(0.25,Math.min(0.85,e.w/maxEdgeW));return`<line x1="${nA.x}" y1="${nA.y}" x2="${nB.x}" y2="${nB.y}" stroke="${PAL.red}" stroke-width="${sw2}" stroke-opacity="${op}"/>`}).join('');
+  const edgeSvg=edges.map(e=>{const nA=nodeMap[e.a],nB=nodeMap[e.b];if(!nA||!nB)return'';const sw2=Math.max(1.5,Math.min(8,e.w/maxEdgeW*8));const op=Math.max(0.25,Math.min(0.85,e.w/maxEdgeW));
+    // A wide transparent line sits under the visible one purely to be hovered:
+    // a 1.5px stroke is almost impossible to hit with a mouse.
+    const _pk=[e.a,e.b].sort((x,y)=>x-y).join('|');
+    const _w=pairWhen[_pk]||{};
+    const _when=Object.keys(_w).sort().map(k2=>k2+' \u00d7'+_w[k2]).join(', ');
+    const _esc=v=>String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const _tip=`${_esc(nA.name)} & ${_esc(nB.name)}\nSanctioned together ${e.w} time${e.w===1?'':'s'} in ${_esc(ctx.sub)}${_when?'\n'+_esc(_when):''}`;
+    return`<line x1="${nA.x}" y1="${nA.y}" x2="${nB.x}" y2="${nB.y}" stroke="${PAL.red}" stroke-width="${Math.max(sw2,10)}" stroke-opacity="0" style="cursor:help"><title>${_tip}</title></line>`
+         +`<line x1="${nA.x}" y1="${nA.y}" x2="${nB.x}" y2="${nB.y}" stroke="${PAL.red}" stroke-width="${sw2}" stroke-opacity="${op}" style="pointer-events:none"/>`}).join('');
 
   function buildTip(n){
     const col=n.sc===0?'var(--bd)':n.connected?PAL.orange:PAL.blue;
@@ -10965,14 +10978,17 @@ function rPeer(){
       slotMap[key].push(s[0]);
     });
 
-    const pairCounts={};
-    Object.values(slotMap).forEach(pupils=>{
+    const pairCounts={},pairSubj={};
+    Object.entries(slotMap).forEach(([slotKey,pupils])=>{
       if(pupils.length<2) return;
+      const subj=slotKey.split('|')[2];       // date|period|subject|class
       const unique=[...new Set(pupils)];
       for(let i=0;i<unique.length;i++){
         for(let j=i+1;j<unique.length;j++){
           const k=[unique[i],unique[j]].sort((x,y)=>x-y).join('-');
           pairCounts[k]=(pairCounts[k]||0)+1;
+          if(!pairSubj[k]) pairSubj[k]={};
+          pairSubj[k][subj]=(pairSubj[k][subj]||0)+1;
         }
       }
     });
@@ -11010,7 +11026,8 @@ function rPeer(){
         tg:(REG[String(px)]?.reg)||'',
         inTG:isAllTG?true:tgPupilPx.has(px)
       }));
-      const links=pairs.map(([k,v])=>{const[a,b]=k.split('-').map(Number);return{source:a,target:b,weight:v}});
+      const links=pairs.map(([k,v])=>{const[a,b]=k.split('-').map(Number);
+        return{source:a,target:b,weight:v,key:k}});
 
       // Nodes are spaced evenly round an oval, which stops being legible well
       // before it stops being possible. Say so rather than draw it.
@@ -11043,7 +11060,16 @@ function rPeer(){
         if(!s||!t)return;
         const w=Math.max(1,l.weight/maxW*6);
         const op=Math.min(0.8,0.2+l.weight/maxW*0.6);
-        svg+=`<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="${PAL.red}" stroke-width="${w}" stroke-opacity="${op}"/>`;
+        // Which subjects the pair actually go off in is the point of the whole
+        // panel — a pair who clash only in one lesson is a seating plan, a pair
+        // who clash everywhere is not.
+        const _sb=pairSubj[l.key]||{};
+        const _list=Object.keys(_sb).sort((x,y)=>_sb[y]-_sb[x])
+                     .map(k2=>k2+' \u00d7'+_sb[k2]).join(', ');
+        const _who=`${s.name}${s.inTG?'':' ('+s.tg+')'} & ${t.name}${t.inTG?'':' ('+t.tg+')'}`;
+        const _esc=v=>String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        svg+=`<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="${PAL.red}" stroke-width="${Math.max(w,6)}" stroke-opacity="0" style="cursor:help"><title>${_esc(_who)}\nSanctioned together ${l.weight} time${l.weight===1?'':'s'}\n${_esc(_list)}</title></line>`;
+        svg+=`<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="${PAL.red}" stroke-width="${w}" stroke-opacity="${op}" style="pointer-events:none"/>`;
         const mx=(s.x+t.x)/2,my=(s.y+t.y)/2;
         svg+=`<text x="${mx}" y="${my-4}" fill="var(--mu)" font-size="7" font-family="IBM Plex Mono" text-anchor="middle">${l.weight}</text>`;
       });
