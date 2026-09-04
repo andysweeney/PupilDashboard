@@ -7234,6 +7234,19 @@ function _hmFormIndex(){
   });
   return out;
 }
+// import_engine writes a peerStats block into every data.json: per-form
+// attendance, positives and sanctions, plain and Winsorised, plus a monthly
+// series. A tutor's file holds only their own form, so without this the
+// comparison would have nothing to compare against — and widening the file to
+// the whole year group would defeat the point of scoping it. Absent from an
+// older data.json, in which case everything falls back to computing from the
+// pupils that are present.
+function _hmPeerData(){
+  var ps = DD.peerStats;
+  return (ps && ps.byForm && Object.keys(ps.byForm).length) ? ps.byForm : null;
+}
+function _hmPeerMonths(){ return (DD.peerStats && DD.peerStats.months) || null; }
+
 // The comparison set is the tutor's own year group, not the whole school —
 // comparing a Year 10 form against Year 11 compares two different timetables,
 // two different sanction cultures and, here, two different data histories.
@@ -7242,8 +7255,18 @@ function _hmScopeForm(){
   return v.startsWith('reg:') ? v.slice(4) : null;
 }
 function _hmPeerForms(){
-  const idx = _hmFormIndex(), me = _hmScopeForm();
-  if(!me || !idx[me]) return { me: null, forms: [] };
+  const me = _hmScopeForm();
+  if(!me) return { me: null, forms: [] };
+  const ps = _hmPeerData();
+  if(ps){
+    if(!ps[me]) return { me: null, forms: [] };
+    const y = ps[me].year;
+    return { me, year: y,
+      forms: Object.keys(ps).filter(f => ps[f].year === y).sort()
+        .map(f => ({ reg: f, pupils: null })) };
+  }
+  const idx = _hmFormIndex();
+  if(!idx[me]) return { me: null, forms: [] };
   const yr = idx[me].year;
   const forms = Object.entries(idx)
     .filter(([, v]) => v.year === yr)
@@ -7352,8 +7375,9 @@ function _hmPanelPeers(){
   if(!peers.me) return _hmPanel('Your form against the year group',
     'Pick a single form in the selector above to see this comparison.', '');
 
+  const ps = _hmPeerData();
   const stats = {};
-  peers.forms.forEach(f => { stats[f.reg] = _hmFormStats(f.pupils); });
+  peers.forms.forEach(f => { stats[f.reg] = ps ? ps[f.reg] : _hmFormStats(f.pupils); });
   const mk = (field, wfield) => peers.forms.map(f =>
     ({ reg: f.reg, v: stats[f.reg][field], w: stats[f.reg][wfield] }));
 
@@ -7444,12 +7468,25 @@ function _hmLineChart(canvasId, key, labels, mine, median, color, fmt){
 function _hmPanelYTD(){
   const peers = _hmPeerForms();
   if(!peers.me) return '';
-  const buckets = _hmMonthBuckets();
-  if(buckets.length < 2) return '';
-  const labels = buckets.map(b => _hmMonthLabel(b.m));
-  const all = peers.forms.map(f => ({ reg: f.reg, s: _hmSeries(f.pupils, buckets) }));
+  const ps = _hmPeerData(), psMonths = _hmPeerMonths();
+  let labels, all;
+  if(ps && psMonths && psMonths.length >= 2){
+    labels = psMonths.map(_hmMonthLabel);
+    const pick = (reg, field) => psMonths.map(m => {
+      const row = (ps[reg] && ps[reg].months && ps[reg].months[m]) || null;
+      return row && row[field] != null ? row[field] : null;
+    });
+    all = peers.forms.map(f => ({ reg: f.reg,
+      s: { att: pick(f.reg, 'att'), pos: pick(f.reg, 'pos'), neg: pick(f.reg, 'neg') } }));
+  } else {
+    const buckets = _hmMonthBuckets();
+    if(buckets.length < 2) return '';
+    labels = buckets.map(b => _hmMonthLabel(b.m));
+    all = peers.forms.map(f => ({ reg: f.reg, s: _hmSeries(f.pupils, buckets) }));
+  }
   const mine = all.find(a => a.reg === peers.me).s;
-  const med = f => buckets.map((_, i) => _hmMedian(all.map(a => a.s[f]), i));
+  // labels, not buckets: the peerStats branch never builds buckets.
+  const med = f => labels.map((_, i) => _hmMedian(all.map(a => a.s[f]), i));
 
   const one = (title, id, key, data, medData, color, fmt, missing) => {
     const live = data.filter(v => v != null && v !== 0);
