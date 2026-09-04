@@ -7293,7 +7293,7 @@ function _hmLegend(){
 // draws twice and the other stays blank. Set once per render, before any panel
 // is built, and captured synchronously by each builder.
 let _HM_NS = '';
-function _hmId(id){ return _HM_NS + id; }
+function _hmId(id){ return id.indexOf(_HM_NS) === 0 ? id : _HM_NS + id; }
 
 function _hmCanvas(id, h){
   id = _hmId(id);
@@ -7595,8 +7595,10 @@ function _hmMedian(arrs, i){
 // panels look identical while plotting different measures — a plain mean in one
 // and a Winsorised mean in the other — which reads as a bug rather than a
 // comparison.
-function _hmLineChart(canvasId, key, labels, mine, median, color, fmt, nameMine, namePeer){
-  canvasId = _hmId(canvasId); key = _HM_NS + key;
+function _hmLineChart(rawId, key, labels, mine, median, color, fmt, nameMine, namePeer){
+  // _hmCanvas namespaces on its way out, so keep the raw id for it and resolve
+  // only the copy the deferred builder closes over.
+  const canvasId = _hmId(rawId); key = _HM_NS + key;
   _hmChart(() => {
     const el = document.getElementById(canvasId);
     if(!el) return;
@@ -7619,7 +7621,7 @@ function _hmLineChart(canvasId, key, labels, mine, median, color, fmt, nameMine,
       }
     }));
   });
-  return _hmCanvas(canvasId, 130);
+  return _hmCanvas(rawId, 130);
 }
 // Eight forms need eight hues that stay apart. Chart.js toggles a series when
 // its legend entry is clicked, which is the "remove or include" behaviour — no
@@ -7627,8 +7629,8 @@ function _hmLineChart(canvasId, key, labels, mine, median, color, fmt, nameMine,
 const _HM_FORM_COLORS = [PAL.sky, PAL.green, PAL.orange, PAL.violet,
                          PAL.teal, PAL.gold, PAL.plum, PAL.indigo];
 
-function _hmMultiLine(canvasId, key, labels, series, fmt){
-  canvasId = _hmId(canvasId); key = _HM_NS + key;
+function _hmMultiLine(rawId, key, labels, series, fmt){
+  const canvasId = _hmId(rawId); key = _HM_NS + key;
   _hmChart(() => {
     const el = document.getElementById(canvasId);
     if(!el) return;
@@ -7655,7 +7657,7 @@ function _hmMultiLine(canvasId, key, labels, series, fmt){
       }
     }));
   });
-  return _hmCanvas(canvasId, 190);
+  return _hmCanvas(rawId, 190);
 }
 
 function _hmPanelYTD(){
@@ -7914,7 +7916,7 @@ function _hmTgCharts(){
   const el = document.getElementById('tg-infographics');
   if(!el) return;
   _HM_SCOPE = _hmScopeFromTG();
-  try { el.innerHTML = _hmInfographics('tg-'); }
+  try { el.innerHTML = _hmInfographics(); }
   catch(e){ console.warn('[hm] charts', e); el.innerHTML = ''; }
 }
 
