@@ -1254,7 +1254,7 @@ async function authRefresh(){
 // while the machine is asleep or the tab is heavily throttled, so a call made
 // on wake can carry an expired token. Anything hitting an authed endpoint
 // should go through this rather than authToken() directly.
-async // A picker with a single option is not a choice, it is a label wearing a
+// A picker with a single option is not a choice, it is a label wearing a
 // dropdown. Scoped accounts see this on every selector, so handle it in one
 // place rather than per control.
 function _lockSingleSelect(sel){
