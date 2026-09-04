@@ -1888,6 +1888,21 @@ def _ay_of(iso):
     return str(y if m >= 9 else y - 1)
 
 
+def _month_row(pxs, m, sched_m, abs_m, pos_m, neg_m):
+    """One month's figures for a set of pupils, mean and Winsorised."""
+    a = [100 - (abs_m[p][m] / sched_m * 100) for p in pxs]
+    pv = [pos_m[p][m] for p in pxs]
+    nv = [neg_m[p][m] for p in pxs]
+    return {
+        'att':  round(statistics.fmean(a), 3),
+        'attW': round(_winsor_mean(a), 3),
+        'pos':  round(statistics.fmean(pv), 3),
+        'posW': round(_winsor_mean(pv), 3),
+        'neg':  round(statistics.fmean(nv), 3),
+        'negW': round(_winsor_mean(nv), 3),
+    }
+
+
 def _build_peer_stats(full):
     cfg = full['config']
     cay = str(cfg['current_acad_year'])
@@ -1979,12 +1994,7 @@ def _build_peer_stats(full):
             sched_m = len(days_in_month[m]) * per_day
             if not sched_m:
                 continue
-            month_rows[m] = {
-                'att': round(statistics.fmean(
-                    [100 - (abs_m[p][m] / sched_m * 100) for p in pxs]), 3),
-                'pos': round(sum(pos_m[p][m] for p in pxs) / len(pxs), 3),
-                'neg': round(sum(neg_m[p][m] for p in pxs) / len(pxs), 3),
-            }
+            month_rows[m] = _month_row(pxs, m, sched_m, abs_m, pos_m, neg_m)
         rnd = lambda x: None if x is None else round(x, 3)
         by_form[form] = {
             'year':   reg[pxs[0]].get('year'),
@@ -1998,7 +2008,36 @@ def _build_peer_stats(full):
             'months': month_rows,
         }
 
-    return {'builtAt': today, 'months': months, 'byForm': by_form}
+    # The whole year group as one series, so a form can be read against its own
+    # year rather than the median of the other forms. Winsorised across every
+    # pupil in the year, not an average of form averages, which would weight a
+    # form of 25 the same as one of 33.
+    year_px = defaultdict(list)
+    for form, pxs in forms.items():
+        yr = reg[pxs[0]].get('year')
+        if yr:
+            year_px[yr].extend(pxs)
+
+    year_rows = {}
+    for yr, pxs in year_px.items():
+        att = [100 - (absent[p] / scheduled * 100) for p in pxs] if scheduled else []
+        pv, nv = [pos[p] for p in pxs], [neg[p] for p in pxs]
+        mrows = {}
+        for m in months:
+            sched_m = len(days_in_month[m]) * per_day
+            if sched_m:
+                mrows[m] = _month_row(pxs, m, sched_m, abs_m, pos_m, neg_m)
+        rnd = lambda x: None if x is None else round(x, 3)
+        year_rows[yr] = {
+            'n': len(pxs),
+            'att': rnd(statistics.fmean(att) if att else None), 'attW': rnd(_winsor_mean(att)),
+            'pos': rnd(statistics.fmean(pv)),                   'posW': rnd(_winsor_mean(pv)),
+            'neg': rnd(statistics.fmean(nv)),                   'negW': rnd(_winsor_mean(nv)),
+            'months': mrows,
+        }
+
+    return {'builtAt': today, 'months': months,
+            'byForm': by_form, 'byYear': year_rows}
 
 
 # ── Write the scoped files ────────────────────────────────────────────────────
