@@ -7201,7 +7201,11 @@ function rHmTutor(){
   _lockSingleSelect('hm-scope-tutor');
   _hmRender('hm-out-tutor',_hmTutor);
 }
-function rHmYear(){  _HM_SCOPE=_hmFill('hm-scope-year',_hmYears())||'all';  _hmRender('hm-out-year',_hmYearLeader); }
+function rHmYear(){
+  _HM_SCOPE=_hmFill('hm-scope-year',_hmYears())||'all';
+  _lockSingleSelect('hm-scope-year');
+  _hmRender('hm-out-year',_hmYearLeader);
+}
 function rHmSLT(){   _HM_SCOPE='all';                                       _hmRender('hm-out-slt',_hmSLT); }
 
 // ---- FORM TUTOR — INFOGRAPHICS ---------------------------------------------
@@ -7562,7 +7566,11 @@ function _hmMedian(arrs, i){
   if(!v.length) return null;
   return v.length % 2 ? v[(v.length-1)/2] : (v[v.length/2 - 1] + v[v.length/2]) / 2;
 }
-function _hmLineChart(canvasId, key, labels, mine, median, color, fmt){
+// nameMine/namePeer are shown in a legend on the chart. Without them the two
+// panels look identical while plotting different measures — a plain mean in one
+// and a Winsorised mean in the other — which reads as a bug rather than a
+// comparison.
+function _hmLineChart(canvasId, key, labels, mine, median, color, fmt, nameMine, namePeer){
   _hmChart(() => {
     const el = document.getElementById(canvasId);
     if(!el) return;
@@ -7570,14 +7578,16 @@ function _hmLineChart(canvasId, key, labels, mine, median, color, fmt){
     sc2(key, new Chart(el, {
       type: 'line',
       data: { labels: labels, datasets: [
-        { label: 'Year group median', data: median, borderColor: PAL.slate, borderWidth: 1.5,
-          borderDash: [5,3], pointRadius: 0, tension: .35, fill: false },
-        { label: 'Your form', data: mine, borderColor: color, borderWidth: 2.5,
+        { label: namePeer || 'Year group median', data: median, borderColor: PAL.slate,
+          borderWidth: 1.5, borderDash: [5,3], pointRadius: 0, tension: .35, fill: false },
+        { label: nameMine || 'Your form', data: mine, borderColor: color, borderWidth: 2.5,
           pointRadius: 3, tension: .35, fill: false }
       ]},
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false },
+        plugins: {
+          legend: { labels: { color: _HM_TICK, font: _HM_FONT, boxWidth: 18,
+                              boxHeight: 1, padding: 7, usePointStyle: false } },
           tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + fmt(c.parsed.y) } } },
         scales: { x: _hmScale(), y: _hmScale({ ticks: { color:_HM_TICK, font:_HM_FONT, callback: fmt } }) }
       }
@@ -7614,9 +7624,13 @@ function _hmPanelYTD(){
   // labels, not buckets: the peerStats branch never builds buckets.
   const med = f => labels.map((_, i) => _hmMedian(all.map(a => a.s[f]), i));
 
+  const nameMine = peers.me || ('All of ' + peers.year);
+  const namePeer = peers.me ? (peers.year + ' median form') : 'Median form';
   const one = (title, id, key, data, medData, color, fmt, missing) => {
     const live = data.filter(v => v != null && v !== 0);
-    const inner = live.length ? _hmLineChart(id, key, labels, data, medData, color, fmt) : _hmNote(missing);
+    const inner = live.length
+      ? _hmLineChart(id, key, labels, data, medData, color, fmt, nameMine, namePeer)
+      : _hmNote(missing);
     return '<div style="flex:1;min-width:230px">'
       + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
       + inner + '</div>';
@@ -7626,8 +7640,10 @@ function _hmPanelYTD(){
 
   return _hmPanel('This year, month by month',
     peers.me
-      ? 'Your form is the solid line. The dashed line is the median form in ' + peers.year + '.'
-      : 'All of ' + peers.year + ' is the solid line. The dashed line is the median form.',
+      ? 'Plain means. Your form solid, the median form in ' + peers.year + ' dashed.'
+      : 'Plain means for all of ' + peers.year + ', against the median form. '
+        + 'The panel below plots the same months on Winsorised means, so its solid line sits '
+        + 'higher \u2014 that gap is what the outliers are doing.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-yatt', 'hmIgYAtt', mine.att, med('att'), PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -7655,13 +7671,21 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
   });
   const mine = peers.me ? ps[peers.me] : yr;
 
+  // On a form scope both lines are Winsorised, one form and one year. On a year
+  // scope the contrast is Winsorised against plain, for the same pupils — so the
+  // names have to say which, or the reader assumes both panels plot the same
+  // thing and the numbers look wrong.
+  const nameMine = peers.me ? (peers.me + ' \u00b7 Winsorised')
+                            : (peers.year + ' \u00b7 Winsorised');
+  const namePeer = peers.me ? (peers.year + ' \u00b7 Winsorised')
+                            : (peers.year + ' \u00b7 plain mean');
   const one = (title, id, key, field, color, fmt, missing) => {
     const a = series(mine, field);
     const b = peers.me ? series(yr, field)
                        : series(yr, field.replace(/W$/, ''));   // year mean, for contrast
     const live = a.filter(v => v != null && v !== 0);
     const inner = live.length
-      ? _hmLineChart(id, key, labels, a, b, color, fmt)
+      ? _hmLineChart(id, key, labels, a, b, color, fmt, nameMine, namePeer)
       : _hmNote(missing);
     return '<div style="flex:1;min-width:230px">'
       + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
