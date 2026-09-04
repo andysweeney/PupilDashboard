@@ -7041,7 +7041,9 @@ function renderNet(){
 
   const legend=`<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.5rem;font-size:.65rem;color:var(--mu)">
     <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f9731622;border:1.5px solid var(--orange);vertical-align:middle;margin-right:.25rem"></span>Co-sanctioned pupil</span>
-    <span>Node size = sanction count · Line thickness = co-sanction frequency</span>
+    <span>Each circle is a pupil, and the bigger the circle the more sanctions they have.
+    A line joins two pupils sanctioned in the same lesson; the thicker the line, the more
+    often it has happened.</span>
   </div>`;
 
   container.innerHTML=`<div style="position:relative">
@@ -7471,14 +7473,14 @@ function _hmPeerBar(canvasId, key, rows, me, opts){
         labels: labels,
         datasets: [
           {
-            label: 'Mean',
+            label: 'All pupils',
             data: raw,
             backgroundColor: labels.map(l => _hmAlpha((!me || l === me) ? opts.color : muted, 0.32)),
             borderColor:     labels.map(l => (!me || l === me) ? opts.color : muted),
             borderWidth: 1, borderRadius: 3, order: 3
           },
           {
-            label: 'Winsorised mean',
+            label: 'Extremes left out',
             data: win,
             backgroundColor: labels.map(l => (!me || l === me) ? opts.color : muted),
             borderWidth: 0, borderRadius: 3, order: 2
@@ -7555,8 +7557,11 @@ function _hmPanelPeers(){
 
   return _hmPanel(peers.me ? 'Your form against the year group'
                            : 'Every form in ' + peers.year,
-    (peers.me ? peers.me + ' is picked out. ' : '')
-    + 'The solid bar is the Winsorised mean, which pulls the highest and lowest tenth of pupils in to the 10th and 90th percentile; the pale bar behind it is the plain mean. A wide gap between the two means one or two pupils are carrying the figure. The dashed line is the ' + peers.year + ' Winsorised mean.',
+    (peers.me ? peers.me + ' is highlighted. ' : '')
+    + 'Two bars per form. The pale one is the straight average of every pupil. '
+    + 'The solid one leaves out the highest and lowest few, so one unusual pupil cannot '
+    + 'swing it. Where the two are far apart, a small number of pupils is moving the figure. '
+    + 'The dashed line is the ' + peers.year + ' average.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">' + body + '</div>');
 }
 
@@ -7705,8 +7710,8 @@ function _hmPanelYTD(){
       + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
       + _hmMultiLine(id, key, labels, build(field), fmt) + '</div>';
     return _hmPanel('Each form, month by month',
-      'Every form in ' + peers.year + ', with the year mean in bold over the top. '
-      + 'Click a form in the key to hide or show it.',
+      'One line per form, with the whole of ' + peers.year + ' in bold. Straight averages. '
+      + 'Click a form name in the key to hide it, and again to bring it back.',
       '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
       + oneF('Attendance', 'hm-ig-fatt', 'hmIgFAtt', 'att', v => (Math.round(v*10)/10) + '%')
       + oneF('Positives per pupil', 'hm-ig-fpos', 'hmIgFPos', 'pos', v => Math.round(v*10)/10)
@@ -7730,10 +7735,9 @@ function _hmPanelYTD(){
 
   return _hmPanel('This year, month by month',
     peers.me
-      ? 'Plain means. Your form solid, the median form in ' + peers.year + ' dashed.'
-      : 'Plain means for all of ' + peers.year + ', against the median form. '
-        + 'The panel below plots the same months on Winsorised means, so its solid line sits '
-        + 'higher \u2014 that gap is what the outliers are doing.',
+      ? 'Your form solid, the middle form in ' + peers.year + ' dashed. '
+        + 'Straight averages, every pupil counted.'
+      : 'Straight averages for all of ' + peers.year + ', against the middle form.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-yatt', 'hmIgYAtt', mine.att, med('att'), PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -7773,10 +7777,10 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
       '<div style="flex:1;min-width:280px">'
       + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
       + _hmMultiLine(id, key, labels, buildW(field), fmt) + '</div>';
-    return _hmPanel('The same, on Winsorised means',
-      'Every form in ' + peers.year + ' with the top and bottom tenth of pupils pulled in each '
-      + 'month, and the year (' + yr.n + ' pupils) in bold. A form that sits noticeably higher '
-      + 'here than in the panel above was being carried by a few pupils.',
+    return _hmPanel('The same, with extremes left out',
+      'The same lines, but each month leaves out the highest and lowest few pupils. '
+      + 'Compare a form with its line above: if it moves a long way, that form\u2019s figure '
+      + 'was being set by a handful of pupils rather than by the group as a whole.',
       '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
       + oneW('Attendance', 'hm-ig-watt', 'hmIgWAtt', 'attW', v => (Math.round(v*10)/10) + '%')
       + oneW('Positives per pupil', 'hm-ig-wpos', 'hmIgWPos', 'posW', v => Math.round(v*10)/10)
@@ -7790,10 +7794,10 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
   // scope the contrast is Winsorised against plain, for the same pupils — so the
   // names have to say which, or the reader assumes both panels plot the same
   // thing and the numbers look wrong.
-  const nameMine = peers.me ? (peers.me + ' \u00b7 Winsorised')
-                            : (peers.year + ' \u00b7 Winsorised');
-  const namePeer = peers.me ? (peers.year + ' \u00b7 Winsorised')
-                            : (peers.year + ' \u00b7 plain mean');
+  const nameMine = peers.me ? (peers.me + ' \u00b7 extremes left out')
+                            : (peers.year + ' \u00b7 extremes left out');
+  const namePeer = peers.me ? (peers.year + ' \u00b7 extremes left out')
+                            : (peers.year + ' \u00b7 all pupils');
   const one = (title, id, key, field, color, fmt, missing) => {
     const a = series(mine, field);
     const b = peers.me ? series(yr, field)
@@ -7807,14 +7811,12 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
       + inner + '</div>';
   };
 
-  return _hmPanel('The same, on Winsorised means',
+  return _hmPanel('The same, with extremes left out',
     peers.me
-      ? 'Your form against all of ' + peers.year + ' (' + yr.n + ' pupils), with the highest '
-        + 'and lowest tenth pulled in each month. Where this and the panel above disagree, a '
-        + 'small number of pupils is moving the plain average.'
-      : 'All of ' + peers.year + ' (' + yr.n + ' pupils): the Winsorised mean as the solid '
-        + 'line against the plain mean dashed. Where they part company, a handful of pupils '
-        + 'is carrying the month.',
+      ? 'The same two lines, but each month leaves out the highest and lowest few pupils. '
+        + 'If your form moves a long way from its line above, its figure there was being set '
+        + 'by a small number of pupils.'
+      : 'All of ' + peers.year + ', leaving out the highest and lowest few pupils each month.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-watt', 'hmIgWAtt', 'attW', PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -10143,7 +10145,7 @@ function rCL(){
 
   // Render dropdown + graph container
   const netDiv=document.getElementById('cl-network');
-  netDiv.innerHTML=`<div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:.85rem;align-items:stretch"><div class="dw" style="margin-bottom:0"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Min co-occurrences <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div><div class="disc-box" style="min-width:0;display:flex">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true,true)}</div></div>${gradeHistHtml}${expDisciplineHtml}`;
+  netDiv.innerHTML=`<div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:.85rem;align-items:stretch"><div class="dw" style="margin-bottom:0"><div class="dwt" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">Sanction Pair Network <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--mu);font-size:.68rem">— ${sub} Class ${cl}</span><label style="margin-left:auto;font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:.3rem">Show pairs sanctioned together <select id="net-min-w" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px"><option value="1" selected>every pair</option><option value="2">2+ times</option><option value="3">3+ times</option><option value="5">5+ times</option></select></label><select id="net-ay" onchange="renderNet()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">${netAYs.map(ay=>`<option value="${ay}"${ay===CAY?' selected':''}>${ay}-${ay+1}</option>`).join('')}</select></div><div id="net-container"></div></div><div class="disc-box" style="min-width:0;display:flex">${alertBox('Academic Year Discipline Issues',PAL.violet,top5Sanc,sancRow,true,true)}</div></div>${gradeHistHtml}${expDisciplineHtml}`;
 
   window._netCtx={classPupilList:[...classPups],sub,cl};
   renderNet();
@@ -10933,40 +10935,96 @@ function rPeer(){
   // ── NETWORK GRAPH ──
   const tgNetDiv=document.getElementById('tg-network');
   if(typeof renderNet==='function'){
-    if(isAllTG){
-      // The whole-year network (every tutor group at once) is too dense to read and the most
-      // expensive thing on this tab to draw, so skip it and prompt for a single tutor group.
-      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;display:flex;align-items:center;gap:.6rem;margin-bottom:0"><span>Sanction Pair Network</span></div><div style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">Select a single tutor group to see its sanction pair network. Across all tutor groups the network is too dense to be readable.</div></div></div>`;
+    if(false){
+      // Kept only so the branch below stays intact. The whole-year network used
+      // to be refused as unreadable; with the same-lesson join and a minimum
+      // pair count it now renders, so this no longer fires.
+      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;display:flex;align-items:center;gap:.6rem;margin-bottom:0"><span>Sanction Pair Network</span></div><div style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">Pick a single tutor group above to see this. Across a whole year group there are too many pupils and too many connections between them for the picture to be readable.</div></div></div>`;
     }else{
-    // Find co-occurring sanctions within TG
-    const tgLessonSanc=tgSancAY.filter(s=>s[3]!=null&&s[4]!=null);
-    // Group by date+period
+    // Two pupils are a pair only if they were in the SAME LESSON — same date,
+    // period, subject AND class. Keying on date+period alone linked pupils who
+    // were in different rooms at the same time; on this school's data that was
+    // 61% of the edges at year level.
+    //
+    // And the candidate set is the whole year group, not this tutor group.
+    // Classes cut across forms, so a pupil in 10E1 who repeatedly goes off with
+    // someone in 10F2 is exactly what a tutor needs to see, and their partner
+    // would never appear if we only looked inside the form.
+    const _ygPupilPx=new Set(lr.map(r=>r[0]));
+    const _clsOf={};
+    enrols.filter(r=>r.t==='cls'&&r.u===null).forEach(r=>{ _clsOf[r.x+'|'+r.s]=r.c; });
+
+    const _cand=SAN.filter(s=>_ygPupilPx.has(s[0])&&s[3]!=null&&s[4]!=null
+                              &&s[2]>=ayStart&&s[2]<=_tgTodayISO);
     const slotMap={};
-    tgLessonSanc.forEach(s=>{
-      const key=s[2]+'|'+s[4];
+    _cand.forEach(s=>{
+      const cl=_clsOf[s[0]+'|'+s[3]];
+      if(cl==null) return;                    // no class on record: cannot place them
+      const key=s[2]+'|'+s[4]+'|'+s[3]+'|'+cl;
       if(!slotMap[key]) slotMap[key]=[];
       slotMap[key].push(s[0]);
     });
-    // Find pairs
+
     const pairCounts={};
     Object.values(slotMap).forEach(pupils=>{
       if(pupils.length<2) return;
       const unique=[...new Set(pupils)];
       for(let i=0;i<unique.length;i++){
         for(let j=i+1;j<unique.length;j++){
-          const k=[unique[i],unique[j]].sort().join('-');
+          const k=[unique[i],unique[j]].sort((x,y)=>x-y).join('-');
           pairCounts[k]=(pairCounts[k]||0)+1;
         }
       }
     });
 
-    const pairs=Object.entries(pairCounts).filter(([k,v])=>v>=2).sort((a,b)=>b[1]-a[1]);
+    // On a single tutor group, keep any pair with at least one of its pupils in
+    // the form — the partner may well be someone else's tutee.
+    const _minW=window._TGNET_MINW||(isAllTG?5:2);
+    // Concatenated, not a template literal: this string is interpolated into
+    // two other templates and nesting backticks three deep breaks the parse.
+    const _netCtl='<label onclick="event.stopPropagation()" style="margin-left:auto;'
+      + 'font-size:.65rem;color:var(--mu);font-weight:400;text-transform:none;'
+      + 'letter-spacing:0;display:flex;align-items:center;gap:.3rem">'
+      + 'Show pairs sanctioned together '
+      + '<select onchange="window._TGNET_MINW=parseInt(this.value)||2;rTG()" '
+      + 'style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);'
+      + 'font-family:inherit;font-size:.7rem;padding:.25rem .5rem;border-radius:5px">'
+      + [1,3,5,10].map(function(v){
+          return '<option value="'+v+'"'+(v===_minW?' selected':'')+'>'
+               + (v===1?'every pair':v+'+ times')+'</option>'; }).join('')
+      + '</select></label>';
+    const pairs=Object.entries(pairCounts)
+      .filter(([k,v])=>{
+        if(v<_minW) return false;
+        if(isAllTG) return true;
+        const[a,b]=k.split('-').map(Number);
+        return tgPupilPx.has(a)||tgPupilPx.has(b);
+      })
+      .sort((a,b)=>b[1]-a[1]);
     if(pairs.length){
       const nodes=new Set();
       pairs.forEach(([k])=>{k.split('-').forEach(px=>nodes.add(parseInt(px)))});
-      const nodeData=[...nodes].map(px=>({px,name:(REG[String(px)]?.id||String(px)).replace(/\s*\(P?\d+\)\s*$/,'').replace(/\s*\(\d+ \w+\)\s*$/,''),tg:tgDisplayName}));
+      const nodeData=[...nodes].map(px=>({
+        px,
+        name:(REG[String(px)]?.id||String(px)).replace(/\s*\(P?\d+\)\s*$/,'').replace(/\s*\(\d+ \w+\)\s*$/,''),
+        tg:(REG[String(px)]?.reg)||'',
+        inTG:isAllTG?true:tgPupilPx.has(px)
+      }));
       const links=pairs.map(([k,v])=>{const[a,b]=k.split('-').map(Number);return{source:a,target:b,weight:v}});
 
+      // Nodes are spaced evenly round an oval, which stops being legible well
+      // before it stops being possible. Say so rather than draw it.
+      if(pairs.length>300){
+        tgNetDiv.innerHTML='<div class="dw" style="padding:0;overflow:hidden">'
+          + '<div class="dwt" style="padding:.75rem 1rem;display:flex;align-items:center;'
+          + 'gap:.6rem;margin-bottom:0"><span>Sanction Pair Network \u2014 '+tgDisplayName
+          + '</span>'+_netCtl+'</div><div style="padding:0 1rem .75rem">'
+          + '<div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">'+pairs.length
+          + ' pairs at this setting, too many to draw legibly. Raise the number above: each '
+          + 'step drops the pairs that happened only occasionally and keeps the ones that '
+          + 'recur.</div></div></div>';
+        return;
+      }
       // Render SVG network
       const W=Math.min(1200,tgNetDiv.clientWidth||900),H=400;
       const R=14,pad=40;
@@ -10990,14 +11048,16 @@ function rPeer(){
         svg+=`<text x="${mx}" y="${my-4}" fill="var(--mu)" font-size="7" font-family="IBM Plex Mono" text-anchor="middle">${l.weight}</text>`;
       });
       nodeData.forEach(n=>{
-        svg+=`<circle cx="${n.x}" cy="${n.y}" r="${n.r}" fill="var(--sf)" stroke="var(--ac)" stroke-width="1.5"/>`;
+        // Pupils from another form are outlined in grey, so it is obvious at a
+        // glance that a partner is not one of yours.
+        svg+=`<circle cx="${n.x}" cy="${n.y}" r="${n.r}" fill="var(--sf)" stroke="${n.inTG?'var(--ac)':PAL.slate}" stroke-width="1.5"${n.inTG?'':' stroke-dasharray="3 2"'}/>`;
         svg+=`<text x="${n.x}" y="${n.y+3}" fill="var(--tx)" font-size="10" font-family="Hanken Grotesk" text-anchor="middle" style="pointer-events:none">${n.name.split(' ')[0]}</text>`;
-        svg+=`<text x="${n.x}" y="${n.y+n.r+14}" fill="var(--mu)" font-size="7" font-family="Hanken Grotesk" text-anchor="middle">${n.name.split(' ').slice(1).join(' ')}</text>`;
+        svg+=`<text x="${n.x}" y="${n.y+n.r+14}" fill="var(--mu)" font-size="7" font-family="Hanken Grotesk" text-anchor="middle">${n.name.split(' ').slice(1).join(' ')}${(!n.inTG&&n.tg)?' \u00b7 '+n.tg:''}</text>`;
       });
       svg+=`</svg>`;
-      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="font-size:.6rem;color:var(--mu);margin-bottom:.5rem">Showing pupils sanctioned together in the same lesson ≥2 times this academic year</div>${svg}</div></div>`;
+      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span>${_netCtl}<span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="font-size:.6rem;color:var(--mu);margin-bottom:.5rem">Showing pupils sanctioned together in the same lesson ≥2 times this academic year</div>${svg}</div></div>`;
     }else{
-      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No significant sanction pairs found</div></div></div>`;
+      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span>${_netCtl}<span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No significant sanction pairs found</div></div></div>`;
     }
     }
   }
@@ -11043,10 +11103,10 @@ function rPeer(){
       ? _tgNames.map((n,i)=>Object.assign(
           {label:n, data:pp.map(p=>fn(ygRows(yearGroup,p).filter(r=>_tgSets[n].has(r[0]))))},
           _formLine(_HM_FORM_COLORS[i%_HM_FORM_COLORS.length])))
-         .concat([Object.assign({label:`${_ygLabel} Winsorised`,
+         .concat([Object.assign({label:`${_ygLabel} · extremes left out`,
                                  data:pp.map(p=>fn(_ygRowsAt(p)))},_yearBold)])
-      : [Object.assign({label:`${_ygLabel} Winsorised`,data:pp.map(p=>fn(_ygRowsAt(p)))},_peerLine),
-         Object.assign({label:`${tgDisplayName} Winsorised`,data:pp.map(p=>fn(_tgRowsAt(p)))},_tgLine)];
+      : [Object.assign({label:`${_ygLabel} · extremes left out`,data:pp.map(p=>fn(_ygRowsAt(p)))},_peerLine),
+         Object.assign({label:`${tgDisplayName} · extremes left out`,data:pp.map(p=>fn(_tgRowsAt(p)))},_tgLine)];
 
     const abDatasets=_sets(winAb);
     const efDatasets=_sets(winEf);
