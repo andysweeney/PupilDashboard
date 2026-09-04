@@ -2007,7 +2007,14 @@ def write_scoped_outputs(full, out_dir=SCOPED_OUT_DIR):
 
     peer = _build_peer_stats(full)
     if peer:
-        full = dict(full, peerStats=peer)     # school-wide file gets it too
+        full = dict(full, peerStats=peer)
+        # The workflow pushes the engine's own output as the school-wide file,
+        # so enrich that in place rather than writing a second copy the CI
+        # would ignore.
+        main_path = globals().get('out_path', '/home/claude/data_real.json')
+        with open(main_path, 'w') as f:
+            json.dump(full, f, separators=(',', ':'))
+        print(f"peerStats added to {main_path} ({len(peer['byForm'])} forms)")
 
     by_form, by_year = defaultdict(set), defaultdict(set)
     for px, r in reg.items():
@@ -2028,7 +2035,8 @@ def write_scoped_outputs(full, out_dir=SCOPED_OUT_DIR):
         written.append((rel, len(data['registry']), mb))
         return mb
 
-    _write('data.json', full)
+    # data.json is not written here: the engine's own output above is the
+    # school-wide file, and this directory carries only the scoped trees.
     for yr, pxs in sorted(by_year.items()):
         _write(f'year/{yr}/data.json', _slice_output(full, pxs))
     for form, pxs in sorted(by_form.items()):
