@@ -504,7 +504,13 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
     let resp;
     if(SB_ON){
       var _SID=schoolId();
-      resp=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+(_SID?_SID+'/':'')+'data.json',
+      // Scoped roles read their own file, built by import_engine. There is
+      // deliberately no fallback to the school-wide file: if a tutor's file is
+      // missing we fail closed rather than hand them the whole school.
+      var _SCOPE=dataScopePath();
+      if(_SCOPE===null) throw new Error('This account has a role but no valid scope. '
+        +'Set app_metadata.scope to a form code or year group, or clear the role.');
+      resp=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+(_SID?_SID+'/':'')+_SCOPE+'data.json',
                        {headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()},cache:'no-store'});
     }else{
       resp=await fetch('./data.json');
@@ -513,7 +519,10 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
       // A signed-in tenant whose data.json isn't there yet is a NEW school, not an error: boot an
       // empty dashboard. A platform owner (who may have no school of their own) always boots empty
       // so they can reach the Schools tab.
-      if(SB_ON && isPlatformOwner()){
+      if(SB_ON && dataScopePath()!==''){
+        throw new Error('No data for this account\u2019s scope ('+userRole()+' / '+userScope()+'). '
+          +'The scoped file has not been built yet \u2014 ask your administrator to re-run the import.');
+      }else if(SB_ON && isPlatformOwner()){
         DD=_EMPTY_DD(); window._ONBOARDING=true;
       }else if(SB_ON && _SID && (resp.status===404||resp.status===400)){
         DD=_EMPTY_DD(); window._ONBOARDING=true;
@@ -1154,6 +1163,78 @@ window._switchSchool=async function(sid){
 function isPlatformOwner(){
   try{ var u=authUser(); return !!(u&&u.app_metadata&&u.app_metadata.platform_owner===true); }catch(e){ return false; }
 }
+// ── Roles ────────────────────────────────────────────────────────────────────
+// Set in app_metadata server-side, exactly like school_id and platform_owner,
+// so a user can never grant themselves a wider scope from the browser.
+//
+//   role  : 'tutor' | 'year_leader' | 'slt'   (absent = 'slt')
+//   scope : tutor      -> form code, e.g. '10E1'
+//           year_leader-> year group, e.g. 'Year 10' or 10
+//           slt        -> ignored
+//
+// Absent role means 'slt' so every existing account keeps working unchanged.
+// That is a migration choice, not a security one: a new account gets no access
+// it was not given, but an old account keeps what it already had. Assign roles
+// deliberately rather than relying on the default.
+const ROLE_SLT='slt', ROLE_YEAR='year_leader', ROLE_TUTOR='tutor';
+const ROLE_BAD='__invalid';
+function userRole(){
+  if(isPlatformOwner()) return ROLE_SLT;
+  var r=null;
+  try{ var u=authUser(); r=u&&u.app_metadata&&u.app_metadata.role; }catch(e){ return ROLE_BAD; }
+  // Never assigned is the migration case: behave exactly as before.
+  // Assigned but unrecognised is a misconfiguration, and a typo in a role name
+  // must not hand someone the whole school.
+  if(r==null||r==='') return ROLE_SLT;
+  return (r===ROLE_TUTOR||r===ROLE_YEAR||r===ROLE_SLT)?r:ROLE_BAD;
+}
+function userScope(){
+  try{ var u=authUser(); return (u&&u.app_metadata&&u.app_metadata.scope)||null; }catch(e){ return null; }
+}
+// The folder this account's data.json lives in, under the school prefix.
+// SLT reads the school-wide file at the root, exactly as today.
+// '' = the school-wide file. A string = that scope's folder. null = this
+// account is misconfigured and must be given nothing.
+function dataScopePath(){
+  var role=userRole(), sc=userScope();
+  if(role===ROLE_SLT) return '';
+  if(role===ROLE_BAD||!sc) return null;   // scoped role with no scope, or a bad role
+  if(role===ROLE_TUTOR) return 'tutor/'+encodeURIComponent(String(sc))+'/';
+  if(role===ROLE_YEAR){
+    var y=String(sc).replace(/\D+/g,'');
+    return y?('year/'+encodeURIComponent(y)+'/'):null;
+  }
+  return null;
+}
+// Which tabs each role may open. This is the list to edit when the split is
+// refined; everything else keys off it. SLT sees all but Schools, which stays
+// with the platform owner.
+const ROLE_TABS={
+  __invalid:[],
+  tutor:['hmtutor','tutor','pupil'],
+  year_leader:['hmtutor','hmyear','tutor','pupil','class','subject','classcomp','tgcomp',
+               'behaviour','pairs','send','sanctions','concerns','slotavoid','peer','analytics','teacher']
+};
+function tabAllowed(view){
+  if(view==='schools') return isPlatformOwner();
+  var allow=ROLE_TABS[userRole()];
+  return !allow||allow.indexOf(view)>=0;
+}
+// Hide what this account may not open, and move off the current tab if it is
+// one of them. Called once after boot.
+function applyRoleUI(){
+  var first=null;
+  document.querySelectorAll('.tb').forEach(function(b){
+    var m=/sw\('(\w+)'/.exec(b.getAttribute('onclick')||'');
+    if(!m) return;
+    if(tabAllowed(m[1])){ if(!first) first=b; }
+    else b.style.display='none';
+  });
+  var cur=document.querySelector('.vw.on');
+  if(cur&&!tabAllowed(cur.id.replace(/^vw-/,''))&&first) first.click();
+}
+window.userRole=userRole; window.userScope=userScope;
+
 function authExpired(){if(!_SESSION)return true;const exp=_SESSION.expires_at?_SESSION.expires_at*1000:0;return !exp||Date.now()>(exp-60000);}
 async function authSignIn(email,password){
   const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email:email,password:password})});
@@ -1168,6 +1249,14 @@ async function authRefresh(){
     if(!r.ok){authClear();_SESSION=null;return null;}
     const j=await r.json();_SESSION=j;authSave(j);return j;
   }catch(e){return null;}
+}
+// The 45-minute interval above keeps a live tab going, but it does not fire
+// while the machine is asleep or the tab is heavily throttled, so a call made
+// on wake can carry an expired token. Anything hitting an authed endpoint
+// should go through this rather than authToken() directly.
+async function authTokenFresh(){
+  if(authExpired()) await authRefresh();
+  return authToken();
 }
 async function authSignOut(){
   await auditLog('logout');
@@ -1238,7 +1327,7 @@ var _AUDIT_SEEN;   // hoisted on purpose; filled the first time it is needed
 async function auditLog(action,subjectType,subjectId,context){
   try{
     if(!SB_ON) return;
-    const tok=authToken(); if(!tok) return;
+    const tok=await authTokenFresh(); if(!tok) return;
     // Repeats of the same view by the same person collapse for five minutes, so a
     // class list does not write a row per pupil per repaint. Downloads and
     // permission changes never collapse — they are what an investigation needs.
@@ -1261,7 +1350,7 @@ async function auditLog(action,subjectType,subjectId,context){
         p_action:action,
         p_subject_type:subjectType||null,
         p_subject_id:(subjectId==null?null:String(subjectId)),
-        p_context:context||{},
+        p_context:Object.assign({role:userRole(),scope:userScope()||null},context||{}),
         p_school_id:activeSchoolOverride()  // the school being viewed, not necessarily the viewer's own
       })
     });
@@ -1579,11 +1668,16 @@ async function checkAdmin(){
       }
     }catch(e){ IS_ADMIN=false; }          // fail closed: treat as non-admin on any error
   }
-  try{const b=document.getElementById('tab-admin'); if(b) b.style.display=IS_ADMIN?'':'none';}catch(e){}
-  try{const u=document.getElementById('tab-upload'); if(u) u.style.display=IS_ADMIN?'':'none';}catch(e){}
+  // A scoped account never gets Admin or Upload, even if it appears in `admins`.
+  const _cfgOK=IS_ADMIN&&userRole()===ROLE_SLT;
+  try{const b=document.getElementById('tab-admin'); if(b) b.style.display=_cfgOK?'':'none';}catch(e){}
+  try{const u=document.getElementById('tab-upload'); if(u) u.style.display=_cfgOK?'':'none';}catch(e){}
   try{const s=document.getElementById('tab-schools'); if(s) s.style.display=isPlatformOwner()?'':'none';}catch(e){}
 }
 await checkAdmin();
+// Runs after checkAdmin so the admin/upload/schools reveal above has already
+// happened and role gating can hide anything that reveal did not cover.
+try{ applyRoleUI(); }catch(e){ console.warn('[role] gating skipped',e); }
 try{ _hdrInitSchoolSwitcher(); }catch(e){}
 // Header school switcher (platform owner only). Populated from the same `schools`
 // table the Schools tab already lists, so there is nothing extra to maintain.
