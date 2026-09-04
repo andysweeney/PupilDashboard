@@ -7759,7 +7759,32 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
     const row = (src && src.months && src.months[m]) || null;
     return row && row[field] != null ? row[field] : null;
   });
-  const mine = peers.me ? ps[peers.me] : yr;
+  // On a year scope, mirror the panel above: every form, Winsorised, with the
+  // year bold over the top. The plain mean is already the subject of that panel,
+  // so repeating it here only crowds the chart.
+  if(!peers.me){
+    const buildW = field => peers.forms.map((f, i) => ({
+      name: f.reg,
+      data: series(ps[f.reg], field),
+      color: _HM_FORM_COLORS[i % _HM_FORM_COLORS.length]
+    })).concat([{ name: 'All of ' + peers.year, bold: true, color: PAL.slate,
+                  data: series(yr, field) }]);
+    const oneW = (title, id, key, field, fmt) =>
+      '<div style="flex:1;min-width:280px">'
+      + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
+      + _hmMultiLine(id, key, labels, buildW(field), fmt) + '</div>';
+    return _hmPanel('The same, on Winsorised means',
+      'Every form in ' + peers.year + ' with the top and bottom tenth of pupils pulled in each '
+      + 'month, and the year (' + yr.n + ' pupils) in bold. A form that sits noticeably higher '
+      + 'here than in the panel above was being carried by a few pupils.',
+      '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
+      + oneW('Attendance', 'hm-ig-watt', 'hmIgWAtt', 'attW', v => (Math.round(v*10)/10) + '%')
+      + oneW('Positives per pupil', 'hm-ig-wpos', 'hmIgWPos', 'posW', v => Math.round(v*10)/10)
+      + oneW('Sanctions per pupil', 'hm-ig-wneg', 'hmIgWNeg', 'negW', v => Math.round(v*10)/10)
+      + '</div>');
+  }
+
+  const mine = ps[peers.me];
 
   // On a form scope both lines are Winsorised, one form and one year. On a year
   // scope the contrast is Winsorised against plain, for the same pupils — so the
