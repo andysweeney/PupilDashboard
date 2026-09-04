@@ -7323,6 +7323,13 @@ function _hmPeerData(){
   return (ps && ps.byForm && Object.keys(ps.byForm).length) ? ps.byForm : null;
 }
 function _hmPeerMonths(){ return (DD.peerStats && DD.peerStats.months) || null; }
+function _hmYearSeries(yrRow, field){
+  const months = _hmPeerMonths() || [];
+  return months.map(m => {
+    const row = (yrRow && yrRow.months && yrRow.months[m]) || null;
+    return row && row[field] != null ? row[field] : null;
+  });
+}
 function _hmPeerYear(y){
   var by = DD.peerStats && DD.peerStats.byYear;
   return (by && by[y]) || null;
@@ -7335,10 +7342,31 @@ function _hmScopeForm(){
   const v = _HM_SCOPE || '';
   return v.startsWith('reg:') ? v.slice(4) : null;
 }
+// 'year:Year 10' — the Year Leader page and the Tutor Group tab's "All Tutor
+// Groups". There is no single form to pick out, but every form in the year is
+// still worth comparing, so this is a scope in its own right rather than an
+// absence of one.
+function _hmScopeYear(){
+  const v = _HM_SCOPE || '';
+  return v.startsWith('year:') ? v.slice(5) : null;
+}
 function _hmPeerForms(){
-  const me = _hmScopeForm();
+  const me = _hmScopeForm(), yrScope = _hmScopeYear();
+  const psY = _hmPeerData();
+  if(!me && yrScope){
+    // Whole year: every form in it, none picked out.
+    if(psY){
+      const f = Object.keys(psY).filter(k => psY[k].year === yrScope).sort();
+      if(f.length) return { me: null, year: yrScope, forms: f.map(k => ({ reg: k, pupils: null })) };
+    }
+    const idx = _hmFormIndex();
+    const f = Object.keys(idx).filter(k => idx[k].year === yrScope).sort();
+    return f.length
+      ? { me: null, year: yrScope, forms: f.map(k => ({ reg: k, pupils: idx[k].pupils })) }
+      : { me: null, forms: [] };
+  }
   if(!me) return { me: null, forms: [] };
-  const ps = _hmPeerData();
+  const ps = psY;
   if(ps){
     if(!ps[me]) return { me: null, forms: [] };
     const y = ps[me].year;
@@ -7416,14 +7444,14 @@ function _hmPeerBar(canvasId, key, rows, me, opts){
           {
             label: 'Mean',
             data: raw,
-            backgroundColor: labels.map(l => _hmAlpha(l === me ? opts.color : muted, 0.32)),
-            borderColor:     labels.map(l => l === me ? opts.color : muted),
+            backgroundColor: labels.map(l => _hmAlpha((!me || l === me) ? opts.color : muted, 0.32)),
+            borderColor:     labels.map(l => (!me || l === me) ? opts.color : muted),
             borderWidth: 1, borderRadius: 3, order: 3
           },
           {
             label: 'Winsorised mean',
             data: win,
-            backgroundColor: labels.map(l => l === me ? opts.color : muted),
+            backgroundColor: labels.map(l => (!me || l === me) ? opts.color : muted),
             borderWidth: 0, borderRadius: 3, order: 2
           },
           {
@@ -7462,8 +7490,8 @@ function _hmPeerBar(canvasId, key, rows, me, opts){
 
 function _hmPanelPeers(){
   const peers = _hmPeerForms();
-  if(!peers.me) return _hmPanel('Your form against the year group',
-    'Pick a single form in the selector above to see this comparison.', '');
+  if(!peers.forms.length) return _hmPanel('Forms against the year group',
+    'Pick a form or a year group in the selector above to see this comparison.', '');
 
   const ps = _hmPeerData();
   const stats = {};
@@ -7496,8 +7524,10 @@ function _hmPanelPeers(){
       + inner + '</div>';
   }).join('');
 
-  return _hmPanel('Your form against the year group',
-    peers.me + ' is picked out. The solid bar is the Winsorised mean, which pulls the highest and lowest tenth of pupils in to the 10th and 90th percentile; the pale bar behind it is the plain mean. A wide gap between the two means one or two pupils are carrying the figure. The dashed line is the ' + peers.year + ' Winsorised mean.',
+  return _hmPanel(peers.me ? 'Your form against the year group'
+                           : 'Every form in ' + peers.year,
+    (peers.me ? peers.me + ' is picked out. ' : '')
+    + 'The solid bar is the Winsorised mean, which pulls the highest and lowest tenth of pupils in to the 10th and 90th percentile; the pale bar behind it is the plain mean. A wide gap between the two means one or two pupils are carrying the figure. The dashed line is the ' + peers.year + ' Winsorised mean.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">' + body + '</div>');
 }
 
@@ -7557,7 +7587,7 @@ function _hmLineChart(canvasId, key, labels, mine, median, color, fmt){
 }
 function _hmPanelYTD(){
   const peers = _hmPeerForms();
-  if(!peers.me) return '';
+  if(!peers.forms.length) return '';
   const ps = _hmPeerData(), psMonths = _hmPeerMonths();
   let labels, all;
   if(ps && psMonths && psMonths.length >= 2){
@@ -7574,7 +7604,13 @@ function _hmPanelYTD(){
     labels = buckets.map(b => _hmMonthLabel(b.m));
     all = peers.forms.map(f => ({ reg: f.reg, s: _hmSeries(f.pupils, buckets) }));
   }
-  const mine = all.find(a => a.reg === peers.me).s;
+  // On a year scope there is no "my form" line; the year's own series stands in.
+  const yrRow = peers.me ? null : _hmPeerYear(peers.year);
+  const mine = peers.me
+    ? all.find(a => a.reg === peers.me).s
+    : (yrRow ? { att: _hmYearSeries(yrRow, 'att'), pos: _hmYearSeries(yrRow, 'pos'),
+                 neg: _hmYearSeries(yrRow, 'neg') } : null);
+  if(!mine) return '';
   // labels, not buckets: the peerStats branch never builds buckets.
   const med = f => labels.map((_, i) => _hmMedian(all.map(a => a.s[f]), i));
 
@@ -7589,7 +7625,9 @@ function _hmPanelYTD(){
   const winPanel = _hmPanelYTDWinsorised(peers, labels, ps);
 
   return _hmPanel('This year, month by month',
-    'Your form is the solid line. The dashed line is the median form in ' + peers.year + '.',
+    peers.me
+      ? 'Your form is the solid line. The dashed line is the median form in ' + peers.year + '.'
+      : 'All of ' + peers.year + ' is the solid line. The dashed line is the median form.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-yatt', 'hmIgYAtt', mine.att, med('att'), PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -7608,15 +7646,19 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
   if(!ps || !labels || labels.length < 2) return '';
   const yr = _hmPeerYear(peers.year);
   if(!yr || !yr.months) return '';
+  // On a year scope the comparison is the year's own mean against its
+  // Winsorised mean — the gap is the distortion the outliers are causing.
   const months = _hmPeerMonths();
   const series = (src, field) => months.map(m => {
     const row = (src && src.months && src.months[m]) || null;
     return row && row[field] != null ? row[field] : null;
   });
-  const mine = ps[peers.me];
+  const mine = peers.me ? ps[peers.me] : yr;
 
   const one = (title, id, key, field, color, fmt, missing) => {
-    const a = series(mine, field), b = series(yr, field);
+    const a = series(mine, field);
+    const b = peers.me ? series(yr, field)
+                       : series(yr, field.replace(/W$/, ''));   // year mean, for contrast
     const live = a.filter(v => v != null && v !== 0);
     const inner = live.length
       ? _hmLineChart(id, key, labels, a, b, color, fmt)
@@ -7627,9 +7669,13 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
   };
 
   return _hmPanel('The same, on Winsorised means',
-    'Your form against all of ' + peers.year + ' (' + yr.n + ' pupils), with the highest and '
-    + 'lowest tenth pulled in each month. Where this and the panel above disagree, a small '
-    + 'number of pupils is moving the plain average.',
+    peers.me
+      ? 'Your form against all of ' + peers.year + ' (' + yr.n + ' pupils), with the highest '
+        + 'and lowest tenth pulled in each month. Where this and the panel above disagree, a '
+        + 'small number of pupils is moving the plain average.'
+      : 'All of ' + peers.year + ' (' + yr.n + ' pupils): the Winsorised mean as the solid '
+        + 'line against the plain mean dashed. Where they part company, a handful of pupils '
+        + 'is carrying the month.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-watt', 'hmIgWAtt', 'attW', PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -7717,8 +7763,9 @@ function _hmPanelBySubject(){
       + incName('o') + '. Map them in Admin \u203a Incident codes.</div>'
     : '';
 
-  return _hmPanel('Sanctions in your form, by subject',
-    'Split by incident category. Counts are raw, so a subject your form has five times a week will sit higher than one it has once.',
+  const _scopeLabel = _hmScopeForm() || _hmScopeYear() || 'this group';
+  return _hmPanel('Sanctions in ' + _scopeLabel + ', by subject',
+    'Split by incident category. Counts are raw, so a subject taught five times a week will sit higher than one taught once.',
     _hmCanvas('hm-ig-subject', Math.max(170, names.length * 24 + 46)) + note);
 }
 
@@ -7943,6 +7990,10 @@ function _hmYearLeader(){
     +_hmCard('Going well',goodN.length,'',goodN.length?'good':'')
     +_hmCard('Considered',consN,'')
     +'</div>';
+
+  // The same charts the Tutor Group tab carries, scoped to the whole year:
+  // every form compared, and the year's own trend against its Winsorised mean.
+  h+=_hmInfographics();
 
   const types=Object.entries(byType).sort((a,b)=>b[1].n-a[1].n);
   if(types.length){
