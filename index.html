@@ -1176,17 +1176,17 @@ function isPlatformOwner(){
 // That is a migration choice, not a security one: a new account gets no access
 // it was not given, but an old account keeps what it already had. Assign roles
 // deliberately rather than relying on the default.
-const ROLE_SLT='slt', ROLE_YEAR='year_leader', ROLE_TUTOR='tutor';
-const ROLE_BAD='__invalid';
+// String literals rather than constants: this runs during boot, before any
+// const further down the file has been initialised.
 function userRole(){
-  if(isPlatformOwner()) return ROLE_SLT;
+  if(isPlatformOwner()) return 'slt';
   var r=null;
-  try{ var u=authUser(); r=u&&u.app_metadata&&u.app_metadata.role; }catch(e){ return ROLE_BAD; }
+  try{ var u=authUser(); r=u&&u.app_metadata&&u.app_metadata.role; }catch(e){ return '__invalid'; }
   // Never assigned is the migration case: behave exactly as before.
   // Assigned but unrecognised is a misconfiguration, and a typo in a role name
   // must not hand someone the whole school.
-  if(r==null||r==='') return ROLE_SLT;
-  return (r===ROLE_TUTOR||r===ROLE_YEAR||r===ROLE_SLT)?r:ROLE_BAD;
+  if(r==null||r==='') return 'slt';
+  return (r==='tutor'||r==='year_leader'||r==='slt')?r:'__invalid';
 }
 function userScope(){
   try{ var u=authUser(); return (u&&u.app_metadata&&u.app_metadata.scope)||null; }catch(e){ return null; }
@@ -1197,10 +1197,10 @@ function userScope(){
 // account is misconfigured and must be given nothing.
 function dataScopePath(){
   var role=userRole(), sc=userScope();
-  if(role===ROLE_SLT) return '';
-  if(role===ROLE_BAD||!sc) return null;   // scoped role with no scope, or a bad role
-  if(role===ROLE_TUTOR) return 'tutor/'+encodeURIComponent(String(sc))+'/';
-  if(role===ROLE_YEAR){
+  if(role==='slt') return '';
+  if(role==='__invalid'||!sc) return null;   // scoped role with no scope, or a bad role
+  if(role==='tutor') return 'tutor/'+encodeURIComponent(String(sc))+'/';
+  if(role==='year_leader'){
     var y=String(sc).replace(/\D+/g,'');
     return y?('year/'+encodeURIComponent(y)+'/'):null;
   }
@@ -1669,7 +1669,7 @@ async function checkAdmin(){
     }catch(e){ IS_ADMIN=false; }          // fail closed: treat as non-admin on any error
   }
   // A scoped account never gets Admin or Upload, even if it appears in `admins`.
-  const _cfgOK=IS_ADMIN&&userRole()===ROLE_SLT;
+  const _cfgOK=IS_ADMIN&&userRole()==='slt';
   try{const b=document.getElementById('tab-admin'); if(b) b.style.display=_cfgOK?'':'none';}catch(e){}
   try{const u=document.getElementById('tab-upload'); if(u) u.style.display=_cfgOK?'':'none';}catch(e){}
   try{const s=document.getElementById('tab-schools'); if(s) s.style.display=isPlatformOwner()?'':'none';}catch(e){}
