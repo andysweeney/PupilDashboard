@@ -11024,14 +11024,32 @@ function rPeer(){
     const _ygLabel=`Year ${yearGroup}`;
     const _peerLine={borderColor:PAL.slate,backgroundColor:PAL.slate,borderWidth:1.5,borderDash:[5,3],pointRadius:0,tension:.3,fill:false};
     const _tgLine={borderColor:'var(--ac)',backgroundColor:'var(--ac)',borderWidth:2,pointRadius:3,tension:.3,fill:false};
-    const abDatasets=[
-      Object.assign({label:`${_ygLabel} Winsorised`,data:pp.map(p=>winAb(_ygRowsAt(p)))},_peerLine),
-      Object.assign({label:`${tgDisplayName} Winsorised`,data:pp.map(p=>winAb(_tgRowsAt(p)))},_tgLine)
-    ];
-    const efDatasets=[
-      Object.assign({label:`${_ygLabel} Winsorised`,data:pp.map(p=>winEf(_ygRowsAt(p)))},_peerLine),
-      Object.assign({label:`${tgDisplayName} Winsorised`,data:pp.map(p=>winEf(_tgRowsAt(p)))},_tgLine)
-    ];
+    // On "All Tutor Groups" the selected set IS the year group, so the two lines
+    // would sit on top of each other and say nothing. Plot each tutor group
+    // instead, with the year bold over the top — the same shape as the
+    // month-by-month panels. Clicking a name in the key hides that line.
+    const _tgNames=isAllTG
+      ?[...new Set(enrols.filter(r=>r.t==='tg'&&r.u===null).map(r=>r.v))].sort()
+      :[];
+    const _tgSets={};
+    _tgNames.forEach(n=>{ _tgSets[n]=new Set(
+      enrols.filter(r=>r.t==='tg'&&r.v===n&&r.u===null).map(r=>r.x)); });
+    const _formLine=c=>({borderColor:c,backgroundColor:c,borderWidth:1.5,borderDash:[4,3],
+                         pointRadius:0,tension:.3,fill:false});
+    const _yearBold={borderColor:PAL.slate,backgroundColor:PAL.slate,borderWidth:3,
+                     pointRadius:3,tension:.3,fill:false};
+
+    const _sets=(fn)=>isAllTG
+      ? _tgNames.map((n,i)=>Object.assign(
+          {label:n, data:pp.map(p=>fn(ygRows(yearGroup,p).filter(r=>_tgSets[n].has(r[0]))))},
+          _formLine(_HM_FORM_COLORS[i%_HM_FORM_COLORS.length])))
+         .concat([Object.assign({label:`${_ygLabel} Winsorised`,
+                                 data:pp.map(p=>fn(_ygRowsAt(p)))},_yearBold)])
+      : [Object.assign({label:`${_ygLabel} Winsorised`,data:pp.map(p=>fn(_ygRowsAt(p)))},_peerLine),
+         Object.assign({label:`${tgDisplayName} Winsorised`,data:pp.map(p=>fn(_tgRowsAt(p)))},_tgLine)];
+
+    const abDatasets=_sets(winAb);
+    const efDatasets=_sets(winEf);
 
     const allAbVals=abDatasets.flatMap(d=>d.data.filter(v=>v!=null));
     const allEfVals=efDatasets.flatMap(d=>d.data.filter(v=>v!=null));
