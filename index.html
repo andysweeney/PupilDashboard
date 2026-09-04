@@ -3655,6 +3655,37 @@ function rP(){
     if(r5){const tA=dgCalc(lt,r5,'ab'),tE=dgCalc(lt,r5,'ef');yoy+=dgRow('Term Drops:',dgBadges(tA,'drop',CT_AB,false),dgBadges(tE,'drop',CT_EF,true));yoy+=dgRow('Term Gains:',dgBadges(tA,'gain',CT_AB,false),dgBadges(tE,'gain',CT_EF,true))}
     if(!r3&&!r5) yoy+='<div style="font-size:.7rem;color:var(--mu)">Not enough data for comparisons yet</div>';
     yoy+='</div>';
+  } else {
+    // One subject: a value and a direction, not a list of subject badges.
+    const _chg=(prev,mode)=>{
+      if(!prev) return null;
+      const cur=mode==='ab'?(abRk(lt.sc[sf])||0):(lt.sc[sf]?lt.sc[sf][1]:0);
+      const was=mode==='ab'?(abRk(prev.sc[sf])||0):(prev.sc[sf]?prev.sc[sf][1]:0);
+      if(!cur||!was) return null;
+      return {cur:cur,was:was,diff:cur-was};
+    };
+    // Both scales run low-is-better, so a fall in the number is an improvement.
+    const _cell=(c,thresh)=>{
+      if(!c) return '<span style="font-size:.7rem;color:var(--mu);font-style:italic">No comparison</span>';
+      if(c.diff===0) return '<span style="font-size:.7rem;color:var(--mu)">Unchanged ('+c.cur+')</span>';
+      const better=c.diff<0, big=Math.abs(c.diff)>=thresh;
+      const col=better?PAL.green:PAL.red;
+      const bg=better?'rgba(46,148,105,.08)':'rgba(181,72,59,.08)';
+      return '<span style="font-size:.68rem;font-weight:600;color:'+col+';background:'+bg
+        +';border:1px solid '+col+'33;border-radius:4px;padding:.1rem .4rem">'
+        +(better?'\u25b2':'\u25bc')+' '+c.was+' \u2192 '+c.cur
+        +(big?' ('+(better?'gain':'drop')+' '+Math.abs(c.diff)+')':'')+'</span>';
+    };
+    const _row=(label,ab,ef)=>'<div style="display:grid;grid-template-columns:7rem 1fr 1fr;gap:.4rem;align-items:center;min-height:1.6rem">'
+      +'<span style="font-size:.68rem;color:var(--mu)">'+label+'</span><div>'+ab+'</div><div>'+ef+'</div></div>';
+    yoy='<div style="display:flex;flex-direction:column;gap:.35rem;margin-top:.4rem">';
+    yoy+='<div style="display:grid;grid-template-columns:7rem 1fr 1fr;gap:.4rem"><span></span>'
+      +'<span style="font-size:.62rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Ability</span>'
+      +'<span style="font-size:.62rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Effort</span></div>';
+    if(r5) yoy+=_row('Since last term:',_cell(_chg(r5,'ab'),CT_AB),_cell(_chg(r5,'ef'),CT_EF));
+    if(r3) yoy+=_row('Since last year:',_cell(_chg(r3,'ab'),CT_AB),_cell(_chg(r3,'ef'),CT_EF));
+    if(!r3&&!r5) yoy+='<div style="font-size:.7rem;color:var(--mu)">Not enough data for comparisons yet</div>';
+    yoy+='</div>';
   }
 
 
@@ -3809,7 +3840,7 @@ function rP(){
   document.getElementById('p-dist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Sanctions Distribution</div>`;
   document.getElementById('p-dist-hp-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">House Points Distribution</div>`;
   document.getElementById('p-hist-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Historic Grades</div>`;
-  document.getElementById('p-acadprog-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Academic Progress</div>`;
+  document.getElementById('p-acadprog-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">Academic Progress${isA?'':' in '+_upEsc(sf)}</div>`;
 
   // ── Attendance section (summary page) ──
   const _attCard=`<div class="crd"><div class="ct2">Attendance ${ayLabel}${isA?'':' · '+sf}</div><div style="display:flex;align-items:baseline;gap:.9rem;flex-wrap:wrap"><span class="cv2" style="color:${ayAttCol};font-size:2.4rem">${ayAttPct}${ayAttPct==='—'?'':'%'}</span>${isA?'':`<span style="font-size:.8rem;color:var(--mu)">${sf}: <b style="color:${ayAttCol}">${ayAttPct}%</b></span>`}</div><div style="font-size:.7rem;color:var(--mu);margin-top:.3rem">Periods attended this academic year</div></div>`;
@@ -3819,8 +3850,23 @@ function rP(){
   const _hpRecs=(DD.housePoints||[]).filter(r=>r[0]===x&&r[2]>=ayStart&&r[2]<=ayEnd);
   const _hpN=_hpRecs.filter(r=>r[1]===0).length,_pocN=_hpRecs.filter(r=>r[1]===1).length;
   const _hpWt=_hpN*hpWeight(0)+_pocN*hpWeight(1);
-  const _sancCard=`<div class="crd"><div class="ct2">Sanctions ${ayLabel}</div><div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${PAL.orange}">${ayCodes}</span><span style="font-size:.72rem;color:var(--mu)">codes${_ayCatStr}</span></div><div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.45rem;font-size:.78rem"><span style="color:var(--mu)"><b style="color:${PAL.red}">${ayOnCalls}</b> On-calls</span><span style="color:var(--mu)"><b style="color:${PAL.violet}">${ayDetentions}</b> Detentions</span></div></div>`;
-  const _hpCard=`<div class="crd g"><div class="ct2">House Points ${ayLabel}</div><div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${PAL.green}">${_hpN}</span><span style="font-size:.72rem;color:var(--mu)">house points</span></div><div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.45rem;font-size:.78rem"><span style="color:var(--mu)"><b style="color:${PAL.blue}">${_pocN}</b> Positive on-calls</span><span style="color:var(--mu)">Weighted <b style="color:var(--tx)">${_hpWt}</b></span></div></div>`;
+  // With a subject selected, show that subject's share of each figure. Nothing
+  // outside a lesson carries a subject, so the split never sums to the total —
+  // hence "N of M" rather than two independent numbers.
+  const _sSan=isA?null:aySanc.filter(r=>r[3]===sf);
+  const _sHp =isA?null:_hpRecs.filter(r=>r[3]===sf);
+  const _ofBadge=(part,total,col)=>'<span style="color:'+col+'">'+part+'</span>'
+    +'<span style="font-size:.72rem;color:var(--mu)"> of '+total+'</span>';
+  const _subjRow=rows=>rows&&rows.length!==undefined
+    ? '<div style="margin-top:.45rem;padding-top:.4rem;border-top:1px solid var(--bd);font-size:.72rem;color:var(--mu)">'
+      + _upEsc(sf) + ' \u00b7 ' + rows + '</div>'
+    : '';
+  const _sancCard=`<div class="crd"><div class="ct2">Sanctions ${ayLabel}</div><div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${PAL.orange}">${ayCodes}</span><span style="font-size:.72rem;color:var(--mu)">codes${_ayCatStr}</span></div><div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.45rem;font-size:.78rem"><span style="color:var(--mu)"><b style="color:${PAL.red}">${ayOnCalls}</b> On-calls</span><span style="color:var(--mu)"><b style="color:${PAL.violet}">${ayDetentions}</b> Detentions</span></div>${
+    isA?'':_subjRow(`${_ofBadge(_sSan.filter(r=>r[1]===0).length,ayCodes,PAL.orange)} codes \u00b7 ${_ofBadge(_sSan.filter(r=>r[1]===1).length,ayOnCalls,PAL.red)} on-calls \u00b7 ${_ofBadge(_sSan.filter(r=>r[1]===2).length,ayDetentions,PAL.violet)} detentions`)
+  }</div>`;
+  const _hpCard=`<div class="crd g"><div class="ct2">House Points ${ayLabel}</div><div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${PAL.green}">${_hpN}</span><span style="font-size:.72rem;color:var(--mu)">house points</span></div><div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.45rem;font-size:.78rem"><span style="color:var(--mu)"><b style="color:${PAL.blue}">${_pocN}</b> Positive on-calls</span><span style="color:var(--mu)">Weighted <b style="color:var(--tx)">${_hpWt}</b></span></div>${
+    isA?'':_subjRow(`${_ofBadge(_sHp.filter(r=>r[1]===0).length,_hpN,PAL.green)} house points \u00b7 ${_ofBadge(_sHp.filter(r=>r[1]===1).length,_pocN,PAL.blue)} positive on-calls`)
+  }</div>`;
   document.getElementById('p-sanchp-section').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd);margin-bottom:.5rem">Sanctions and House Points</div><div class="crd-g">${_sancCard}${_hpCard}</div>`;
 
   if(hasGrades&&isA){
@@ -3899,7 +3945,7 @@ function rP(){
   const labs=pp.map(p=>PL[PER.indexOf(p)]);
   document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
   const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?abRk(data[p].sc[s])||null:null),_raw:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][0]:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
-  if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?abRk(r[3][sf])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
+  if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?abRk(r[3][sf])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:PAL.slate,borderWidth:1.5,borderDash:[5,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay: subject-specific when single subject, overall when all
   const pAtt=ABP[String(x)];
   const pAttS=ABPS[String(x)];
@@ -3914,7 +3960,7 @@ function rP(){
   }
   sc2('pab',new Chart(document.getElementById('c-pab'),{type:'line',plugins:[_ksMarkerPlugin(pp,ink)].filter(Boolean),data:{labels:labs,datasets:abDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:9},boxWidth:7,padding:6}},tooltip:{callbacks:{label:abTipLabel}}},scales:{y:{min:1,max:ABILITY.n,reverse:true,position:'left',ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},y1:{min:Math.max(0,Math.min(80,Math.min(...(abDS.filter(d=>d.yAxisID==='y1').flatMap(d=>d.data.filter(v=>v!=null))))-5)||80),max:100,position:'right',ticks:{color:PAL.green,font:{size:8},maxTicksLimit:5,padding:2,callback:v=>v+'%'},grid:{display:false},border:{color:'#2d7a4f44'}},x:{ticks:{color:'#6e7686',font:{size:8}},grid:{display:false},border:{color:'#e6dfd0'}}}}}));
   const efDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][1]||null:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
-  if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:'#34d39988',borderWidth:1,borderDash:[3,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
+  if(!isA){efDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const v=rs.map(r=>r[3][sf]?r[3][sf][1]:null).filter(e=>e!=null&&e>0);return v.length?parseFloat((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2)):null}),borderColor:PAL.slate,borderWidth:1.5,borderDash:[5,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay on effort chart
   const pAttE=ABP[String(x)];
   const pAttSE=ABPS[String(x)];
@@ -7246,6 +7292,10 @@ function _hmPeerData(){
   return (ps && ps.byForm && Object.keys(ps.byForm).length) ? ps.byForm : null;
 }
 function _hmPeerMonths(){ return (DD.peerStats && DD.peerStats.months) || null; }
+function _hmPeerYear(y){
+  var by = DD.peerStats && DD.peerStats.byYear;
+  return (by && by[y]) || null;
+}
 
 // The comparison set is the tutor's own year group, not the whole school —
 // comparing a Year 10 form against Year 11 compares two different timetables,
@@ -7356,8 +7406,17 @@ function _hmPeerBar(canvasId, key, rows, me, opts){
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
-          legend: { labels: { color: _HM_TICK, font: _HM_FONT, boxWidth: 9,
-            padding: 7, filter: i => i.text !== 'Year group' } },
+          legend: { labels: { color: _HM_TICK, font: _HM_FONT, boxWidth: 9, padding: 7,
+            // backgroundColor is a per-bar array, so Chart.js would draw both
+            // swatches in the first form's muted colour. Paint them the way the
+            // selected form's bars are actually drawn.
+            generateLabels: ch => Chart.defaults.plugins.legend.labels
+              .generateLabels(ch)
+              .filter(l => l.text !== 'Year group')
+              .map(l => Object.assign(l, {
+                fillStyle:   l.text === 'Mean' ? _hmAlpha(opts.color, 0.32) : opts.color,
+                strokeStyle: opts.color, lineWidth: 1
+              })) } },
           tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + opts.fmt(c.parsed.y) } }
         },
         scales: {
@@ -7496,6 +7555,8 @@ function _hmPanelYTD(){
       + inner + '</div>';
   };
 
+  const winPanel = _hmPanelYTDWinsorised(peers, labels, ps);
+
   return _hmPanel('This year, month by month',
     'Your form is the solid line. The dashed line is the median form in ' + peers.year + '.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
@@ -7504,6 +7565,46 @@ function _hmPanelYTD(){
     + one('Positives per pupil', 'hm-ig-ypos', 'hmIgYPos', mine.pos, med('pos'), PAL.green,
           v => Math.round(v*10)/10, 'No positive behaviour recorded for this year group.')
     + one('Sanctions per pupil', 'hm-ig-yneg', 'hmIgYNeg', mine.neg, med('neg'), PAL.red,
+          v => Math.round(v*10)/10, 'No sanctions recorded yet.')
+    + '</div>') + winPanel;
+}
+
+// The same three charts on Winsorised means: the form against its whole year
+// group rather than against the median form. Winsorising matters more here than
+// on the annual bars, because a single month is a small enough window for one
+// pupil's fortnight off to move the line visibly.
+function _hmPanelYTDWinsorised(peers, labels, ps){
+  if(!ps || !labels || labels.length < 2) return '';
+  const yr = _hmPeerYear(peers.year);
+  if(!yr || !yr.months) return '';
+  const months = _hmPeerMonths();
+  const series = (src, field) => months.map(m => {
+    const row = (src && src.months && src.months[m]) || null;
+    return row && row[field] != null ? row[field] : null;
+  });
+  const mine = ps[peers.me];
+
+  const one = (title, id, key, field, color, fmt, missing) => {
+    const a = series(mine, field), b = series(yr, field);
+    const live = a.filter(v => v != null && v !== 0);
+    const inner = live.length
+      ? _hmLineChart(id, key, labels, a, b, color, fmt)
+      : _hmNote(missing);
+    return '<div style="flex:1;min-width:230px">'
+      + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
+      + inner + '</div>';
+  };
+
+  return _hmPanel('The same, on Winsorised means',
+    'Your form against all of ' + peers.year + ' (' + yr.n + ' pupils), with the highest and '
+    + 'lowest tenth pulled in each month. Where this and the panel above disagree, a small '
+    + 'number of pupils is moving the plain average.',
+    '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
+    + one('Attendance', 'hm-ig-watt', 'hmIgWAtt', 'attW', PAL.sky,
+          v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
+    + one('Positives per pupil', 'hm-ig-wpos', 'hmIgWPos', 'posW', PAL.green,
+          v => Math.round(v*10)/10, 'No positive behaviour recorded for this year group.')
+    + one('Sanctions per pupil', 'hm-ig-wneg', 'hmIgWNeg', 'negW', PAL.red,
           v => Math.round(v*10)/10, 'No sanctions recorded yet.')
     + '</div>');
 }
@@ -10405,6 +10506,27 @@ function rPeer(){
     const o=document.createElement('option');o.value=tg;o.textContent=tg;sel.appendChild(o);
   });
   if(prev==='__all'||[...tgs].includes(prev))sel.value=prev;
+  // A scoped file holds one tutor group, so the picker offers a choice of one.
+  // Show the group as a label rather than a control that does nothing.
+  try{
+    const only = tgs.size===1 ? [...tgs][0] : null;
+    const cg = sel.closest('.cg'), lbl = document.getElementById('tg-sel-fixed');
+    if(cg){
+      if(only){
+        sel.value = only; sel.style.display='none';
+        if(!lbl){
+          const d=document.createElement('div');
+          d.id='tg-sel-fixed';
+          d.style.cssText='font-size:.8rem;font-weight:600;color:var(--tx);padding:.35rem 0';
+          cg.appendChild(d);
+        }
+        document.getElementById('tg-sel-fixed').textContent = only;
+      }else{
+        sel.style.display='';
+        if(lbl) lbl.remove();
+      }
+    }
+  }catch(e){}
   rTG();
   _hmTgCharts();
 }
