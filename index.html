@@ -7885,8 +7885,10 @@ function _hmPanelBySubject(){
     row[id] = (row[id] || 0) + 1;
     row.total++;
   });
+  // Every subject, not a top slice. A subject cut off the bottom looks like a
+  // subject with no sanctions, and nothing on the chart said otherwise.
   const names = Object.keys(subjects)
-    .sort((a,b) => subjects[b].total - subjects[a].total).slice(0, 12);
+    .sort((a,b) => subjects[b].total - subjects[a].total);
 
   const _subjId = _hmId('hm-ig-subject'), _subjKey = _HM_NS + 'hmIgSubject';
   _hmChart(() => {
@@ -7930,7 +7932,10 @@ function _hmPanelBySubject(){
   const _scopeLabel = _hmScopeForm() || _hmScopeYear() || 'this group';
   return _hmPanel('Sanctions in ' + _scopeLabel + ', by subject',
     'Split by incident category. Counts are raw, so a subject taught five times a week will sit higher than one taught once.',
-    _hmCanvas('hm-ig-subject', Math.max(170, names.length * 24 + 46)) + note);
+    // Rows get tighter as the list grows, so a whole year's subjects still fit
+    // on screen without the panel running away.
+    _hmCanvas('hm-ig-subject',
+      Math.max(170, names.length * (names.length > 16 ? 20 : 24) + 46)) + note);
 }
 
 // ── the block, and the one call that mounts it ──
