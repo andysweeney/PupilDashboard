@@ -7020,8 +7020,14 @@ function renderNet(){
     const _w=pairWhen[_pk]||{};
     const _when=Object.keys(_w).sort().map(k2=>k2+' \u00d7'+_w[k2]).join(', ');
     const _esc=v=>String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const _tip=`${_esc(nA.name)} & ${_esc(nB.name)}\nSanctioned together ${e.w} time${e.w===1?'':'s'} in ${_esc(ctx.sub)}${_when?'\n'+_esc(_when):''}`;
-    return`<line x1="${nA.x}" y1="${nA.y}" x2="${nB.x}" y2="${nB.y}" stroke="${PAL.red}" stroke-width="${Math.max(sw2,10)}" stroke-opacity="0" style="cursor:help"><title>${_tip}</title></line>`
+    // Held in an attribute and rendered by the same tooltip box the nodes use,
+    // so an edge and a node look the same on hover.
+    const _tip='<div style="font-weight:600;font-size:.8rem;margin-bottom:.35rem;color:var(--tx)">'
+      + _esc(nA.name)+' &amp; '+_esc(nB.name)+'</div>'
+      + '<div style="font-size:.72rem;color:var(--tx2)">Sanctioned together <b style="color:'+PAL.red+'">'
+      + e.w+'</b> time'+(e.w===1?'':'s')+' in '+_esc(ctx.sub)+'</div>'
+      + (_when?'<div style="font-size:.68rem;color:var(--mu);margin-top:.3rem">'+_esc(_when)+'</div>':'');
+    return`<line x1="${nA.x}" y1="${nA.y}" x2="${nB.x}" y2="${nB.y}" stroke="${PAL.red}" stroke-width="${Math.max(sw2,10)}" stroke-opacity="0" style="cursor:help" data-tip="${_tip.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"/>`
          +`<line x1="${nA.x}" y1="${nA.y}" x2="${nB.x}" y2="${nB.y}" stroke="${PAL.red}" stroke-width="${sw2}" stroke-opacity="${op}" style="pointer-events:none"/>`}).join('');
 
   function buildTip(n){
@@ -7068,9 +7074,12 @@ function renderNet(){
   if(svgEl&&tipEl){
     const svgRect=()=>svgEl.getBoundingClientRect();
     svgEl.addEventListener('mousemove',ev=>{
+      // Nodes carry an id and look their content up; edges carry it inline.
       const circ=ev.target.closest('circle[data-px]');
-      if(!circ){tipEl.style.display='none';return}
-      const html=tipData[parseInt(circ.getAttribute('data-px'))];
+      const line=circ?null:ev.target.closest('line[data-tip]');
+      if(!circ&&!line){tipEl.style.display='none';return}
+      const html=circ?tipData[parseInt(circ.getAttribute('data-px'))]
+                     :line.getAttribute('data-tip');
       if(!html){tipEl.style.display='none';return}
       tipEl.innerHTML=html;tipEl.style.display='block';
       const rect=svgRect();let left=ev.clientX-rect.left+15,top=ev.clientY-rect.top+15;
@@ -11068,7 +11077,12 @@ function rPeer(){
                      .map(k2=>k2+' \u00d7'+_sb[k2]).join(', ');
         const _who=`${s.name}${s.inTG?'':' ('+s.tg+')'} & ${t.name}${t.inTG?'':' ('+t.tg+')'}`;
         const _esc=v=>String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        svg+=`<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="${PAL.red}" stroke-width="${Math.max(w,6)}" stroke-opacity="0" style="cursor:help"><title>${_esc(_who)}\nSanctioned together ${l.weight} time${l.weight===1?'':'s'}\n${_esc(_list)}</title></line>`;
+        const _tipHtml='<div style="font-weight:600;font-size:.8rem;margin-bottom:.35rem;color:var(--tx)">'
+          + _esc(_who)+'</div>'
+          + '<div style="font-size:.72rem;color:var(--tx2)">Sanctioned together <b style="color:'+PAL.red+'">'
+          + l.weight+'</b> time'+(l.weight===1?'':'s')+' in the same lesson</div>'
+          + (_list?'<div style="font-size:.68rem;color:var(--mu);margin-top:.3rem">'+_esc(_list)+'</div>':'');
+        svg+=`<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="${PAL.red}" stroke-width="${Math.max(w,10)}" stroke-opacity="0" style="cursor:help" data-tip="${_tipHtml.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"/>`;
         svg+=`<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}" stroke="${PAL.red}" stroke-width="${w}" stroke-opacity="${op}" style="pointer-events:none"/>`;
         const mx=(s.x+t.x)/2,my=(s.y+t.y)/2;
         svg+=`<text x="${mx}" y="${my-4}" fill="var(--mu)" font-size="7" font-family="IBM Plex Mono" text-anchor="middle">${l.weight}</text>`;
@@ -11081,7 +11095,26 @@ function rPeer(){
         svg+=`<text x="${n.x}" y="${n.y+n.r+14}" fill="var(--mu)" font-size="7" font-family="Hanken Grotesk" text-anchor="middle">${n.name.split(' ').slice(1).join(' ')}${(!n.inTG&&n.tg)?' \u00b7 '+n.tg:''}</text>`;
       });
       svg+=`</svg>`;
+      svg=`<div id="tgnet-wrap" style="position:relative">`+svg
+        +`<div id="tgnet-tip" style="display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.7rem;box-shadow:0 8px 30px rgba(40,34,20,.4);max-width:400px;z-index:999"></div></div>`;
       tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span>${_netCtl}<span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="font-size:.6rem;color:var(--mu);margin-bottom:.5rem">Showing pupils sanctioned together in the same lesson ≥2 times this academic year</div>${svg}</div></div>`;
+      // Same behaviour as the Class network's tooltip: follow the pointer,
+      // flip when it would run off an edge, hide on leave.
+      const _tw=document.getElementById('tgnet-wrap'),_tt=document.getElementById('tgnet-tip');
+      if(_tw&&_tt){
+        _tw.addEventListener('mousemove',ev=>{
+          const ln=ev.target.closest('line[data-tip]');
+          if(!ln){_tt.style.display='none';return}
+          _tt.innerHTML=ln.getAttribute('data-tip');
+          _tt.style.display='block';
+          const r=_tw.getBoundingClientRect();
+          let left=ev.clientX-r.left+15, top=ev.clientY-r.top+15;
+          if(left+_tt.offsetWidth>r.width) left=Math.max(5,ev.clientX-r.left-_tt.offsetWidth-10);
+          if(top+_tt.offsetHeight>r.height) top=Math.max(5,ev.clientY-r.top-_tt.offsetHeight-10);
+          _tt.style.left=left+'px'; _tt.style.top=top+'px';
+        });
+        _tw.addEventListener('mouseleave',()=>{_tt.style.display='none'});
+      }
     }else{
       tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=this.nextElementSibling;bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Sanction Pair Network — ${tgDisplayName}</span>${_netCtl}<span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div><div class="tt-hide" style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No significant sanction pairs found</div></div></div>`;
     }
