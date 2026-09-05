@@ -147,7 +147,6 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <button class="tb" onclick="sw('compare',this)">📈 Cross Year Comparison</button>
 <button class="tb" onclick="sw('progression',this)">📊 Year Progression Comparison</button>
 <button class="tb" onclick="sw('teacher',this)">👩‍🏫 Teacher</button>
-<button class="tb" onclick="sw('behaviour',this)">⚠️ Behavioural Concerns</button>
 <button class="tb" onclick="sw('pairs',this)">👥 Problem Groups</button>
 <button class="tb" onclick="sw('send',this)">🎯 SEND Focus</button>
 <button class="tb" onclick="sw('analytics',this)">📊 Analytics</button>
@@ -1213,7 +1212,7 @@ const ROLE_TABS={
   __invalid:[],
   tutor:['hmtutor','tutor','pupil'],
   year_leader:['hmtutor','hmyear','tutor','pupil','class','subject','classcomp','tgcomp',
-               'behaviour','pairs','send','sanctions','concerns','slotavoid','peer','analytics','teacher']
+               'pairs','send','sanctions','concerns','slotavoid','peer','analytics','teacher']
 };
 function tabAllowed(view){
   if(view==='schools') return isPlatformOwner();
@@ -2148,7 +2147,7 @@ function firstName(px){
 }
 
 // Concern thresholds (global)
-let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=3, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
+let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=5, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
 let AP_MULT=2.0, AP_HIGH_ABS=40;
 let CT_AT=1.3, CT_AM=3;
 let CT_PA_WIN=20, CT_PA_PCT=10;
@@ -2246,7 +2245,7 @@ function applyThresholdValues(v){
 
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
-  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:3, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10,
+  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10,
   CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
   SA_MIN_TOTAL:6, SA_MIN_TEACHER:3, SA_RATIO:2.0, SA_ENGAGE:3,
@@ -2320,7 +2319,7 @@ function applyCT(){
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
   CT_SC=parseFloat(document.getElementById('ct-sc').value)||1.5;
-  CT_MN=parseInt(document.getElementById('ct-mn').value)||3;
+  CT_MN=parseInt(document.getElementById('ct-mn').value)||5;
   CT_AT=parseFloat(document.getElementById('ct-at').value)||1.3;
   CT_AM=parseInt(document.getElementById('ct-am').value)||3;
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
@@ -11831,11 +11830,43 @@ function rPeer(){
       items.push({type:'att-pa',subkey:'',label:'Persistent Absence',severity:'red',detail:`${fn} has been absent for ${aPA.absent} Periods in the last ${CT_PA_WIN} school days (${aPA.rate.toFixed(1)}% absence rate).`});
     }
     // 3. Sanctions Accelerating
-    const s20=sanRAMod(px,yg,20),s60=sanRAMod(px,yg,60);
-    const sCount20=sanCountInMod(px,yg,20);
-    if(s20>s60*CT_SC && s60>0 && sCount20>=CT_MN){
-      const sev=s20>s60*2?'red':'amber';
-      items.push({type:'sanc-accel',subkey:'',label:'Sanctions Accelerating',severity:sev,detail:`${fn} has had ${sCount20} sanctions in the last 20 school days (a weighted score of ${s20.toFixed(1)} compared with their weighted 60 school day average of ${s60.toFixed(1)}). This is ${(s20/s60).toFixed(1)}× the rolling weighted average.`});
+    // Absorbs what the separate Behavioural Concerns tab used to do. That tab
+    // ran the same weighted-rate ratio on 10-vs-20 and 10-vs-100 windows, while
+    // this ran 20-vs-60 — so the two produced different lists from the same
+    // test and nothing explained the difference. Three windows now, one place.
+    //
+    //   Immediate : 10 against 20  — something happened in the last fortnight
+    //   Building  : 10 against 100 — a rise that has been underway for months
+    //   Rising    : 20 against 60  — the original, slower signal
+    const s10=sanRAMod(px,yg,10),s20=sanRAMod(px,yg,20),
+          s60=sanRAMod(px,yg,60),s100=sanRAMod(px,yg,100);
+    const sCount10=sanCountInMod(px,yg,10),sCount20=sanCountInMod(px,yg,20);
+    const _imm =s10>s20*CT_SC  && s20>0  && sCount10>=CT_MN;
+    const _bld =s10>s100*CT_SC && s100>0 && sCount10>=CT_MN;
+    const _rise=s20>s60*CT_SC  && s60>0  && sCount20>=CT_MN;
+    if(_imm||_bld||_rise){
+      // Which subject the recent sanctions are in. Named only when one subject
+      // holds most of them — otherwise it is spread and saying "Maths" misleads.
+      const _sd=_cnYgSDMod&&_cnYgSDMod[yg]?_cnYgSDMod[yg]:_cnSDMod;
+      const _end=(_cnYgLatestMod&&_cnYgLatestMod[yg])||(_sd.length?_sd[_sd.length-1]:'');
+      const _cut=_sd.length>10?_sd[_sd.length-10]:(_sd[0]||'');
+      const _recent=(DD.sanctions||[]).filter(r=>r[0]===px&&r[2]>=_cut&&r[2]<=_end);
+      const _bySub={};
+      _recent.forEach(r=>{const k=r[3]||'Non-Lesson';_bySub[k]=(_bySub[k]||0)+1;});
+      const _top=Object.keys(_bySub).sort((a,b)=>_bySub[b]-_bySub[a])[0];
+      const _conc=_top&&_recent.length?_bySub[_top]/_recent.length:0;
+      const _where=(_top&&_conc>=0.6)
+        ? (_top==='Non-Lesson'?' Most of them are outside lessons.'
+                              :` Most of them are in ${_top}.`)
+        : '';
+      const _kind=_imm?'Immediate':(_bld?'Building':'Rising');
+      const _sev=(_imm&&s10>s20*2)||(_bld&&s10>s100*2)||(s20>s60*2)?'red':'amber';
+      const _detail=_imm
+        ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against ${s20.toFixed(1)} over 20 days, ${(s10/s20).toFixed(1)}\u00d7.${_where}`
+        : _bld
+        ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against a 100-day average of ${s100.toFixed(1)}, ${(s10/s100).toFixed(1)}\u00d7. This has been building rather than sudden.${_where}`
+        : `${fn} has had ${sCount20} sanctions in the last 20 school days \u2014 a weighted score of ${s20.toFixed(1)} against a 60-day average of ${s60.toFixed(1)}, ${(s20/s60).toFixed(1)}\u00d7.${_where}`;
+      items.push({type:'sanc-accel',subkey:'',label:'Sanctions '+_kind,severity:_sev,detail:_detail});
     }
     // 4. Absence Pattern (slot-level)
     const absAnalysis=analyseAbsencePattern(px, String(CAY));
@@ -13079,7 +13110,7 @@ function rPeer(){
           'A pupil is flagged when their recent (10sd) weighted sanction score is significantly higher than their previous pattern (20sd or 100sd).',
           'Concerns tab → Pupil Concerns; Behavioural Concerns tab; Pupil tab',
           inputRow('Acceleration multiplier','ct-sc',CT_SC,{min:0.5,max:5,step:0.1,hint:'Recent sanction score must exceed the older score by this multiplier to fire. Default 1.5×.'})+
-          inputRow('Minimum recent sanctions','ct-mn',CT_MN,{min:0,max:50,step:1,hint:'A pupil must have at least this many sanctions in the recent window before flagging. Default 3.'})
+          inputRow('Minimum recent sanctions','ct-mn',CT_MN,{min:0,max:50,step:1,hint:'A pupil must have at least this many sanctions in the recent window before flagging. At 3 a pupil could be flagged on three codes in two days, which is usually noise. Default 5.'})
         )}
         ${groupPanel(
           'Absence Pattern (Slot Avoidance)',
