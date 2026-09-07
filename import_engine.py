@@ -421,17 +421,44 @@ def period_label(p):
 # aggregation, a report is not.
 _MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-def collection_label(iso):
-    """'2025-11-14' -> '14 Nov 2025', for display."""
-    try:
-        return f"{int(iso[8:10])} {_MONTHS[int(iso[5:7]) - 1]} {iso[:4]}"
-    except Exception:
-        return iso
+# A collection is identified by its real date when the export carries one, and by
+# the school's own term label when it does not. Nominal dates are used ONLY to
+# put label-only collections in the right order — they are never displayed,
+# because an invented date on a chart axis reads as a fact.
+_NOMINAL = {'T1': '11-15', 'T2': '02-15', 'T3': '06-15'}
 
-def collection_in_cohort(iso, intake, cay):
-    """Is this collection inside the cohort's school career? Same bounds the term
-    grid used: intake year onwards, stopping at the end of Year 13."""
-    ay = acad_year(iso)
+def is_dated(c):
+    return bool(c) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(c)))
+
+def collection_sort_date(c):
+    """An ISO date for ordering. Real when we have one, nominal when we do not."""
+    if is_dated(c):
+        return c
+    m = re.fullmatch(r'(T[123])\s+(\d{4})', str(c) or '')
+    if not m:
+        return '9999-12-31'
+    t, ay = m.group(1), int(m.group(2))
+    md = _NOMINAL[t]
+    return f"{ay if t == 'T1' else ay + 1}-{md}"
+
+def collection_ay(c):
+    return acad_year(collection_sort_date(c))
+
+def collection_label(c):
+    """Display: a real date as '14 Nov 2025'; a term as the school sees it."""
+    if is_dated(c):
+        try:
+            return f"{int(c[8:10])} {_MONTHS[int(c[5:7]) - 1]} {c[:4]}"
+        except Exception:
+            return c
+    try:
+        return period_label(c)          # 'T1 2025' -> 'T1 2025-2026'
+    except Exception:
+        return str(c)
+
+def collection_in_cohort(c, intake, cay):
+    """Inside the cohort's school career? Same bounds the term grid used."""
+    ay = collection_ay(c)
     if ay is None:
         return False
     return intake <= ay <= cay and (ay - intake + 7) <= 13
@@ -1064,17 +1091,15 @@ if len(reports):
         if _has_date:
             term = parse_date_flex(row.get('Date'))
         if term is None and _has_term:
-            # Older exports carry only 'T1 2025'. Give it a nominal mid-term date
-            # so everything downstream sits on one axis rather than two.
+            # No date in the export: keep the school's own term label as the
+            # collection's identity rather than inventing a date for it.
             tv = _norm_raw(row.get('Term'))
             if tv and re.fullmatch(r'T[123]\s+\d{4}', tv):
-                _t, _y = tv.split(' ')
-                term = {'T1': f'{_y}-11-15', 'T2': f'{int(_y)+1}-02-15',
-                        'T3': f'{int(_y)+1}-06-15'}[_t]
+                term = tv
         if term is None:
             _rep_no_term += 1
             continue
-        _ay = acad_year(term)
+        _ay = collection_ay(term)
         if _ay is None:
             _rep_no_term += 1
             continue
@@ -1439,9 +1464,12 @@ print(f"Periods ({len(periods_list)}): {periods_list}")
 # Report collections: every date a report was actually collected on, in order.
 # Derived from the data rather than generated from a calendar, so a school
 # running two a term or eight a year is represented as it is.
-collections_list = sorted({d for _scores in report_scores.values() for d in _scores})
+collections_list = sorted({d for _scores in report_scores.values() for d in _scores},
+                          key=collection_sort_date)
 collection_labels = [collection_label(c) for c in collections_list]
+_dated = sum(1 for c in collections_list if is_dated(c))
 print(f"Report collections ({len(collections_list)}): {collections_list}")
+print(f"  {_dated} carry a real date, {len(collections_list) - _dated} are term labels only")
 
 progress = {}
 for intake in INTAKES:
@@ -2083,12 +2111,125 @@ def _build_peer_stats(full):
             'byForm': by_form, 'byYear': year_rows}
 
 
+# ── Cohort statistics ─────────────────────────────────────────────────────────
+# Two comparisons the year-group aggregates above cannot answer:
+#   current  — my year against the other year groups in the school right now
+#   historic — my year against the same year group in previous cohorts
+#
+# Both are aggregates only: counts and means per cohort, no pupil-level data, so
+# a scoped file can carry them without widening what an account can see. Months
+# are indexed from September rather than dated, so October in 2023 lines up with
+# October in 2025.
+_AY_MONTHS = ['Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug']
+
+def _build_cohort_stats(full):
+    cfg = full['config']
+    date_index = full['dateIndex']
+    reg = full['registry']
+    week_lessons = full.get('weekLessons') or {}
+    if not week_lessons:
+        return None
+    # Local, so this block stands on its own if lifted out of the engine.
+    _ay = lambda iso: int(iso[:4]) if int(iso[5:7]) >= 9 else int(iso[:4]) - 1
+
+    vals = list(week_lessons.values())
+    per_day = (sum(vals) / len(vals)) / 5 if vals else 5
+    today = _date.today().isoformat()
+
+    # School days per academic year, and per month-of-year within it.
+    days_by_ay = defaultdict(list)
+    for wk in sorted(week_lessons):
+        d0 = _date.fromisoformat(wk)
+        for off in range(5):
+            iso = (d0 + timedelta(days=off)).isoformat()
+            if iso <= today:
+                days_by_ay[_ay(iso)].append(iso)
+
+    supp = {str(k): set(v) for k, v in (full.get('suppressedAbsences') or {}).items()}
+
+    # Absent periods per pupil per academic year, and per month index.
+    abs_ay = defaultdict(lambda: defaultdict(int))
+    abs_m  = defaultdict(lambda: defaultdict(int))
+    for px, by_date in (full.get('attAbsSubj') or {}).items():
+        seen, sp = set(), supp.get(str(px), set())
+        for dk, lessons in by_date.items():
+            iso = date_index[int(dk)] if int(dk) < len(date_index) else None
+            if not iso:
+                continue
+            ay = _ay(iso)
+            mi = (int(iso[5:7]) - 9) % 12
+            for lesson in lessons:
+                k = f'{iso}|{lesson[1]}'
+                if k in sp or k in seen:
+                    continue
+                seen.add(k)
+                abs_ay[str(px)][ay] += 1
+                abs_m[str(px)][(ay, mi)] += 1
+
+    def _counts(arr):
+        tot = defaultdict(lambda: defaultdict(int))
+        mon = defaultdict(lambda: defaultdict(int))
+        for r in (full.get(arr) or []):
+            iso = date_index[r[2]] if isinstance(r[2], int) else r[2]
+            ay = _ay(iso)
+            tot[str(r[0])][ay] += 1
+            mon[str(r[0])][(ay, (int(iso[5:7]) - 9) % 12)] += 1
+        return tot, mon
+    pos_ay, pos_m = _counts('housePoints')
+    neg_ay, neg_m = _counts('sanctions')
+
+    by_intake = defaultdict(list)
+    for px, r in reg.items():
+        if r.get('intake'):
+            by_intake[int(r['intake'])].append(str(px))
+
+    rnd = lambda x: None if x is None else round(x, 3)
+    out = {}
+    for intake, pxs in by_intake.items():
+        for ay, days in days_by_ay.items():
+            yg = ay - intake + 7
+            if not (7 <= yg <= 13) or not days:
+                continue
+            scheduled = len(days) * per_day
+            att = [100 - (abs_ay[p][ay] / scheduled * 100) for p in pxs]
+            pv  = [pos_ay[p][ay] for p in pxs]
+            nv  = [neg_ay[p][ay] for p in pxs]
+            if not any(pv) and not any(nv) and not any(abs_ay[p][ay] for p in pxs):
+                continue                       # cohort has no data that year
+
+            months = []
+            for mi in range(12):
+                dm = [d for d in days if (int(d[5:7]) - 9) % 12 == mi]
+                if not dm:
+                    continue
+                sm = len(dm) * per_day
+                months.append({
+                    'm':    _AY_MONTHS[mi],
+                    'att':  round(statistics.fmean([100 - (abs_m[p][(ay, mi)] / sm * 100) for p in pxs]), 3),
+                    'attW': round(_winsor_mean([100 - (abs_m[p][(ay, mi)] / sm * 100) for p in pxs]), 3),
+                    'pos':  round(statistics.fmean([pos_m[p][(ay, mi)] for p in pxs]), 3),
+                    'neg':  round(statistics.fmean([neg_m[p][(ay, mi)] for p in pxs]), 3),
+                })
+
+            out.setdefault(str(yg), {})[str(ay)] = {
+                'n': len(pxs), 'intake': intake,
+                'att': rnd(statistics.fmean(att)), 'attW': rnd(_winsor_mean(att)),
+                'pos': rnd(statistics.fmean(pv)),  'posW': rnd(_winsor_mean(pv)),
+                'neg': rnd(statistics.fmean(nv)),  'negW': rnd(_winsor_mean(nv)),
+                'months': months,
+            }
+    return out or None
+
+
 # ── Write the scoped files ────────────────────────────────────────────────────
 def write_scoped_outputs(full, out_dir=SCOPED_OUT_DIR):
     reg = full['registry']
 
     peer = _build_peer_stats(full)
     if peer:
+        cohorts = _build_cohort_stats(full)
+        if cohorts:
+            peer = dict(peer, byCohort=cohorts)
         full = dict(full, peerStats=peer)
         # The workflow pushes the engine's own output as the school-wide file,
         # so enrich that in place rather than writing a second copy the CI
