@@ -10710,8 +10710,38 @@ const PEER_COLORS=[PAL.orange,PAL.sky,PAL.lilac,PAL.green,PAL.red];
 let peerGroups=[];
 let peerIdCounter=0;
 
+// Which academic year a collection belongs to, for either identity form.
+function _collAY(c){
+  if(/^\d{4}-\d{2}-\d{2}$/.test(c)){
+    const y=+c.slice(0,4),m=+c.slice(5,7);
+    return m>=9?y:y-1;
+  }
+  const m=/^T[123]\s+(\d{4})$/.exec(c);
+  return m?+m[1]:null;
+}
+// The group was always measured at the latest collection, so picking an older
+// cohort gave you them as they are NOW, not as they were at the year group you
+// wanted to compare. This resolves "as Year 10" to the last collection in the
+// academic year that cohort was in Year 10.
+function _peerPeriodFor(intake,periods,at){
+  if(!periods.length) return null;
+  if(!at||at==='latest') return periods[periods.length-1];
+  const want=parseInt(at,10);
+  if(isNaN(want)) return periods[periods.length-1];
+  const inYear=periods.filter(p=>{
+    const ay=_collAY(p);
+    return ay!=null && (ay-intake+7)===want;
+  });
+  return inYear.length?inYear[inYear.length-1]:null;
+}
+
 function peerBuildSelects(id){
   const intOpts=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>`<option value="${ink}">Y${curYG(ink)} (${ink})</option>`).join('');
+  // "Now" keeps the old behaviour. The year-group options are what make a
+  // like-for-like comparison possible: this year's Y10 against a previous
+  // cohort measured when they were Y10, rather than as they are today.
+  const atOpts=`<option value="latest">Now</option>`
+    +[7,8,9,10,11,12,13].map(y=>`<option value="${y}">as Y${y}</option>`).join('');
   const subjOpts=`<option value="all">All Subjects</option>`+SUBS.map(s=>`<option value="${s}">${s}</option>`).join('');
   const color=PEER_COLORS[(peerGroups.findIndex(g=>g.id===id))%PEER_COLORS.length];
   const isFirst=peerGroups[0]&&peerGroups[0].id===id;
@@ -10720,6 +10750,7 @@ function peerBuildSelects(id){
   return`<div id="peer-row-${id}" style="display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;padding:.5rem .6rem;margin-bottom:.3rem;border-radius:8px;border:1px solid var(--bd);background:var(--sf)">
     <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
     <select data-peer="${id}" data-f="intake" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${intOpts}</select>
+    <select data-peer="${id}" data-f="at" onchange="rPeer()" title="When to measure this group. 'Now' uses the latest collection; picking a year group uses the last collection from the year that cohort was in it." style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${atOpts}</select>
     <select data-peer="${id}" data-f="fsm" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">FSM: Any</option><option value="Y">FSM: Y</option><option value="N">FSM: N</option></select>
     <select data-peer="${id}" data-f="ehcp" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">EHCP: Any</option><option value="Y">EHCP: Y</option><option value="N">EHCP: N</option></select>
     <select data-peer="${id}" data-f="send" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">SEND: Any</option><option value="Y">Any SEND</option><option value="N">No SEND</option><option value="K">SEN Support</option><option value="E">EHCP</option><option value="Add">Additional Help</option><option value="Strat">Strategies</option><option value="Ncode">Monitoring</option></select>
@@ -10751,20 +10782,27 @@ function peerDelRow(id){
 
 function peerGetFilters(id){
   const sel=(f)=>{const el=document.querySelector(`[data-peer="${id}"][data-f="${f}"]`);return el?el.value:'any'};
-  return{intake:parseInt(sel('intake')),fsm:sel('fsm'),ehcp:sel('ehcp'),send:sel('send'),gender:sel('gender'),subject:sel('subject'),attband:sel('attband')};
+  return{intake:parseInt(sel('intake')),at:sel('at'),fsm:sel('fsm'),ehcp:sel('ehcp'),send:sel('send'),gender:sel('gender'),subject:sel('subject'),attband:sel('attband')};
 }
 
+// Returns noPeriod when a cohort has no collection in the year group asked for
+// — e.g. asking for this year's Y10 "as Y11", which has not happened yet.
 function peerFilterPupils(filters){
-  const {intake,fsm,ehcp,send,gender,subject,attband}=filters;
+  const {intake,at,fsm,ehcp,send,gender,subject,attband}=filters;
   const ik=`I${intake}`;
   const pp2=ygPeriods(curYG(intake));
   if(!pp2.length) return{pupils:[],periods:pp2};
-  const lp=pp2[pp2.length-1];
+  const lp=_peerPeriodFor(intake,pp2,at);
+  if(!lp) return{pupils:[],periods:pp2,noPeriod:true};
   const lr=ygRows(curYG(intake),lp);
   const WLK=DD.weekLessons||{};
-  const ayStart=`${intake}-09-01`;
+  // Attendance is measured over the same window as the grades, so "as Year 10"
+  // compares like with like rather than a snapshot against a whole career.
+  const _atAY=(at&&at!=='latest')?(intake+parseInt(at,10)-7):null;
+  const ayStart=_atAY!=null?`${_atAY}-09-01`:`${intake}-09-01`;
   const _pToday=new Date();
-  const _pTodayISO=`${_pToday.getFullYear()}-${String(_pToday.getMonth()+1).padStart(2,'0')}-${String(_pToday.getDate()).padStart(2,'0')}`;
+  let _pTodayISO=`${_pToday.getFullYear()}-${String(_pToday.getMonth()+1).padStart(2,'0')}-${String(_pToday.getDate()).padStart(2,'0')}`;
+  if(_atAY!=null){ const _end=`${_atAY+1}-08-31`; if(_end<_pTodayISO) _pTodayISO=_end; }
 
   let filtered=lr.filter(r=>{
     const px=r[0];
