@@ -3546,14 +3546,14 @@ function rP(){
   }
   auditLog('pupil_view_opened','pupil',x);
   const pu=REG[x],ink=pu.intake,en=getEn(ink,x),data=getProg(ink,x),ctg=curTG(en);
-  const pp=PER.filter(p=>data[p]),nP=pp.length;
+  const pp=COLL.filter(p=>data[p]),nP=pp.length;
   // hasGrades: true if ANY period has subject grades (not just the latest — Spring grades
   // arrive before Summer, KS3 sometimes only reports terminally, etc.).
   const hasGrades=nP>0&&pp.some(p=>Object.keys(data[p]?.sc||{}).length>0);
   if(!nP){
     // No progress data at all — still render what we can
     // Create empty data structures
-    const lp=PER[PER.length-1];
+    const lp=COLL[COLL.length-1];
     const lt={sc:{}};
     const sf=document.getElementById('p-sf').value;
     const isA=sf==='all';
@@ -5486,7 +5486,7 @@ function rTV(){
     const recs=tMap[teacher];
     // Default sort: Year Group ascending, then academic year descending, then subject
     const rows=recs.sort((a,b)=>a.yg-b.yg||b.ayI-a.ayI||a.s.localeCompare(b.s)).map(r=>{
-      const allP=PER.filter(p=>(PRG[inkKey(r.ink)]||{})[p]);
+      const allP=COLL.filter(p=>(PRG[inkKey(r.ink)]||{})[p]);
       const ayYear=parseInt(r.ay.split('-')[0]);
       const ayP=allP.filter(p=>{const y=parseInt(p.split(' ')[1]);return y===ayYear});
 
