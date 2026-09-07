@@ -1068,6 +1068,32 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   // ── Boot the app ──
   const CFG=DD.config,REG=DD.registry,PRG=DD.progress,ENR=DD.enrolments;
 let SUBS=CFG.subjects;const PER=CFG.periods,PL=CFG.period_labels,CAY=CFG.current_acad_year;
+// Reports sit on their own dated axis. Terms stay for attendance, which is a
+// genuine per-term aggregation; a report is an event on a date, and bucketing
+// two collections into one term used to make the second overwrite the first.
+// Falls back to the term list so an older data.json still works unchanged.
+const COLL=(CFG.collections&&CFG.collections.length)?CFG.collections:PER;
+const CLBL=(CFG.collection_labels&&CFG.collection_labels.length)?CFG.collection_labels:PL;
+const _COLL_IX={};COLL.forEach((c,i)=>{_COLL_IX[c]=i});
+function collLabel(c){const i=_COLL_IX[c];return i==null?c:(CLBL[i]||c)}
+// Days between two collections, for "the same point last year" rather than
+// "three back", which only held while collections were evenly spaced.
+function collGapDays(a,b){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(a)||!/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+  return Math.abs((new Date(a)-new Date(b))/86400000);
+}
+// The collection closest to `days` before `from`, within a tolerance.
+function collNearBefore(list,from,days,tol){
+  let best=null,bestD=Infinity;
+  list.forEach(c=>{
+    if(c>=from) return;
+    const g=collGapDays(from,c);
+    if(g==null) return;
+    const d=Math.abs(g-days);
+    if(d<tol&&d<bestD){best=c;bestD=d}
+  });
+  return best;
+}
 const ABP=DD.attByPeriod||{}; // {pupilIdx: {period: overall attendance%}}
 const ABPS=DD.attByPeriodSubj||{}; // {pupilIdx: {period: {subject: attendance%}}}
 // AM (ability_map), AG and AN are derived from the resolved ability scale (see below),
@@ -2469,7 +2495,7 @@ function _stageDistSpecs(yearGroup,sub,rowsFn){
 function _renderAbDist(canvasId,key,spec,yearGroup,sub,rowsFn){
   const el=document.getElementById(canvasId);if(!el)return;
   rowsFn=rowsFn||(p=>ygRows(yearGroup,p));
-  const labs=spec.periods.map(p=>PL[PER.indexOf(p)]);
+  const labs=spec.periods.map(p=>collLabel(p));
   const nmap={};if(spec.useNative)spec.levels.forEach(l=>{nmap[String(l.label).toUpperCase()]=l.label;});
   const bandOf=spec.useNative
     ? (cell=>{const t=(cell&&cell[0]!=null)?String(cell[0]).trim().toUpperCase():null;return t!=null?(nmap[t]||null):null;})
@@ -3533,7 +3559,7 @@ function rP(){
     const isA=sf==='all';
     const act=[];
     // Render header
-    const ayLabel=PL[PER.indexOf(lp)]||lp;
+    const ayLabel=collLabel(lp)||lp;
     document.getElementById('p-hd').innerHTML=`<div><h2 style="margin:0;font-size:1.3rem">${pu.id}</h2><div style="font-size:.8rem;color:var(--mu)">TG: ${ctg} · Year ${curYG(ink)} · Intake ${ink}</div></div>`;
     // Clear grade sections
     ['p-crds','p-ch','p-tbl'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
@@ -3552,9 +3578,13 @@ function rP(){
       if(Object.keys(data[pp[i]]?.sc||{}).length>0){ lp=pp[i]; break; }
     }
   }
-  // Pick comparison periods (3 and 5 back from current) — relative to lp, not pp[nP-1]
+  // Comparison collections. Index arithmetic only worked while collections were
+  // three a year and evenly spaced; with dated collections "two back" could be a
+  // fortnight. p5 is the previous collection, p3 the nearest one about a year
+  // earlier — falling back to two back when the dates cannot be parsed.
   const lpIdx=pp.indexOf(lp);
-  const p3=lpIdx>=2?pp[lpIdx-2]:null,p5=lpIdx>=1?pp[lpIdx-1]:null;
+  const p5=lpIdx>=1?pp[lpIdx-1]:null;
+  const p3=collNearBefore(pp,lp,365,150)||(lpIdx>=2?pp[lpIdx-2]:null);
   const lt=data[lp],r3=p3?data[p3]:null,r5=p5?data[p5]:null;
   // Get active subjects from timetable if no grades
   const ttGrid=TT_DATA[String(x)]||[];
@@ -3634,8 +3664,8 @@ function rP(){
     efRkStr=getRankStr(efRanks,x);
 
     // Previous periods with TG rank in brackets
-    abPrv=prevP.map(p=>{const v=abAvg(data[p],act);const rks=tgRanks(p,'ab');const rk=getRankStr(rks,x);return`<span>${PL[PER.indexOf(p)]}: <b>${abGrade(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
-    efPrv=prevP.map(p=>{const v=efAvg(data[p],act);const rks=tgRanks(p,'ef');const rk=getRankStr(rks,x);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
+    abPrv=prevP.map(p=>{const v=abAvg(data[p],act);const rks=tgRanks(p,'ab');const rk=getRankStr(rks,x);return`<span>${collLabel(p)}: <b>${abGrade(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
+    efPrv=prevP.map(p=>{const v=efAvg(data[p],act);const rks=tgRanks(p,'ef');const rk=getRankStr(rks,x);return`<span>${collLabel(p)}: <b>${fN(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
   }else{
     // Single subject: rank within the class the pupil was in at each period
     function clsRankAt(p,metric){
@@ -3654,8 +3684,8 @@ function rP(){
         return ri?`${ord(ri)}/${ranked.length}`:'—';
       }
     }
-    abPrv=prevP.map(p=>{const v=abAvg(data[p],act);const rk=clsRankAt(p,'ab');return`<span>${PL[PER.indexOf(p)]}: <b>${abGrade(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
-    efPrv=prevP.map(p=>{const v=efAvg(data[p],act);const rk=clsRankAt(p,'ef');return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
+    abPrv=prevP.map(p=>{const v=abAvg(data[p],act);const rk=clsRankAt(p,'ab');return`<span>${collLabel(p)}: <b>${abGrade(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
+    efPrv=prevP.map(p=>{const v=efAvg(data[p],act);const rk=clsRankAt(p,'ef');return`<span>${collLabel(p)}: <b>${fN(v)}</b> <span style="font-size:.65rem;color:var(--mu)">(${rk})</span></span>`}).join('');
   }
 
   // Flags + header
@@ -3802,7 +3832,7 @@ function rP(){
     if(start!==null) runs.push({f:start,u:null});
     return runs;
   }
-  function fmtPeriod(p){return PL[PER.indexOf(p)]||p}
+  function fmtPeriod(p){return collLabel(p)||p}
   function flagBadge(label,color,bg,border,runs){
     if(!runs.length)return'';
     const dateStr=runs.map(r=>{
@@ -3913,7 +3943,7 @@ function rP(){
   if(hasGrades&&isA){
     document.getElementById('p-crds').innerHTML=`
     ${_attCard}
-    <div class="crd"><div class="ct2">Avg Ability (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${_abBestLab} = best)</span></div>
+    <div class="crd"><div class="ct2">Avg Ability (${collLabel(lp)}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${_abBestLab} = best)</span></div>
       <div style="display:flex;gap:1rem;align-items:flex-start">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${_abH.valueLabel}</span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abRkStr}</b> in ${ctg}</span></div>
@@ -3923,7 +3953,7 @@ function rP(){
         <div style="flex:0 0 auto">${_scaleBarHtml(_abH.levels,_abH.pos)}</div>
       </div>
     </div>
-    <div class="crd g"><div class="ct2">Avg Effort (${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div>
+    <div class="crd g"><div class="ct2">Avg Effort (${collLabel(lp)}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div>
       <div style="display:flex;gap:1rem;align-items:flex-start">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span><span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efRkStr}</b> in ${ctg}</span></div>
@@ -3953,7 +3983,7 @@ function rP(){
     }
     document.getElementById('p-crds').innerHTML=`
     ${_attCard}
-    <div class="crd"><div class="ct2">${sf} Ability (${PL[PER.indexOf(lp)]})</div>
+    <div class="crd"><div class="ct2">${sf} Ability (${collLabel(lp)})</div>
       <div style="display:flex;gap:1rem;align-items:flex-start">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${_abH.valueLabel}</span>${abClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abClsRkStr}</b> in class</span>`:''}</div>
@@ -3964,7 +3994,7 @@ function rP(){
         <div style="flex:0 0 auto">${_scaleBarHtml(_abH.levels,_abH.pos)}</div>
       </div>
     </div>
-    <div class="crd g"><div class="ct2">${sf} Effort (${PL[PER.indexOf(lp)]})</div>
+    <div class="crd g"><div class="ct2">${sf} Effort (${collLabel(lp)})</div>
       <div style="display:flex;gap:1rem;align-items:flex-start">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(e6)}">${fN(e6)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(e6)}</span></span>${efClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${efClsRkStr}</b> in class</span>`:''}</div>
@@ -3983,7 +4013,7 @@ function rP(){
   // Charts — only render if grades available
   dc('pab');dc('pef');
   if(hasGrades){
-  const labs=pp.map(p=>PL[PER.indexOf(p)]);
+  const labs=pp.map(p=>collLabel(p));
   document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
   const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?abRk(data[p].sc[s])||null:null),_raw:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][0]:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?abRk(r[3][sf])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:PAL.slate,borderWidth:1.5,borderDash:[5,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
@@ -4066,7 +4096,7 @@ function rP(){
 
   // Subject table — collapsible, default collapsed, compact with rotated headers
   if(hasGrades){
-  const rpp=[...pp],rl=rpp.map(p=>{const parts=PL[PER.indexOf(p)].split(' ');return parts[0]+'<br>'+parts[1]});
+  const rpp=[...pp],rl=rpp.map(p=>{const parts=collLabel(p).split(' ');return parts[0]+'<br>'+parts[1]});
   const thStyle='style="writing-mode:vertical-lr;transform:rotate(180deg);text-align:left;padding:.3rem .15rem;font-size:.55rem;white-space:nowrap;min-width:1.2rem;height:4.5rem"';
   const abHdr=rl.map(l=>`<th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ab</span></th>`).join('');
   const efHdr=rl.map(l=>`<th ${thStyle}><span style="color:var(--tx)">${l}</span> <span style="color:var(--mu)">Ef</span></th>`).join('');
@@ -5851,7 +5881,7 @@ function rSEND(){
           pp.forEach(p=>{
             const pRows=(PRG[ik]||{})[p]||[];
             const pRow=pRows.find(row=>row[0]===px);
-            if(pRow&&pRow[flagIdx]) flagPeriods.push(PL[PER.indexOf(p)]||p);
+            if(pRow&&pRow[flagIdx]) flagPeriods.push(collLabel(p)||p);
           });
         }
         const flagDateStr=flagPeriods.length?`${flagPeriods[0]} → present`:'—';
@@ -9502,7 +9532,7 @@ function ygRows(yearGroup,period){
 function ygPeriods(yearGroup){
   for(const[ik,periods]of Object.entries(PRG)){
     const ink=parseInt(ik.slice(1));
-    if(curYG(ink)===yearGroup)return PER.filter(p=>periods[p]);
+    if(curYG(ink)===yearGroup)return COLL.filter(p=>periods[p]);
   }
   return[];
 }
@@ -9538,7 +9568,7 @@ function rSV(){
   // Pick the most recent period that actually has grade data — falls back to last period
   const lp=ygCurrentGradePeriod(yearGroup)||pp[nP-1];
   const lpIdx=pp.indexOf(lp);
-  const labs=pp.map(p=>PL[PER.indexOf(p)]);
+  const labs=pp.map(p=>collLabel(p));
   const lr=ygRows(yearGroup,lp);
 
   // Helper: avg ability for a set of rows
@@ -9560,8 +9590,8 @@ function rSV(){
 
   // Previous 3 periods for prev2
   const prevP=pp.slice(Math.max(0,nP-3),nP-1).reverse();
-  const abPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgAb(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${abGrade(v)}</b></span>`}).join('');
-  const efPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgEf(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
+  const abPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgAb(rs);return`<span>${collLabel(p)}: <b>${abGrade(v)}</b></span>`}).join('');
+  const efPrv=prevP.map(p=>{const rs=ygRows(yearGroup,p);const v=avgEf(rs);return`<span>${collLabel(p)}: <b>${fN(v)}</b></span>`}).join('');
 
   // Sub-group averages at each point in time (current period) — only pupils taking this subject
   const ink=CFG.intakes.find(i=>curYG(i)===yearGroup)||CAY;
@@ -9745,13 +9775,13 @@ function rSV(){
   }else{
 
   document.getElementById('sv-cards').innerHTML=`
-    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div>
+    <div class="crd"><div class="ct2">${sub} Avg Ability (Y${yearGroup} · ${collLabel(lp)}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${_abAvgLabel(_abCells(lr,[sub]),avg)}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
     </div>
-    <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div>
+    <div class="crd g"><div class="ct2">${sub} Avg Effort (Y${yearGroup} · ${collLabel(lp)}) <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span></div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -9839,7 +9869,7 @@ function rCL(){
   const pp=ygPeriods(yearGroup);if(!pp.length){document.getElementById('cl-cards').innerHTML='<div style="color:var(--mu)">No data for Year '+yearGroup+'</div>';document.getElementById('cl-charts').innerHTML='';document.getElementById('cl-alerts').innerHTML='';document.getElementById('cl-network').innerHTML='';document.getElementById('cl-title').innerHTML='';document.getElementById('cl-send-title').innerHTML='';document.getElementById('cl-send').innerHTML='';document.getElementById('cl-perf-title').innerHTML='';const cs=document.getElementById('cl-summary');if(cs)cs.innerHTML='';return}
   const nP=pp.length;
   const lp=ygCurrentGradePeriod(yearGroup)||pp[nP-1];
-  const labs=pp.map(p=>PL[PER.indexOf(p)]);
+  const labs=pp.map(p=>collLabel(p));
 
   // Pupils currently in this class
   const enrols=ygEnrol(yearGroup);
@@ -9877,8 +9907,8 @@ function rCL(){
   const eT=avgE!=null&&avgE5!=null?avgE-avgE5:null;
 
   const prevP=pp.slice(Math.max(0,nP-3),nP-1).reverse();
-  const abPrv=prevP.map(p=>{const rs=clRows(p);const v=avgAb(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${abGrade(v)}</b></span>`}).join('');
-  const efPrv=prevP.map(p=>{const rs=clRows(p);const v=avgEf(rs);return`<span>${PL[PER.indexOf(p)]}: <b>${fN(v)}</b></span>`}).join('');
+  const abPrv=prevP.map(p=>{const rs=clRows(p);const v=avgAb(rs);return`<span>${collLabel(p)}: <b>${abGrade(v)}</b></span>`}).join('');
+  const efPrv=prevP.map(p=>{const rs=clRows(p);const v=avgEf(rs);return`<span>${collLabel(p)}: <b>${fN(v)}</b></span>`}).join('');
 
   function sgAvgAb(flag){return avgAb(lr.filter(r=>r[flag]))}
   function sgAvgEf(flag){return avgEf(lr.filter(r=>r[flag]))}
@@ -10074,7 +10104,7 @@ function rCL(){
   // ── SEND Pupils table ──
   const sendPupils=lr.filter(r=>r[4]||r[5]);
   const last3pp=pp.slice(-3).reverse();
-  const last3labels=last3pp.map(p=>PL[PER.indexOf(p)]);
+  const last3labels=last3pp.map(p=>collLabel(p));
   const aySancStart=`${CAY}-09-01`,aySancEnd=`${CAY+1}-07-31`;
   const aySancAll=(DD.sanctions||[]).filter(s=>lrIdxSet.has(s[0])&&s[2]>=aySancStart&&s[2]<=aySancEnd&&s[3]===sub);
 
@@ -10145,7 +10175,7 @@ function rCL(){
     if(histPeriods.length){
       const cellMaps=histPeriods.map(p=>{const m={};clRows(p).forEach(r=>{if(r[3][sub])m[r[0]]=r[3][sub]});return m;});
       const pupArr=[...classPups].sort((a,b)=>String(REG[String(a)]?.id||a).localeCompare(String(REG[String(b)]?.id||b)));
-      const perHdr=histPeriods.map(pp2=>`<th colspan="2" style="text-align:center;font-size:.58rem;border-left:1px solid var(--bd)">${PL[PER.indexOf(pp2)]}</th>`).join('');
+      const perHdr=histPeriods.map(pp2=>`<th colspan="2" style="text-align:center;font-size:.58rem;border-left:1px solid var(--bd)">${collLabel(pp2)}</th>`).join('');
       const subHdr=histPeriods.map(()=>`<th style="text-align:center;font-size:.52rem;color:var(--mu);font-weight:400;border-left:1px solid var(--bd)">Att</th><th style="text-align:center;font-size:.52rem;color:var(--mu);font-weight:400">Ef</th>`).join('');
       const histBody=pupArr.map((px,i)=>{
         const nm=REG[String(px)]?.id||String(px);
@@ -10196,13 +10226,13 @@ function rCL(){
 
   if(hasGradesCL){
   document.getElementById('cl-cards').innerHTML=`
-    <div class="crd"><div class="ct2">${sub} Class ${cl} Ability (Y${yearGroup} · ${PL[PER.indexOf(lp)]})</div>
+    <div class="crd"><div class="ct2">${sub} Class ${cl} Ability (Y${yearGroup} · ${collLabel(lp)})</div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${_abAvgLabel(_abCells(lr,[sub]),avg)}</span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
     </div>
-    <div class="crd g"><div class="ct2">${sub} Class ${cl} Effort (Y${yearGroup} · ${PL[PER.indexOf(lp)]})</div>
+    <div class="crd g"><div class="ct2">${sub} Class ${cl} Effort (Y${yearGroup} · ${collLabel(lp)})</div>
       <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${eC(avgE)}">${fN(avgE)} <span style="font-size:.8rem;font-weight:600;color:var(--mu)">${efDesc(avgE)}</span></span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(eY,'Year-on-Year')}${chB(eT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${efPrv}</div>
@@ -10334,7 +10364,7 @@ function rCC(){
 
     return`<tr><td>Class ${c}</td><td>${info.tc}</td><td>${info.pups.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${(()=>{let m=0,f=0;info.pups.forEach(px=>{const g=REG[String(px)]?.gender;if(g==='M')m++;else if(g==='F')f++});return`${m}M · ${f}F`})()}</div></td><td style="text-align:center;font-family:'IBM Plex Mono',monospace;${ytdAttCol}">${ytdAttCC!=null?ytdAttCC+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${_abAvgLabel(_abCells(lr,[sub]),avg)}</td><td style="font-weight:600;color:${eC(avgE)}">${efAvgD(avgE)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'—'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'—'}</td><td style="text-align:center;${sendC?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${sendC||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'—'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'—'}</td><td style="text-align:center;${fsmC?'color:var(--blue);font-weight:600':'color:var(--mu)'}">${fsmC||'—'}</td><td style="text-align:center;${clsCodes?'color:var(--orange);font-weight:600;'+sancTipAttrs(clsCodes,clsDetentions,_clsCats):'color:var(--mu)'}">${clsCodes||'—'}</td><td style="text-align:center;color:var(--mu)">${eCodes}${dot(dotC)}</td><td style="text-align:center;${clsOnCalls?'color:var(--red);font-weight:600':'color:var(--mu)'}">${clsOnCalls||'—'}</td><td style="text-align:center;color:var(--mu)">${eOnCalls}${dot(dotO)}</td><td style="text-align:center;${clsDetentions?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${clsDetentions||'—'}</td><td style="text-align:center;color:var(--mu)">${eDets}${dot(dotD)}</td></tr>`}).join('');
 
-  document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--orange)">Exp.</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--red)">Exp.</th><th style="color:var(--violet)">Det.</th><th style="color:var(--violet)">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.getElementById('cc-out').innerHTML=`<div class="dw"><div class="dwt">${sub} — Class Comparison Y${yearGroup} (${collLabel(lp)})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Expected = each pupil's overall sanction rate × their timetable proportion for ${sub}. <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);vertical-align:middle"></span> Actual > Expected <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);vertical-align:middle;margin-left:.4rem"></span> Actual < Expected</div><table class="d ctr"><thead><tr><th>Class</th><th>Teacher</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. Δ</th><th>Ef. Δ</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--orange)">Exp.</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--red)">Exp.</th><th style="color:var(--violet)">Det.</th><th style="color:var(--violet)">Exp.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function rTGC(){
@@ -10375,8 +10405,8 @@ function rTGC(){
     let m=0,f=0;pupSet.forEach(px=>{const g=REG[String(px)]?.gender;if(g==='M')m++;else if(g==='F')f++});
     return`<tr><td style="font-weight:500">${tg}</td><td>${pupSet.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${m}M · ${f}F</div></td><td style="text-align:center;font-family:'IBM Plex Mono',monospace;${attCol}">${ytdAtt!=null?ytdAtt+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${_abAvgLabel(_abCells(lr,SUBS),avg)}</td><td style="font-weight:600;color:${eC(avgE)}">${efAvgD(avgE)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'\u2014'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'\u2014'}</td><td style="text-align:center;${sendC?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${sendC||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'\u2014'}</td><td style="text-align:center;${fsmC?'color:var(--blue);font-weight:600':'color:var(--mu)'}">${fsmC||'\u2014'}</td><td style="text-align:center;${nCodes?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${nCodes||'\u2014'}</td><td style="text-align:center;${nOnCalls?'color:var(--red);font-weight:600':'color:var(--mu)'}">${nOnCalls||'\u2014'}</td><td style="text-align:center;${nDets?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${nDets||'\u2014'}</td></tr>`;
   }).join('');
-  const cmpLabel=p3?PL[PER.indexOf(p3)]:'previous period';
-  document.getElementById('tgc-out').innerHTML=`<div class="dw"><div class="dwt">Tutor Group Comparison \u2014 Y${yearGroup} (${PL[PER.indexOf(lp)]})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Ability and effort are averaged across all subjects (${ABILITY.bestLabel} = best ability). \u0394 columns compare with ${cmpLabel}. Sanctions are this academic year, all subjects.</div><table class="d ctr"><thead><tr><th>Tutor Group</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. \u0394</th><th>Ef. \u0394</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--violet)">Det.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const cmpLabel=p3?collLabel(p3):'previous period';
+  document.getElementById('tgc-out').innerHTML=`<div class="dw"><div class="dwt">Tutor Group Comparison \u2014 Y${yearGroup} (${collLabel(lp)})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Ability and effort are averaged across all subjects (${ABILITY.bestLabel} = best ability). \u0394 columns compare with ${cmpLabel}. Sanctions are this academic year, all subjects.</div><table class="d ctr"><thead><tr><th>Tutor Group</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th>Avg Ef.</th><th>Ab. \u0394</th><th>Ef. \u0394</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--violet)">Det.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 (function(){
@@ -10596,7 +10626,7 @@ function peerComputeSeries(result){
   const labs=[];
 
   periods.forEach(p=>{
-    labs.push(PL[PER.indexOf(p)]||p);
+    labs.push(collLabel(p)||p);
     const pRows=(PRG[ik]||{})[p]||[];
     const pxSet=new Set(pupils.map(r=>r[0]));
 
@@ -11141,7 +11171,7 @@ function rPeer(){
     document.getElementById('tg-perf-body').classList.add('tt-hide');
     document.getElementById('tg-perf-title').innerHTML=`<div class="dwt" style="padding:.75rem 1rem;cursor:pointer;display:flex;align-items:center;gap:.6rem;margin-bottom:0" onclick="const bd=document.getElementById('tg-perf-body');bd.classList.toggle('tt-hide');this.querySelector('.tv-arrow').classList.toggle('tt-open')"><span>Effort and Ability Summary</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${tgDisplayName}</span><span class="tv-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
 
-    const labs=pp.map(p=>PL[PER.indexOf(p)]);
+    const labs=pp.map(p=>collLabel(p));
     const _tgRowsAt=p=>ygRows(yearGroup,p).filter(r=>tgPupilPx.has(r[0]));
     const _ygRowsAt=p=>ygRows(yearGroup,p);
     const _ygLabel=`Year ${yearGroup}`;
