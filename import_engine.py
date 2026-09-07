@@ -1943,6 +1943,28 @@ def _slice_output(full, keep_px):
 # counts in the current academic year, and the Winsorised mean clamps the top
 # and bottom tenth.
 
+# Attendance has a ceiling at 100 and a long tail below, so a Winsorised mean
+# is almost entirely a one-sided operation that lifts the worst attenders: on
+# this school's data the top clamp removes 0.02 points and the bottom adds 1.49.
+# The low tail is the finding, so it is counted rather than trimmed. Bands
+# rather than a single threshold, so the cut can move without a rebuild.
+_ATT_BANDS = [('u85', 85), ('u90', 90), ('u95', 95)]
+
+def _att_bands(vals):
+    out = {k: 0 for k, _ in _ATT_BANDS}
+    out['o95'] = 0
+    for v in vals:
+        if v is None:
+            continue
+        for k, cut in _ATT_BANDS:
+            if v < cut:
+                out[k] += 1
+                break
+        else:
+            out['o95'] += 1
+    return out
+
+
 def _winsor_mean(vals, p=0.10):
     v = sorted(x for x in vals if x is not None)
     if not v:
@@ -2070,6 +2092,7 @@ def _build_peer_stats(full):
         by_form[form] = {
             'year':   reg[pxs[0]].get('year'),
             'n':      len(pxs),
+            'attBands': _att_bands(att),
             'att':    rnd(statistics.fmean(att) if att else None),
             'attW':   rnd(_winsor_mean(att)),
             'pos':    rnd(statistics.fmean(pv) if pv else None),
@@ -2101,6 +2124,7 @@ def _build_peer_stats(full):
         rnd = lambda x: None if x is None else round(x, 3)
         year_rows[yr] = {
             'n': len(pxs),
+            'attBands': _att_bands(att),
             'att': rnd(statistics.fmean(att) if att else None), 'attW': rnd(_winsor_mean(att)),
             'pos': rnd(statistics.fmean(pv)),                   'posW': rnd(_winsor_mean(pv)),
             'neg': rnd(statistics.fmean(nv)),                   'negW': rnd(_winsor_mean(nv)),
@@ -2213,6 +2237,7 @@ def _build_cohort_stats(full):
 
             out.setdefault(str(yg), {})[str(ay)] = {
                 'n': len(pxs), 'intake': intake,
+                'attBands': _att_bands(att),
                 'att': rnd(statistics.fmean(att)), 'attW': rnd(_winsor_mean(att)),
                 'pos': rnd(statistics.fmean(pv)),  'posW': rnd(_winsor_mean(pv)),
                 'neg': rnd(statistics.fmean(nv)),  'negW': rnd(_winsor_mean(nv)),
