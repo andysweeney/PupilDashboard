@@ -10731,10 +10731,18 @@ function _collAY(c){
 // cohort gave you them as they are NOW, not as they were at the year group you
 // wanted to compare. This resolves "as Year 10" to the last collection in the
 // academic year that cohort was in Year 10.
-// Academic years with report collections behind them, newest first.
+// Every academic year the school has data for, newest first. Derived from the
+// attendance calendar as well as the report collections: grades exist for far
+// fewer years than attendance and behaviour, and a year with attendance but no
+// reports is still worth comparing — the grade charts simply come out empty.
 function peerAYs(){
   const set={};
   (COLL||[]).forEach(c=>{const a=_collAY(c);if(a!=null)set[a]=1});
+  Object.keys(DD.schoolDayCounts||{}).forEach(a=>{const n=parseInt(a,10);if(!isNaN(n))set[n]=1});
+  Object.keys(DD.weekLessons||{}).forEach(w=>{
+    const y=+w.slice(0,4),m=+w.slice(5,7);
+    set[m>=9?y:y-1]=1;
+  });
   const out=Object.keys(set).map(Number).sort((a,b)=>b-a);
   return out.length?out:[CAY];
 }
@@ -10810,9 +10818,14 @@ function peerFilterPupils(filters){
   if(!(CFG.intakes||[]).includes(intake)) return{pupils:[],periods:[],noPeriod:true};
   const pp2=ygPeriods(curYG(intake));
   if(!pp2.length) return{pupils:[],periods:pp2,noPeriod:true};
+  // Grades come from the last collection in the chosen year, if there is one.
+  // If there is not, the group is still valid — attendance and sanctions are
+  // recorded whether or not anyone ran a report — so fall back to the latest
+  // collection purely to get the roster and the SEND/EHCP/FSM flags, and let
+  // the grade charts come out empty.
   const inAY=pp2.filter(p=>_collAY(p)===ay);
-  if(!inAY.length) return{pupils:[],periods:pp2,noPeriod:true};
-  const lp=inAY[inAY.length-1];
+  const lp=inAY.length?inAY[inAY.length-1]:pp2[pp2.length-1];
+  const noGrades=!inAY.length;
   const lr=ygRows(curYG(intake),lp);
   const WLK=DD.weekLessons||{};
   // Attendance measured over the same academic year as the grades, so the two
@@ -10869,7 +10882,7 @@ function peerFilterPupils(filters){
     return true;
   });
 
-  return{pupils:filtered,periods:pp2,intake,subject};
+  return{noGrades:noGrades,pupils:filtered,periods:pp2,intake,subject};
 }
 
 function peerComputeSeries(result){
@@ -10979,7 +10992,13 @@ function rPeer(){
     const result=peerFilterPupils(filters);
     const label=peerLabel(filters,result.pupils.length);
     const countEl=document.getElementById('peer-count-'+g.id);
-    if(countEl) countEl.textContent=`n=${result.pupils.length}`;
+    if(countEl){
+      // An empty ability or effort chart is a data gap, not a result. Say which
+      // on the row itself rather than leaving the reader to wonder.
+      countEl.textContent=`n=${result.pupils.length}`
+        +(result.pupils.length&&result.noGrades?' \u00b7 no reports that year':'');
+      countEl.style.color=(result.pupils.length&&result.noGrades)?'var(--orange)':'';
+    }
     if(!result.pupils.length){
       allSeries.push({label,abData:[],efData:[],attData:[],sanc:{codes:[],det:[]},labs:[],color:PEER_COLORS[gi%PEER_COLORS.length]});
       return;
