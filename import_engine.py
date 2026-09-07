@@ -413,6 +413,29 @@ def period_label(p):
     t, ay = p.split(' ')
     return f"{t} {ay}-{int(ay) + 1}"
 
+# ── Report collections ────────────────────────────────────────────────────────
+# Reports used to be bucketed into three terms a year by month, which meant two
+# collections in the same term overwrote each other and a school running four a
+# year silently lost one. A report is an event on a date, so it is keyed by that
+# date. Attendance keeps the term buckets above: attendance per term is a real
+# aggregation, a report is not.
+_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+def collection_label(iso):
+    """'2025-11-14' -> '14 Nov 2025', for display."""
+    try:
+        return f"{int(iso[8:10])} {_MONTHS[int(iso[5:7]) - 1]} {iso[:4]}"
+    except Exception:
+        return iso
+
+def collection_in_cohort(iso, intake, cay):
+    """Is this collection inside the cohort's school career? Same bounds the term
+    grid used: intake year onwards, stopping at the end of Year 13."""
+    ay = acad_year(iso)
+    if ay is None:
+        return False
+    return intake <= ay <= cay and (ay - intake + 7) <= 13
+
 # ── LOAD DATA ──
 print("Loading data files...")
 UP = '/home/claude/import_input'   # staged inputs (concatenated / renamed as needed)
@@ -1035,17 +1058,26 @@ if len(reports):
             _rep_no_subject += 1
             continue
         # Term: prefer a parseable Date; else an explicit 'T{n} {yyyy}' Term value.
+        # Key on the collection date itself. get_term() is still used for
+        # attendance; it is only reports that stop being bucketed.
         term = None
         if _has_date:
-            term = get_term(parse_date_flex(row.get('Date')))
+            term = parse_date_flex(row.get('Date'))
         if term is None and _has_term:
+            # Older exports carry only 'T1 2025'. Give it a nominal mid-term date
+            # so everything downstream sits on one axis rather than two.
             tv = _norm_raw(row.get('Term'))
             if tv and re.fullmatch(r'T[123]\s+\d{4}', tv):
-                term = tv
+                _t, _y = tv.split(' ')
+                term = {'T1': f'{_y}-11-15', 'T2': f'{int(_y)+1}-02-15',
+                        'T3': f'{int(_y)+1}-06-15'}[_t]
         if term is None:
             _rep_no_term += 1
             continue
-        _ay = int(term.split()[1])
+        _ay = acad_year(term)
+        if _ay is None:
+            _rep_no_term += 1
+            continue
         _yg = _ay - registry[p]['intake'] + 7
         ability = map_attainment_scaled(row.get('Ability Value'), _yg, _unmapped_ability)
         if ability is None and ABILITY_VALUE_MAP:
@@ -1404,12 +1436,19 @@ periods_list = sorted(period_set, key=term_sort_key)
 period_labels = [period_label(p) for p in periods_list]
 print(f"Periods ({len(periods_list)}): {periods_list}")
 
+# Report collections: every date a report was actually collected on, in order.
+# Derived from the data rather than generated from a calendar, so a school
+# running two a term or eight a year is represented as it is.
+collections_list = sorted({d for _scores in report_scores.values() for d in _scores})
+collection_labels = [collection_label(c) for c in collections_list]
+print(f"Report collections ({len(collections_list)}): {collections_list}")
+
 progress = {}
 for intake in INTAKES:
     ik = f"I{intake}"
     progress[ik] = {}
     intake_pupils = [p for p, info in registry.items() if info['intake'] == intake]
-    for period in get_periods(intake, CAY):
+    for period in [c for c in collections_list if collection_in_cohort(c, intake, CAY)]:
         rows = []
         for p in intake_pupils:
             rows.append([int(p), registry[p]['id'], registry[p]['reg'],
@@ -1696,6 +1735,10 @@ output = {
         "calibration": _CALIBRATION_EFF,
         "periods": periods_list,
         "period_labels": period_labels,
+        # Reports live on their own dated axis; periods above stay term-based
+        # because attendance per term is a real aggregation.
+        "collections": collections_list,
+        "collection_labels": collection_labels,
         "intakes": sorted(INTAKES, reverse=True),
         "current_acad_year": CAY,
         "real_data": True,
