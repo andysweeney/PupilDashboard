@@ -1976,13 +1976,21 @@ let SUBJ=_buildSUBJ(DD.config.subject_map);
 const _c={};function dc(i){if(_c[i])try{_c[i].destroy()}catch(e){}_c[i]=null}function sc2(i,c){_c[i]=c}
 
 function ygAt(ink,ay){return ay-ink+7}
+// The lowest and highest year groups the school actually teaches, read off the
+// roll rather than assumed. Every filter below hardcoded 7 to 11, which hides
+// Reception to Year 6 at an all-through school and the sixth form at an 11-18.
+const _YG_ALL=(CFG.intakes||[]).map(i=>CAY-i+7).filter(y=>y>=0&&y<=13);
+const YG_MIN=_YG_ALL.length?Math.min.apply(null,_YG_ALL):7;
+const YG_MAX=_YG_ALL.length?Math.max.apply(null,_YG_ALL):11;
+function ygInSchool(ink){const y=CAY-ink+7;return y>=YG_MIN&&y<=YG_MAX}
 function curYG(ink){return ygAt(ink,CAY)}
 // A cohort has LEFT once its current year-group passes the school's top year,
 // unless an admin override forces it. Top year + overrides come from cohort_settings.
 function _cohortTopYear(){return (window.COHORT_CFG&&window.COHORT_CFG.topYear)||11;}
 function _cohortLeft(ink){ const C=window.COHORT_CFG||{topYear:11,left:{}}; const o=(C.left||{})[ink];
   return (o==='left')?true:(o==='active')?false:(curYG(ink)>(C.topYear||11)); }
-function atSchool(ink){return curYG(ink)<=11}
+// Was <=11, so a Year 12 or 13 pupil counted as having left the school.
+function atSchool(ink){return ygInSchool(ink)}
 function inkKey(ink){return'I'+ink}
 
 // Lookups
@@ -5556,7 +5564,7 @@ function popBCTG(){
   sel.innerHTML='<option value="all">All Tutor Groups</option>';
 
   // Collect TGs from matching year groups
-  const ygs=ygVal==='all'?CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)):[parseInt(ygVal)];
+  const ygs=ygVal==='all'?CFG.intakes.filter(ygInSchool).map(ink=>curYG(ink)):[parseInt(ygVal)];
   const tgs=new Set();
   ygs.forEach(yg=>{
     const enrols=ygEnrol(yg);
@@ -5575,7 +5583,7 @@ function rBC(){
   out.innerHTML='<div style="color:var(--mu);padding:1rem">Loading...</div>';
 
   // Get year groups to process
-  const ygs=ygVal==='all'?CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)):[parseInt(ygVal)];
+  const ygs=ygVal==='all'?CFG.intakes.filter(ygInSchool).map(ink=>curYG(ink)):[parseInt(ygVal)];
   const filterLabel=ygVal==='all'?'All Years':`Y${ygVal}`;
   const tgLabel=tgVal==='all'?'All TGs':tgVal;
 
@@ -10640,7 +10648,7 @@ function rTGC(){
     const n=parseInt(String(r&&r.year||'').replace(/\D+/g,''),10);
     if(!isNaN(n)) _ygPresent.add(n);
   });
-  const availYGs=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink))
+  const availYGs=CFG.intakes.filter(ygInSchool).map(ink=>curYG(ink))
     .filter(y=>!_ygPresent.size||_ygPresent.has(y)).sort((a,b)=>a-b);
   const ygDropdowns={
     'sv-yg':{hasAll:false,onChange:'rSV()'},
@@ -10723,25 +10731,29 @@ function _collAY(c){
 // cohort gave you them as they are NOW, not as they were at the year group you
 // wanted to compare. This resolves "as Year 10" to the last collection in the
 // academic year that cohort was in Year 10.
-function _peerPeriodFor(intake,periods,at){
-  if(!periods.length) return null;
-  if(!at||at==='latest') return periods[periods.length-1];
-  const want=parseInt(at,10);
-  if(isNaN(want)) return periods[periods.length-1];
-  const inYear=periods.filter(p=>{
-    const ay=_collAY(p);
-    return ay!=null && (ay-intake+7)===want;
-  });
-  return inYear.length?inYear[inYear.length-1]:null;
+// Academic years with report collections behind them, newest first.
+function peerAYs(){
+  const set={};
+  (COLL||[]).forEach(c=>{const a=_collAY(c);if(a!=null)set[a]=1});
+  const out=Object.keys(set).map(Number).sort((a,b)=>b-a);
+  return out.length?out:[CAY];
 }
+// Year groups the school teaches, oldest first so the sixth form is not buried.
+function peerYGs(){
+  const out=[];
+  for(let y=YG_MAX;y>=YG_MIN;y--) out.push(y);
+  return out;
+}
+function ygName(y){return y===0?'Reception':(y<0?'Nursery':'Year '+y)}
 
 function peerBuildSelects(id){
-  const intOpts=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>`<option value="${ink}">Y${curYG(ink)} (${ink})</option>`).join('');
-  // "Now" keeps the old behaviour. The year-group options are what make a
-  // like-for-like comparison possible: this year's Y10 against a previous
-  // cohort measured when they were Y10, rather than as they are today.
-  const atOpts=`<option value="latest">Now</option>`
-    +[7,8,9,10,11,12,13].map(y=>`<option value="${y}">as Y${y}</option>`).join('');
+  // Academic year plus year group, rather than a cohort plus an offset. It names
+  // the group by where and when — "AY 2024-2025, Year 10" — and the cohort falls
+  // out of the arithmetic (intake = ay - yg + 7). It needs no label for the
+  // cohort itself, so it survives mid-phase entry, sixth forms and all-through
+  // schools, none of which an intake year or a "class of" describes cleanly.
+  const intOpts=peerAYs().map(a=>`<option value="${a}"${a===CAY?' selected':''}>AY ${a}\u2013${a+1}</option>`).join('');
+  const atOpts=peerYGs().map(y=>`<option value="${y}"${y===YG_MAX?' selected':''}>${ygName(y)}</option>`).join('');
   const subjOpts=`<option value="all">All Subjects</option>`+SUBS.map(s=>`<option value="${s}">${s}</option>`).join('');
   const color=PEER_COLORS[(peerGroups.findIndex(g=>g.id===id))%PEER_COLORS.length];
   const isFirst=peerGroups[0]&&peerGroups[0].id===id;
@@ -10749,8 +10761,8 @@ function peerBuildSelects(id){
 
   return`<div id="peer-row-${id}" style="display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;padding:.5rem .6rem;margin-bottom:.3rem;border-radius:8px;border:1px solid var(--bd);background:var(--sf)">
     <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
-    <select data-peer="${id}" data-f="intake" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${intOpts}</select>
-    <select data-peer="${id}" data-f="at" onchange="rPeer()" title="When to measure this group. 'Now' uses the latest collection; picking a year group uses the last collection from the year that cohort was in it." style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${atOpts}</select>
+    <select data-peer="${id}" data-f="intake" onchange="rPeer()" title="The academic year to measure this group in." style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${intOpts}</select>
+    <select data-peer="${id}" data-f="at" onchange="rPeer()" title="The year group. With the academic year this identifies the pupils \u2014 AY 2024\u20132025, Year 10 is last year\u2019s Year 10." style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${atOpts}</select>
     <select data-peer="${id}" data-f="fsm" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">FSM: Any</option><option value="Y">FSM: Y</option><option value="N">FSM: N</option></select>
     <select data-peer="${id}" data-f="ehcp" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">EHCP: Any</option><option value="Y">EHCP: Y</option><option value="N">EHCP: N</option></select>
     <select data-peer="${id}" data-f="send" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">SEND: Any</option><option value="Y">Any SEND</option><option value="N">No SEND</option><option value="K">SEN Support</option><option value="E">EHCP</option><option value="Add">Additional Help</option><option value="Strat">Strategies</option><option value="Ncode">Monitoring</option></select>
@@ -10782,27 +10794,33 @@ function peerDelRow(id){
 
 function peerGetFilters(id){
   const sel=(f)=>{const el=document.querySelector(`[data-peer="${id}"][data-f="${f}"]`);return el?el.value:'any'};
-  return{intake:parseInt(sel('intake')),at:sel('at'),fsm:sel('fsm'),ehcp:sel('ehcp'),send:sel('send'),gender:sel('gender'),subject:sel('subject'),attband:sel('attband')};
+  // The two pickers are an academic year and a year group; the cohort is derived.
+  const ay=parseInt(sel('intake')),yg=parseInt(sel('at'));
+  return{ay:ay,yg:yg,intake:ay-yg+7,fsm:sel('fsm'),ehcp:sel('ehcp'),send:sel('send'),
+         gender:sel('gender'),subject:sel('subject'),attband:sel('attband')};
 }
 
 // Returns noPeriod when a cohort has no collection in the year group asked for
 // — e.g. asking for this year's Y10 "as Y11", which has not happened yet.
 function peerFilterPupils(filters){
-  const {intake,at,fsm,ehcp,send,gender,subject,attband}=filters;
+  const {ay,yg,intake,fsm,ehcp,send,gender,subject,attband}=filters;
   const ik=`I${intake}`;
+  // No such cohort: the school did not have that year group in that year, e.g.
+  // asking for Year 11 in an academic year this cohort had not reached.
+  if(!(CFG.intakes||[]).includes(intake)) return{pupils:[],periods:[],noPeriod:true};
   const pp2=ygPeriods(curYG(intake));
-  if(!pp2.length) return{pupils:[],periods:pp2};
-  const lp=_peerPeriodFor(intake,pp2,at);
-  if(!lp) return{pupils:[],periods:pp2,noPeriod:true};
+  if(!pp2.length) return{pupils:[],periods:pp2,noPeriod:true};
+  const inAY=pp2.filter(p=>_collAY(p)===ay);
+  if(!inAY.length) return{pupils:[],periods:pp2,noPeriod:true};
+  const lp=inAY[inAY.length-1];
   const lr=ygRows(curYG(intake),lp);
   const WLK=DD.weekLessons||{};
-  // Attendance is measured over the same window as the grades, so "as Year 10"
-  // compares like with like rather than a snapshot against a whole career.
-  const _atAY=(at&&at!=='latest')?(intake+parseInt(at,10)-7):null;
-  const ayStart=_atAY!=null?`${_atAY}-09-01`:`${intake}-09-01`;
+  // Attendance measured over the same academic year as the grades, so the two
+  // halves of a comparison cover the same window.
+  const ayStart=`${ay}-09-01`;
   const _pToday=new Date();
   let _pTodayISO=`${_pToday.getFullYear()}-${String(_pToday.getMonth()+1).padStart(2,'0')}-${String(_pToday.getDate()).padStart(2,'0')}`;
-  if(_atAY!=null){ const _end=`${_atAY+1}-08-31`; if(_end<_pTodayISO) _pTodayISO=_end; }
+  const _ayEnd=`${ay+1}-08-31`; if(_ayEnd<_pTodayISO) _pTodayISO=_ayEnd;
 
   let filtered=lr.filter(r=>{
     const px=r[0];
@@ -11874,7 +11892,7 @@ function rPeer(){
     const out=document.getElementById('sa-out');
     out.innerHTML='<div style="color:var(--mu);padding:1rem">Analysing...</div>';
 
-    const ygs=ygVal==='all'?CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)):[parseInt(ygVal)];
+    const ygs=ygVal==='all'?CFG.intakes.filter(ygInSchool).map(ink=>curYG(ink)):[parseInt(ygVal)];
 
     // Collect all pupils
     let allLR=[];
@@ -13838,13 +13856,13 @@ function rPeer(){
     }else if(role==='yl'){
       ygWrap.style.display='';tgWrap.style.display='none';
       if(!ygSel.options.length){
-        const avail=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)).sort((a,b)=>a-b);
+        const avail=CFG.intakes.filter(ygInSchool).map(ink=>curYG(ink)).sort((a,b)=>a-b);
         avail.forEach(yg=>{const o=document.createElement('option');o.value=yg;o.textContent=`Year ${yg}`;ygSel.appendChild(o)});
       }
     }else{
       ygWrap.style.display='';tgWrap.style.display='';
       if(!ygSel.options.length){
-        const avail=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink)).sort((a,b)=>a-b);
+        const avail=CFG.intakes.filter(ygInSchool).map(ink=>curYG(ink)).sort((a,b)=>a-b);
         avail.forEach(yg=>{const o=document.createElement('option');o.value=yg;o.textContent=`Year ${yg}`;ygSel.appendChild(o)});
       }
       // Populate TGs for selected year
@@ -13966,7 +13984,7 @@ function rPeer(){
     let targetYGs=[];
     let targetTG=null;
     if(role==='slt'){
-      targetYGs=CFG.intakes.filter(ink=>curYG(ink)>=7&&curYG(ink)<=11).map(ink=>curYG(ink));
+      targetYGs=CFG.intakes.filter(ygInSchool).map(ink=>curYG(ink));
     }else if(role==='yl'){
       targetYGs=[parseInt(document.getElementById('cn-yg').value)];
     }else{
