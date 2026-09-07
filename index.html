@@ -2190,6 +2190,13 @@ function firstName(px){
 }
 
 // Concern thresholds (global)
+// Recurring seasonal absence: years the month must repeat in, minimum sessions
+// in it, minimum share of that year's absence, and how many months ahead to warn.
+// Two repeats is deliberately loose. Unlike the sanction ratios, a false
+// positive here costs one glance at an attendance record, while a miss costs a
+// fortnight of teaching. Severity carries the distinction: amber at two years,
+// red at three or more.
+let SA_YRS=2, SA_MIN=5, SA_SHARE=40, SA_LEAD=2;
 let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=5, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
 let AP_MULT=2.0, AP_HIGH_ABS=40;
 let CT_AT=1.3, CT_AM=3;
@@ -2289,6 +2296,7 @@ function applyThresholdValues(v){
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
   CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10,
+  SA_YRS:2, SA_MIN:5, SA_SHARE:40, SA_LEAD:2,
   CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
   SA_MIN_TOTAL:6, SA_MIN_TEACHER:3, SA_RATIO:2.0, SA_ENGAGE:3,
@@ -2303,6 +2311,7 @@ const _THRESHOLD_DEFAULTS = {
 const _THRESHOLD_INPUTS = {
   CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
   CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct',
+  SA_YRS:'sa-yrs', SA_MIN:'sa-abs-min', SA_SHARE:'sa-share', SA_LEAD:'sa-lead',
   CG_AT:'cg-at', CG_PA_PCT:'cg-pa-pct', CG_SC:'cg-sc', CG_MN:'cg-mn', CG_EX_PCT:'cg-ex-pct',
   AP_MIN:'ct-ap-min', AP_PCT:'ct-ap-pct', AP_SLOT:'ct-ap-slot', AP_MULT:'ap-mult', AP_HIGH_ABS:'ap-high-abs',
   SA_MIN_TOTAL:'sa-min-total', SA_MIN_TEACHER:'sa-min-teacher', SA_RATIO:'sa-ratio', SA_ENGAGE:'sa-engage',
@@ -2315,7 +2324,7 @@ const _THRESHOLD_INPUTS = {
 
 // Refresh all header display spans from current globals.
 function _refreshThresholdDisplays(){
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
@@ -2363,6 +2372,11 @@ function applyCT(){
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
   CT_SC=parseFloat(document.getElementById('ct-sc').value)||1.5;
   CT_MN=parseInt(document.getElementById('ct-mn').value)||5;
+  SA_YRS=parseInt(document.getElementById('sa-yrs').value)||2;
+  SA_MIN=parseInt(document.getElementById('sa-abs-min').value)||5;
+  SA_SHARE=parseFloat(document.getElementById('sa-share').value)||40;
+  SA_LEAD=parseInt(document.getElementById('sa-lead').value);
+  if(isNaN(SA_LEAD))SA_LEAD=2;
   CT_AT=parseFloat(document.getElementById('ct-at').value)||1.3;
   CT_AM=parseInt(document.getElementById('ct-am').value)||3;
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
@@ -2392,7 +2406,7 @@ function applyCT(){
   TG_SAN_RATIO=parseFloat(document.getElementById('tg-san-ratio').value)||1.5;
   TG_SAN_MIN=parseInt(document.getElementById('tg-san-min').value)||5;
   TG_PA_MIN=parseInt(document.getElementById('tg-pa-min').value)||3;
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
@@ -10682,7 +10696,7 @@ function rTGC(){
     else if(_v==='tutor') popTG();
   }catch(e){ console.warn('[boot] initial view render',e); }
   // Initialise concern threshold display
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
@@ -12112,7 +12126,58 @@ function rPeer(){
       }
       items.push({type:'sanc-conc',subkey:f.teacher,label:'Sanctions Concentration',severity:sev,detail});
     });
-    
+
+    // 7. Recurring Seasonal Absence
+    // The other six say "something is changing now". This says "this recurs every
+    // year and is about to recur again", so it is time-gated: it fires in the
+    // weeks before the month comes round and is silent the rest of the year. A
+    // December flag raised in January is no use to anyone.
+    //
+    // Works on the pupil's own history alone — no school baseline — so it is
+    // just as valid in a tutor's scoped file as in the whole-school one.
+    (function(){
+      const rows=(DD.attAbsSubj||{})[String(px)]||[];
+      if(!rows.length) return;
+      const supp=getSuppressed(px);
+      const byYM={},yrTot={};
+      const seen=new Set();
+      rows.forEach(r=>{
+        const k=r[0]+'|'+r[2];
+        if(supp.has(k)||seen.has(k)) return;
+        seen.add(k);
+        const y=+r[0].slice(0,4),m=+r[0].slice(5,7);
+        const a=m>=9?y:y-1;                       // academic year
+        byYM[a+'|'+m]=(byYM[a+'|'+m]||0)+1;
+        yrTot[a]=(yrTot[a]||0)+1;
+      });
+      const ays=Object.keys(yrTot).map(Number).sort();
+      if(ays.length<SA_YRS) return;
+      const now=new Date(), curM=now.getMonth()+1;
+      const curAY=now.getMonth()+1>=9?now.getFullYear():now.getFullYear()-1;
+      for(let m=1;m<=12;m++){
+        // Only look ahead: how many months until this one comes round again.
+        let ahead=m-curM; if(ahead<0) ahead+=12;
+        if(ahead>SA_LEAD) continue;
+        const hits=ays.filter(a=>a<curAY
+          && (byYM[a+'|'+m]||0)>=SA_MIN
+          && yrTot[a]>0
+          && (byYM[a+'|'+m]/yrTot[a])>=SA_SHARE/100);
+        if(hits.length<SA_YRS) continue;
+        const MNAMES=['January','February','March','April','May','June','July',
+                      'August','September','October','November','December'];
+        const counts=hits.map(a=>byYM[a+'|'+m]);
+        const shares=hits.map(a=>Math.round(byYM[a+'|'+m]/yrTot[a]*100));
+        items.push({type:'seasonal-abs',subkey:String(m),
+          label:'Recurring Seasonal Absence',
+          severity:hits.length>=3?'red':'amber',
+          detail:`${fn} has been absent in ${MNAMES[m-1]} in ${hits.length} of the last `
+            +`${ays.filter(a=>a<curAY).length} years (`+counts.join(', ')+` sessions), each time `
+            +`accounting for ${Math.min.apply(null,shares)}\u2013${Math.max.apply(null,shares)}% of `
+            +`that year's absence. ${MNAMES[m-1]} is `
+            +(ahead===0?'under way now':ahead===1?'next month':`${ahead} months away`)+`.`});
+      }
+    })();
+
     return items;
   }
   function _pocRender(px,items){
@@ -13326,6 +13391,15 @@ function rPeer(){
           'Concerns tab → Pupil Concerns; Behavioural Concerns tab; Pupil tab',
           inputRow('Acceleration multiplier','ct-sc',CT_SC,{min:0.5,max:5,step:0.1,hint:'Recent sanction score must exceed the older score by this multiplier to fire. Default 1.5×.'})+
           inputRow('Minimum recent sanctions','ct-mn',CT_MN,{min:0,max:50,step:1,hint:'A pupil must have at least this many sanctions in the recent window before flagging. At 3 a pupil could be flagged on three codes in two days, which is usually noise. Default 5.'})
+        )}
+        ${groupPanel(
+          'Recurring Seasonal Absence',
+          'Finds pupils who are absent in the same month year after year \u2014 the pattern behind term-time holidays and annual family commitments. Invisible within any single year, because the absence is short and the rest of the year looks fine. Unlike the other triggers this one looks forward: it warns in the weeks before the month comes round, and stays quiet the rest of the year.',
+          'Concerns tab \u2192 Pupil Concerns; Form Tutor and Year Leader lists; Pupil tab',
+          inputRow('Years the month must repeat in','sa-yrs',SA_YRS,{min:2,max:5,step:1,hint:'How many earlier years must show the same month before it is flagged. Two is deliberately loose: a false positive costs one glance at an attendance record, a miss costs a fortnight of teaching. Two years shows amber, three or more shows red. Default 2.'})+
+          inputRow('Minimum sessions in the month','sa-abs-min',SA_MIN,{min:1,max:60,step:1,hint:'How many sessions the pupil must have missed in that month, in each qualifying year. Stops a single afternoon repeating by chance. Default 5.'})+
+          inputRow('Share of the year\u2019s absence (%)','sa-share',SA_SHARE,{min:10,max:100,step:5,hint:'That month must account for at least this share of the pupil\u2019s absence for the year. It is what separates a genuine annual pattern from a pupil who is simply absent a lot. Default 40.'})+
+          inputRow('Warn this many months ahead','sa-lead',SA_LEAD,{min:0,max:6,step:1,hint:'How far in advance to raise the flag. At 2 a December pattern appears from October, giving time to speak to the family before it happens again. Set to 0 to flag only once the month has started. Default 2.'})
         )}
         ${groupPanel(
           'Absence Pattern (Slot Avoidance)',
