@@ -391,13 +391,25 @@ def get_term(date_str):
     else:           t = 3   # Apr-Aug  -> T3
     return f"T{t} {ay}"
 
-def get_periods(intake, cay):
+def get_periods(intake, cay, min_yg=7):
     """Period labels for a cohort: intake (Y7 start year) .. cay, capped at Y13 (end of KS5).
     The cap reaches Year 13 so sixth-form cohorts and the GCSE→A-Level transition are charted;
     cohorts not yet that old simply stop at the current year."""
+    # Iterating from `intake` assumed the cohort's first year at the school was
+    # Year 7. An all-through school has Reception seven years earlier, which
+    # makes the notional Y7 start a FUTURE year — range(intake, cay+1) is then
+    # empty and the whole cohort silently gets no periods. Start from Reception
+    # and let the year-group bounds do the work.
+    # min_yg is the lowest year group the school actually teaches, derived from
+    # the roster rather than assumed. A secondary school passes 7 and nothing
+    # changes; an all-through school passes 0 and Reception is included without
+    # generating seven empty years for every secondary cohort.
     out = []
-    for ay in range(intake, cay + 1):
-        if (ay - intake + 7) > 13:   # past Year 13
+    for ay in range(intake - 7, cay + 1):
+        yg = ay - intake + 7
+        if yg < min_yg:
+            continue
+        if yg > 13:     # past Year 13
             break
         for t in (1, 2, 3):
             out.append(f"T{t} {ay}")
@@ -461,7 +473,8 @@ def collection_in_cohort(c, intake, cay):
     ay = collection_ay(c)
     if ay is None:
         return False
-    return intake <= ay <= cay and (ay - intake + 7) <= 13
+    yg = ay - intake + 7
+    return ay <= cay and MIN_YG <= yg <= 13
 
 # ── LOAD DATA ──
 print("Loading data files...")
@@ -766,6 +779,93 @@ for _p, _L in _ledger.items():
 ehcp_set = {p for p, s in sen_map.items() if s == 'E'}
 send_set = set(sen_map.keys())
 print(f"FSM: {len(fsm_set)}, SEND: {len(send_set)}, EHCP: {len(ehcp_set)}")
+
+# ── DATED SEN / EHCP / FSM SPELLS ─────────────────────────────────────────────
+# The sets above are point-in-time, and worse, the engine stamped them onto every
+# historic collection — so a pupil identified as SEND last month appeared SEND in
+# their Year 9 data too. That makes any historic comparison answer a different
+# question from the one asked, silently.
+#
+# A spell is {code, from, to}, with to=None meaning still open. Read from
+# optional date columns if the export carries them; otherwise one open spell
+# starting from the pupil's first day, which reproduces the old behaviour
+# exactly. Xporter supplies the real thing via StudentSENProvisionHistory and
+# EntitlementHistory, and both drop straight in here.
+_DATE_COLS_FROM = ['Start Date', 'StartDate', 'From', 'From Date', 'Date From', 'Valid From']
+_DATE_COLS_TO   = ['End Date', 'EndDate', 'To', 'To Date', 'Date To', 'Valid To']
+
+def _spell_dates(row):
+    """(from, to) as ISO, or (None, None) when the export carries no dates."""
+    f = t = None
+    for c in _DATE_COLS_FROM:
+        if c in row and pd.notna(row.get(c)):
+            f = parse_date_flex(row.get(c))
+            if f:
+                break
+    for c in _DATE_COLS_TO:
+        if c in row and pd.notna(row.get(c)):
+            t = parse_date_flex(row.get(c))
+            if t:
+                break
+    return f, t
+
+def _add_spell(store, p, code, frm, to):
+    store.setdefault(p, []).append({'code': code, 'from': frm, 'to': to})
+
+sen_spells, fsm_spells = {}, {}
+_dated_sen = _dated_fsm = 0
+
+for df_sen, col_pref in [(sen_y10, 'SEN Status Code'), (sen_y11, 'SEN Status')]:
+    col = col_pref if col_pref in df_sen.columns else ('SEN Status Code' if 'SEN Status Code' in df_sen.columns else 'SEN Status')
+    for _, row in df_sen.iterrows():
+        p = pid(row['Name'])
+        status = row.get(col)
+        if p not in registry or pd.isna(status) or not str(status).strip():
+            continue
+        f, t = _spell_dates(row)
+        if f or t:
+            _dated_sen += 1
+        _add_spell(sen_spells, p, str(status).strip(), f, t)
+
+for _, row in fsm_y10.iterrows():
+    p = pid(row['Name']) if pd.notna(row.get('Name')) else None
+    if p not in registry:
+        continue
+    _elig = str(row.get('Eligible for free meals', '')).strip().upper()[:1]
+    _flag = str(row.get('FSM', '')).strip().upper()[:1]
+    if _elig in ('T', 'Y') or _flag in ('Y', 'T', 'E'):
+        f, t = _spell_dates(row)
+        if f or t:
+            _dated_fsm += 1
+        _add_spell(fsm_spells, p, 'FSM', f, t)
+
+# Anyone flagged by the undated route keeps an open spell, so behaviour is
+# unchanged until real dates arrive.
+for p in send_set:
+    if p not in sen_spells:
+        _add_spell(sen_spells, p, sen_map.get(p, 'K'), None, None)
+for p in fsm_set:
+    if p not in fsm_spells:
+        _add_spell(fsm_spells, p, 'FSM', None, None)
+
+def _spell_active(spells, p, iso):
+    """Was this flag in force on that date? An undated spell counts as always on."""
+    for sp in spells.get(p, ()):
+        if sp['from'] is None and sp['to'] is None:
+            return sp['code']
+        if sp['from'] and iso < sp['from']:
+            continue
+        if sp['to'] and iso > sp['to']:
+            continue
+        return sp['code']
+    return None
+
+def send_at(p, iso):  return _spell_active(sen_spells, p, iso) is not None
+def ehcp_at(p, iso):  return _spell_active(sen_spells, p, iso) == 'E'
+def fsm_at(p, iso):   return _spell_active(fsm_spells, p, iso) is not None
+
+print(f"  dated spells: {_dated_sen} SEN rows, {_dated_fsm} FSM rows carry dates"
+      + ("" if (_dated_sen or _dated_fsm) else " \u2014 none, so flags stay point-in-time"))
 
 # Refresh the ledger from this run's current pupils (leaver rows are left untouched),
 # then persist it so the next rebuild can restore anyone who has since left.
@@ -1448,13 +1548,16 @@ if _hp_unknown_types:
 # ── BUILD PROGRESS ──
 print("Building progress structure...")
 INTAKES = sorted({info['intake'] for info in registry.values()})
+# Lowest year group on the roll. 7 at a secondary, 0 at an all-through school,
+# and it follows the data rather than being declared anywhere.
+MIN_YG = min((CAY - ink + 7) for ink in INTAKES) if INTAKES else 7
 print(f"Active intakes (from registry): {INTAKES}")
 
 # Dynamic period list: union of each cohort's full grid (intake .. CAY, capped Y11)
 # plus any term actually produced from real attendance dates (safety net).
 period_set = set()
 for intake in INTAKES:
-    period_set.update(get_periods(intake, CAY))
+    period_set.update(get_periods(intake, CAY, MIN_YG))
 for _pid, _periods in att_by_period.items():
     period_set.update(k for k in _periods.keys() if k)
 periods_list = sorted(period_set, key=term_sort_key)
@@ -1477,11 +1580,14 @@ for intake in INTAKES:
     progress[ik] = {}
     intake_pupils = [p for p, info in registry.items() if info['intake'] == intake]
     for period in [c for c in collections_list if collection_in_cohort(c, intake, CAY)]:
+        # Resolve the flags as they stood at the collection, not as they stand
+        # today. With no dated data this is the same answer as before.
+        _asOf = period if is_dated(period) else collection_sort_date(period)
         rows = []
         for p in intake_pupils:
             rows.append([int(p), registry[p]['id'], registry[p]['reg'],
                          dict(report_scores.get(p, {}).get(period, {})),
-                         p in send_set, p in ehcp_set, p in fsm_set])
+                         send_at(p, _asOf), ehcp_at(p, _asOf), fsm_at(p, _asOf)])
         progress[ik][period] = rows
 
 # ── BUILD ENROLMENTS ──
@@ -1763,6 +1869,11 @@ output = {
         "calibration": _CALIBRATION_EFF,
         "periods": periods_list,
         "period_labels": period_labels,
+        # Dated spells, so a historic view can ask "was this pupil SEND then"
+        # rather than "are they SEND now". senStatus below stays as the current
+        # snapshot for everything that only needs today.
+        "senSpells": sen_spells,
+        "fsmSpells": fsm_spells,
         # Reports live on their own dated axis; periods above stay term-based
         # because attendance per term is a real aggregation.
         "collections": collections_list,
@@ -2212,7 +2323,7 @@ def _build_cohort_stats(full):
     for intake, pxs in by_intake.items():
         for ay, days in days_by_ay.items():
             yg = ay - intake + 7
-            if not (7 <= yg <= 13) or not days:
+            if not (0 <= yg <= 13) or not days:      # 0 = Reception
                 continue
             scheduled = len(days) * per_day
             att = [100 - (abs_ay[p][ay] / scheduled * 100) for p in pxs]
