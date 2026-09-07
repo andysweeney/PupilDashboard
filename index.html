@@ -154,6 +154,8 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 <button class="tb" onclick="sw('concerns',this)">🚨 Concerns & Congrats</button>
 <button class="tb" onclick="sw('slotavoid',this)">🎯 Slot Avoidance</button>
 <button class="tb" onclick="sw('rebalance',this)">🎚 Rebalance</button>
+<button class="tb" onclick="sw('pgnow',this)">📊 Year Groups Now</button>
+<button class="tb" onclick="sw('pgpast',this)">🕰️ Year Groups Over Time</button>
 <button class="tb" onclick="sw('peer',this)">📊 Peer Group Comparison</button>
 <button class="tb" onclick="window.authSignOut&&window.authSignOut()" style="margin-left:auto" title="Sign out">🔑 Sign out</button>
 </div>
@@ -396,6 +398,17 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 
 <div id="vw-schools" class="vw">
 <div id="schools-out"></div>
+</div>
+
+<div id="vw-pgnow" class="vw">
+<div id="pgnow-out"></div>
+</div>
+
+<div id="vw-pgpast" class="vw">
+<div class="ctl">
+<div class="cg"><label>Year Group</label><select id="pg-yg" onchange="rPGHistoric()"></select></div>
+</div>
+<div id="pgpast-out"></div>
 </div>
 
 <div id="vw-peer" class="vw">
@@ -1238,7 +1251,7 @@ const ROLE_TABS={
   __invalid:[],
   tutor:['hmtutor','tutor','pupil'],
   year_leader:['hmtutor','hmyear','tutor','pupil','class','subject','classcomp','tgcomp',
-               'pairs','send','sanctions','concerns','slotavoid','peer','analytics','teacher']
+               'pairs','send','sanctions','concerns','slotavoid','peer','pgnow','pgpast','analytics']
 };
 function tabAllowed(view){
   if(view==='schools') return isPlatformOwner();
@@ -7136,7 +7149,7 @@ function sw(v,btn){
   // instead, because those also run when the dropdown changes — so switching from
   // 10A to 10B writes its own row, which a tab-level log would miss.
   try{ if(v!=='class'&&v!=='tutor') auditLog('view_opened',null,null,{view:v}); }catch(e){}
-  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class'){popCL();rCL()}else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour'){popBCTG();rBC()}else if(v==='pairs')rPP();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='hmtutor')rHmTutor();else if(v==='hmyear')rHmYear();else if(v==='hmslt')rHmSLT();else rP();
+  if(v==='compare')rCmp();else if(v==='progression')rPrg();else if(v==='teacher')rTV();else if(v==='subject')rSV();else if(v==='class'){popCL();rCL()}else if(v==='tutor')popTG();else if(v==='classcomp')rCC();else if(v==='tgcomp')rTGC();else if(v==='behaviour'){popBCTG();rBC()}else if(v==='pairs')rPP();else if(v==='pgnow')rPGCurrent();else if(v==='pgpast')rPGHistoric();else if(v==='peer'){if(!peerGroups.length)peerAddRow()}else if(v==='send')rSEND();else if(v==='analytics'){try{rAnalytics()}catch(e){document.getElementById('an-subj-scatter').innerHTML='<div style="color:red;padding:1rem">Error: '+e.message+'</div>'}}else if(v==='concerns'){popCNFilters();rCN()}else if(v==='sanctions')rSA();else if(v==='slotavoid')rSlot();else if(v==='rebalance')rRebal();else if(v==='admin')rAdmin();else if(v==='upload')rUpload();else if(v==='schools')rSchools();else if(v==='hmtutor')rHmTutor();else if(v==='hmyear')rHmYear();else if(v==='hmslt')rHmSLT();else rP();
 }
 
 
@@ -7555,7 +7568,10 @@ function _hmPeerBar(canvasId, key, rows, me, opts){
               .generateLabels(ch)
               .filter(l => l.text !== 'Year group')
               .map(l => Object.assign(l, {
-                fillStyle:   l.text === 'Mean' ? _hmAlpha(opts.color, 0.32) : opts.color,
+                // Must match the dataset label exactly. This said 'Mean' and the
+                // labels were later reworded, so neither branch matched and both
+                // swatches came out solid.
+                fillStyle:   l.text === 'All pupils' ? _hmAlpha(opts.color, 0.32) : opts.color,
                 strokeStyle: opts.color, lineWidth: 1
               })) } },
           tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + opts.fmt(c.parsed.y) } }
@@ -7885,8 +7901,16 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
 function _hmPanelBySubject(){
   const pupils = [..._hmPupilsInScope()];
   if(!pupils.length) return '';
-  const ay = _hmAY(), set = new Set(pupils);
+  // Academic year is selectable here, unlike the other panels: a head of year
+  // comparing this cohort with the last one needs the history, and the subject
+  // mix is the part that shifts between years.
+  const set = new Set(pupils);
   const det = (typeof SANC_DET !== 'undefined' && SANC_DET) || DD.sanctionDetails || [];
+  const _ayAll = [...new Set((DD.sanctions || [])
+    .filter(s => set.has(s[0])).map(s => _hmAyOf(s[2])))].sort().reverse();
+  if(!_ayAll.length) return '';
+  const ay = (window._HM_SUBJ_AY && _ayAll.indexOf(window._HM_SUBJ_AY) >= 0)
+    ? window._HM_SUBJ_AY : (_ayAll.indexOf(_hmAY()) >= 0 ? _hmAY() : _ayAll[0]);
 
   const recs = [];
   (DD.sanctions || []).forEach((s, i) => {
@@ -7959,8 +7983,18 @@ function _hmPanelBySubject(){
     : '';
 
   const _scopeLabel = _hmScopeForm() || _hmScopeYear() || 'this group';
+  const _ayCtl = '<div style="margin:.35rem 0 .1rem"><label style="font-size:.65rem;'
+    + 'color:var(--mu);display:inline-flex;align-items:center;gap:.3rem">Academic year '
+    + '<select onchange="window._HM_SUBJ_AY=this.value;window._hmRerender&&window._hmRerender()" '
+    + 'style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);'
+    + 'font-family:inherit;font-size:.7rem;padding:.2rem .45rem;border-radius:5px">'
+    + _ayAll.map(function(a){
+        return '<option value="' + a + '"' + (a === ay ? ' selected' : '') + '>'
+             + a + '\u2013' + String(Number(a) + 1).slice(2) + '</option>'; }).join('')
+    + '</select></label></div>';
   return _hmPanel('Sanctions in ' + _scopeLabel + ', by subject',
     'Split by incident category. Counts are raw, so a subject taught five times a week will sit higher than one taught once.',
+    _ayCtl +
     // Rows get tighter as the list grows, so a whole year's subjects still fit
     // on screen without the panel running away.
     _hmCanvas('hm-ig-subject',
@@ -7970,6 +8004,11 @@ function _hmPanelBySubject(){
 // ── the block, and the one call that mounts it ──
 function _hmInfographics(ns){
   _HM_NS = ns || '';
+  // The selector inside a panel needs a way to ask for this view again. Which
+  // renderer that is depends on where the block was mounted.
+  window._hmRerender = (ns === 'tg-')
+    ? function(){ if(typeof _hmTgCharts === 'function') _hmTgCharts(); }
+    : function(){ if(typeof rHmYear === 'function') rHmYear(); };
   const parts = [
     _hmPanelPeers(), _hmPanelYTD(), _hmPanelBySubject()
   ].filter(Boolean).join('');
@@ -8006,6 +8045,107 @@ function _hmTgCharts(){
 // Inline handlers are evaluated in global scope, the same reason the app does
 // window.popTG = popTG further down the file.
 window._hmTgCharts = _hmTgCharts;
+
+// ---- PEER GROUP COMPARISON — current and historic --------------------------
+// Both read peerStats.byCohort, which the engine writes as aggregates only:
+// counts and means per cohort, no pupil-level data. That is what lets a scoped
+// account see other year groups at all — there is nothing identifiable to see.
+
+function _pgCohorts(){
+  const c = DD.peerStats && DD.peerStats.byCohort;
+  return (c && Object.keys(c).length) ? c : null;
+}
+function _pgMonthLabels(rows){
+  const seen = [];
+  rows.forEach(r => (r.months||[]).forEach(m => { if(seen.indexOf(m.m) < 0) seen.push(m.m); }));
+  return seen;
+}
+function _pgSeries(row, labels, field){
+  const by = {};
+  (row.months||[]).forEach(m => { by[m.m] = m[field]; });
+  return labels.map(l => (by[l] == null ? null : by[l]));
+}
+function _pgPanel(title, sub, rows, names, labels, note){
+  const one = (t, id, key, field, fmt) => {
+    const series = rows.map((r, i) => ({
+      name: names[i],
+      data: _pgSeries(r, labels, field),
+      color: _HM_FORM_COLORS[i % _HM_FORM_COLORS.length]
+    }));
+    return '<div style="flex:1;min-width:280px">'
+      + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + t + '</div>'
+      + _hmMultiLine(id, key, labels, series, fmt) + '</div>';
+  };
+  return _hmPanel(title, sub,
+    '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
+    + one('Attendance', 'pg-att', 'pgAtt', 'att', v => (Math.round(v*10)/10) + '%')
+    + one('Positives per pupil', 'pg-pos', 'pgPos', 'pos', v => Math.round(v*10)/10)
+    + one('Sanctions per pupil', 'pg-neg', 'pgNeg', 'neg', v => Math.round(v*10)/10)
+    + '</div>' + (note || ''));
+}
+// A cohort with nothing recorded plots as a flat zero, which reads as a finding
+// rather than a gap. Name it once under the charts instead of hiding it.
+function _pgGapNote(rows, names){
+  const gaps = [];
+  rows.forEach((r, i) => {
+    ['pos','neg'].forEach(f => {
+      if((r.months||[]).length && (r.months||[]).every(m => !m[f]))
+        gaps.push(names[i] + ' has no ' + (f === 'pos' ? 'positive behaviour' : 'sanctions') + ' recorded');
+    });
+  });
+  return gaps.length
+    ? '<div style="font-size:.68rem;color:var(--orange);margin-top:.5rem">'
+      + gaps.join('. ') + '. A flat line there is a gap in the data, not a result.</div>'
+    : '';
+}
+
+function rPGCurrent(){
+  const el = document.getElementById('pgnow-out');
+  if(!el) return;
+  const bc = _pgCohorts();
+  if(!bc){ el.innerHTML = _hmNote('This needs a rebuilt data file. Re-run the import and it will appear.'); return; }
+  _HM_NS = 'pgnow-';
+  const cay = _hmAY();
+  const ygs = Object.keys(bc).filter(y => bc[y][cay]).sort((a,b) => +a - +b);
+  if(!ygs.length){ el.innerHTML = _hmNote('No year groups have data for ' + cay + '.'); return; }
+  const rows = ygs.map(y => bc[y][cay]);
+  const names = ygs.map(y => 'Year ' + y);
+  const labels = _pgMonthLabels(rows);
+  el.innerHTML = _pgPanel('Year groups this year',
+    'Every year group in ' + cay + '\u2013' + String(Number(cay)+1).slice(2)
+    + ', month by month. Aggregates only \u2014 no pupil appears here. '
+    + 'Click a year in the key to hide it.',
+    rows, names, labels, _pgGapNote(rows, names));
+  setTimeout(_hmFlushCharts, 0);
+}
+
+function rPGHistoric(){
+  const el = document.getElementById('pgpast-out');
+  if(!el) return;
+  const bc = _pgCohorts();
+  if(!bc){ el.innerHTML = _hmNote('This needs a rebuilt data file. Re-run the import and it will appear.'); return; }
+  _HM_NS = 'pgpast-';
+  const sel = document.getElementById('pg-yg');
+  const ygs = Object.keys(bc).filter(y => Object.keys(bc[y]).length > 1).sort((a,b) => +a - +b);
+  if(!ygs.length){
+    el.innerHTML = _hmNote('Only one cohort has reached each year group so far, so there is nothing to compare against yet.');
+    return;
+  }
+  if(sel && !sel.options.length){
+    sel.innerHTML = ygs.map(y => '<option value="' + y + '">Year ' + y + '</option>').join('');
+  }
+  const yg = (sel && sel.value) || ygs[ygs.length-1];
+  const ays = Object.keys(bc[yg]).sort();
+  const rows = ays.map(a => bc[yg][a]);
+  const names = ays.map(a => a + '\u2013' + String(Number(a)+1).slice(2));
+  const labels = _pgMonthLabels(rows);
+  el.innerHTML = _pgPanel('Year ' + yg + ', cohort by cohort',
+    'The same year group in each academic year, aligned from September so the same '
+    + 'point in the year lines up. ' + rows.map((r,i) => names[i] + ': ' + r.n + ' pupils').join(' \u00b7 ')
+    + '.', rows, names, labels, _pgGapNote(rows, names));
+  setTimeout(_hmFlushCharts, 0);
+}
+window.rPGCurrent = rPGCurrent; window.rPGHistoric = rPGHistoric;
 
 // ---- FORM TUTOR ------------------------------------------------------------
 // Mirrors the Concerns and Congrats tabs exactly. The school sets its triggers
@@ -9954,6 +10094,23 @@ function rCL(){
   }
   const abTT=concerns('ab',lr,p5,CT_AB),abYoY=concerns('ab',lr,p3,CT_AB);
   const efTT=concerns('ef',lr,p5,CT_EF),efYoY=concerns('ef',lr,p3,CT_EF);
+  // The mirror of concerns(). Both scales are inverted — rank 1 is the best
+  // grade and effort 1 is the best effort — so a fall in the number is an
+  // improvement, and the test is the same threshold with the sign flipped.
+  function improvements(metric,cur,prevP2,threshold){
+    if(!prevP2)return[];
+    const valFn=metric==='ab'?abVal:efVal;
+    return cur.map(r=>{
+      const pr=getClRow(prevP2,r[0]);if(!pr)return null;
+      const cv=valFn(r),pv=valFn(pr);
+      if(cv<=0||pv<=0)return null;
+      const diff=cv-pv;
+      if(diff<=-threshold)return{idx:r[0],pid:r[1],cur:cv,prev:pv,diff,flags:r};
+      return null;
+    }).filter(Boolean).sort((a,b)=>a.diff-b.diff);
+  }
+  const abTTup=improvements('ab',lr,p5,CT_AB),abYoYup=improvements('ab',lr,p3,CT_AB);
+  const efTTup=improvements('ef',lr,p5,CT_EF),efYoYup=improvements('ef',lr,p3,CT_EF);
   const lrIdxSet=new Set(lr.map(r=>r[0]));
   const clAySancStart=`${CAY}-09-01`;
   const todayCL=new Date();
@@ -10159,7 +10316,8 @@ function rCL(){
   // Summary cards (population/SEN + attendance/sanctions) for the class
   document.getElementById('cl-summary').innerHTML=makeSummaryCards(lr, {titleLabel:`Y${yearGroup} ${sub} Class ${cl}`, ay:CAY});
 
-  document.getElementById('cl-alerts').innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.85rem;align-items:stretch">${alertBox('Term-on-Term Ability Concern',PAL.red,abTT,i=>concernRow(i,'ab'))}${alertBox('Year-on-Year Ability Concern',PAL.red,abYoY,i=>concernRow(i,'ab'))}${alertBox('Term-on-Term Effort Concern',PAL.orange,efTT,i=>concernRow(i,'ef'))}${alertBox('Year-on-Year Effort Concern',PAL.orange,efYoY,i=>concernRow(i,'ef'))}</div>`;
+  document.getElementById('cl-alerts').innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.85rem;align-items:stretch">${alertBox('Term-on-Term Ability Concern',PAL.red,abTT,i=>concernRow(i,'ab'))}${alertBox('Year-on-Year Ability Concern',PAL.red,abYoY,i=>concernRow(i,'ab'))}${alertBox('Term-on-Term Effort Concern',PAL.orange,efTT,i=>concernRow(i,'ef'))}${alertBox('Year-on-Year Effort Concern',PAL.orange,efYoY,i=>concernRow(i,'ef'))}</div>`
+    +`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.85rem;align-items:stretch;margin-top:.85rem">${alertBox('Term-on-Term Ability Improvement',PAL.green,abTTup,i=>concernRow(i,'ab'))}${alertBox('Year-on-Year Ability Improvement',PAL.green,abYoYup,i=>concernRow(i,'ab'))}${alertBox('Term-on-Term Effort Improvement',PAL.green,efTTup,i=>concernRow(i,'ef'))}${alertBox('Year-on-Year Effort Improvement',PAL.green,efYoYup,i=>concernRow(i,'ef'))}</div>`;
 
   // SEND section
   document.getElementById('cl-send-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">SEND and FSM Overview</div>`;
