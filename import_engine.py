@@ -364,8 +364,27 @@ def map_ote(v):
     n = int(m.group())
     return n if 1 <= n <= 9 else None
 
-DAY_MAP = {'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4}
+# ── TIMETABLE SHAPE ──
+# The grid used to be hardcoded 5 days x 5 periods. That silently DISCARDED data:
+# att_all['Per'].between(1, 5) dropped periods 6+, and a five-entry DAY_MAP dropped
+# Saturday. A school running 8 periods, or teaching on a Saturday, lost those rows
+# before data.json was written — no error, just a smaller denominator.
+#
+# The shape is derivable: 'Period Description' is 'Mon:1', so the distinct days and
+# the highest period ARE the timetable. DAY_NAMES / DAY_MAP / N_PER are rebuilt from
+# the data immediately after att_all is parsed (see "DERIVE TIMETABLE SHAPE" below),
+# and written into data.json so the browser reads dimensions instead of counting to 5.
+#
+# WEEK_ORDER is the canonical ordering only — a day appears in DAY_NAMES solely
+# because the data contains it. Sorting days alphabetically would put Fri before Mon.
+WEEK_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+# Fallbacks. Overwritten from the data below; kept so anything importing this module
+# before parsing still sees a sane shape.
 DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+DAY_MAP = {d: i for i, d in enumerate(DAY_NAMES)}
+N_DAY = len(DAY_NAMES)
+N_PER = 5
 
 # ── TERM / PERIOD RESOLUTION (year-aware) ──
 # An academic year is labelled by its START calendar year: AY 2025-26 -> "2025".
@@ -574,6 +593,29 @@ att_all['Day'] = (att_all['Period Description'].astype(str).str.split(':').str[0
                   .str.strip().str[:3].str.title())   # 'Monday'/'MON'/'mon' -> 'Mon' (matches DAY_MAP)
 att_all['Per'] = _vmap(att_all['Period Description'], _per_of)
 att_all['DateISO'] = _vmap(att_all['Date'], parse_date_flex)
+
+# ── DERIVE TIMETABLE SHAPE (was hardcoded 5x5) ──
+# Every day the data actually contains, in week order; every period up to the highest
+# one seen. Periods are contiguous from 1 so a school that only uses 1,2,3,5 still gets
+# a slot for 4 rather than a ragged grid.
+_days_seen = set(att_all['Day'].dropna().unique())
+DAY_NAMES = [d for d in WEEK_ORDER if d in _days_seen] or ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+DAY_MAP = {d: i for i, d in enumerate(DAY_NAMES)}
+N_DAY = len(DAY_NAMES)
+
+_per_seen = pd.to_numeric(att_all['Per'], errors='coerce')
+_per_seen = _per_seen[(_per_seen >= 1) & (_per_seen <= 20)]   # 20 = sanity ceiling, not a shape
+N_PER = int(_per_seen.max()) if len(_per_seen) else 5
+
+print(f"Timetable shape: {N_DAY} days {DAY_NAMES} x {N_PER} periods")
+_unknown_days = sorted(d for d in _days_seen if d and d not in DAY_MAP)
+if _unknown_days:
+    # Never silently drop. A day we cannot place is a data problem the school should see.
+    print(f"  !! unrecognised day tokens, rows will be excluded: {_unknown_days}")
+_hi = pd.to_numeric(att_all['Per'], errors='coerce')
+_over = int((_hi > 20).sum())
+if _over:
+    print(f"  !! {_over} rows with a period above 20 — excluded, check the export")
 att_all['Teacher'] = att_all['Teacher'].apply(lambda x: int(x) if pd.notna(x) else None)
 att_all = att_all.dropna(subset=['DateISO'])
 # Academic year (start calendar year) per row — used to build per-year snapshots.
@@ -897,10 +939,10 @@ print("Building per-year timetables...")
 # code had — so primary = earliest-starting subject, secondary = latest, changeover = its start.
 tt_out = {}                       # ay_str -> px -> 5x5 grid
 _all_subject_set = set()
-tt_src = att_all[att_all['Per'].between(1, 5)]
+tt_src = att_all[att_all['Per'].between(1, N_PER)]
 # Create an entry for every (AY, pupil) that has any period-1..5 row (matches old pid iteration).
 for ay, ay_grp in tt_src.groupby('AY', sort=False):
-    tt_out[str(int(ay))] = {p: [[None]*5 for _ in range(5)] for p in ay_grp['pid'].unique()}
+    tt_out[str(int(ay))] = {p: [[None]*N_PER for _ in range(N_DAY)] for p in ay_grp['pid'].unique()}
 # Earliest DateISO per (AY, pupil, valid-day, period, subject), then ordered for tie-breaking.
 _tt_valid = tt_src[tt_src['Day'].isin(DAY_MAP)]
 _tt_min = (_tt_valid.groupby(['AY', 'pid', 'Day', 'Per', 'Subject'], sort=False)['DateISO']
@@ -1322,7 +1364,7 @@ slot_denominators = {}            # ay_str -> 5x5 grid
 valid_slot_dates = {}             # ay_str -> {(di, per): [DateISO, ...]} scheduled dates (>=10 marks)
 for ay, ay_grp in real_att.groupby('AY'):
     ay_str = str(int(ay))
-    grid = [[0]*5 for _ in range(5)]
+    grid = [[0]*N_PER for _ in range(N_DAY)]
     vmap = {}
     for dow_name in DAY_NAMES:
         di = DAY_MAP[dow_name]
@@ -1350,12 +1392,12 @@ print(f"School day counts: {len(school_day_counts)} year(s)")
 # ── ENRICHMENT: slotTeachers (per AY) ──
 print("Computing per-year slot teachers...")
 slot_teachers = {}                # ay_str -> px -> 5x5 grid of [[teacher, count], ...]
-st_src = att_all[att_all['Per'].between(1, 5) & att_all['Teacher'].notna()]
+st_src = att_all[att_all['Per'].between(1, N_PER) & att_all['Teacher'].notna()]
 for ay, ay_grp in st_src.groupby('AY'):
     ay_str = str(int(ay))
     slot_teachers[ay_str] = {}
     for px, grp in ay_grp.groupby('pid'):
-        days = [[[] for _ in range(5)] for _ in range(5)]
+        days = [[[] for _ in range(N_PER)] for _ in range(N_DAY)]
         for (dow_name, per), subgrp in grp.groupby(['Day', 'Per']):
             di = DAY_MAP.get(dow_name)
             if di is None or per < 1 or per > 5:
@@ -1375,7 +1417,7 @@ print(f"Slot teachers: {sum(len(v) for v in slot_teachers.values())} pupil-years
 # priorDenom + curDenom always reconciles to slotDenominators[di][per-1].
 print("Computing split-slot per-era metadata...")
 INV_DAY = {di: name for name, di in DAY_MAP.items()}
-_split_src = att_all[att_all['Per'].between(1, 5)
+_split_src = att_all[att_all['Per'].between(1, N_PER)
                      & att_all['Day'].isin(DAY_MAP)
                      & att_all['Teacher'].notna()].copy()
 _split_src['Teacher'] = _split_src['Teacher'].astype(int)
@@ -1389,8 +1431,8 @@ for ay_str, pupils in tt_out.items():
     vmap = valid_slot_dates.get(ay_str, {})
     for px, grid in pupils.items():
         cell_meta = {}
-        for di in range(5):
-            for p in range(5):
+        for di in range(N_DAY):
+            for p in range(N_PER):
                 c = grid[di][p]
                 if not c or len(c) != 4:
                     continue
@@ -1420,7 +1462,7 @@ print("Detecting mixed present+absent slots and duplicate registrations...")
 suppressed_absences = {}
 dup_pupils = 0
 dup_slots = 0
-for px, grp in att_all[att_all['Per'].between(1, 5)].groupby('pid'):
+for px, grp in att_all[att_all['Per'].between(1, N_PER)].groupby('pid'):
     slot_marks = grp.groupby(['DateISO', 'Per'])['Mark'].apply(list)
     px_suppressed = []
     n_dup = 0
@@ -1606,7 +1648,7 @@ _teacher_pos = {tid: i for i, tid in enumerate(_teacher_ids)}
 CAY_ROSTER_MIN = 5        # ignore tiny slot rosters (<5 pupils) — stray marks, not a class
 MERGE_JACCARD  = 0.5      # same-teacher slot rosters merge into one class at this roster overlap
 
-_cay = att_all[(att_all['AY'] == CAY) & att_all['Per'].between(1, 5) & att_all['Teacher'].notna()].copy()
+_cay = att_all[(att_all['AY'] == CAY) & att_all['Per'].between(1, N_PER) & att_all['Teacher'].notna()].copy()
 _cay['Teacher'] = _cay['Teacher'].astype(int)
 _sess = _cay.groupby(['Subject', 'pid', 'Teacher', 'Day', 'Per']).size().reset_index(name='n')
 
@@ -1868,6 +1910,11 @@ output = {
         "transitions": _TRANSITIONS,
         "calibration": _CALIBRATION_EFF,
         "periods": periods_list,
+        # Timetable shape, derived from the data rather than assumed (see DERIVE
+        # TIMETABLE SHAPE). The browser must read these instead of counting to 5:
+        # every grid in this file is len(ttDays) x ttPeriods.
+        "ttDays": DAY_NAMES,
+        "ttPeriods": N_PER,
         "period_labels": period_labels,
         # Dated spells, so a historic view can ask "was this pupil SEND then"
         # rather than "are they SEND now". senStatus below stays as the current
@@ -2123,7 +2170,7 @@ def _build_peer_stats(full):
         if wk < ay_start:
             continue
         d0 = _date.fromisoformat(wk)
-        for off in range(5):
+        for off in range(N_DAY):   # was range(5) — assumed Mon..Fri
             iso = (d0 + timedelta(days=off)).isoformat()
             if iso <= today:
                 school_days.append(iso)
@@ -2275,7 +2322,7 @@ def _build_cohort_stats(full):
     days_by_ay = defaultdict(list)
     for wk in sorted(week_lessons):
         d0 = _date.fromisoformat(wk)
-        for off in range(5):
+        for off in range(N_DAY):   # was range(5) — assumed Mon..Fri
             iso = (d0 + timedelta(days=off)).isoformat()
             if iso <= today:
                 days_by_ay[_ay(iso)].append(iso)
