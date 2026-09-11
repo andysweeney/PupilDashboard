@@ -2209,6 +2209,14 @@ let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=5, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
 let AP_MULT=2.0, AP_HIGH_ABS=40;
 let CT_AT=1.3, CT_AM=3;
 let CT_PA_WIN=20, CT_PA_PCT=10;
+// Attendance "low" threshold. Was hardcoded at 90 in the engine, which pre-counted
+// pupils into fixed bands and discarded the values — so it could not be changed
+// without a rebuild. The engine now ships the values (peerStats *.attVals) and the
+// cutoff lives here, applying immediately like every other threshold.
+// NOTE 90 is also the DfE definition of persistent absence, and the national
+// comparator (PAPerc, 24.21% England secondary) is fixed at 90. A school raising
+// this for internal use makes its own chart stop matching the national figure.
+let ATT_LOW=90;
 // Congrats / praise thresholds — fully independent of the concern thresholds above.
 // Defaults match their concern counterparts; lower them to make praise easier to earn.
 let CG_AT=1.3, CG_PA_PCT=10, CG_SC=1.5, CG_MN=3, CG_EX_PCT=99;
@@ -2236,7 +2244,7 @@ const _LS_KEY = 'pupilDashboard.thresholds.v1';
 function saveThresholds(){
   try {
     const obj = {
-      CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT,
+      CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, ATT_LOW,
       CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT,
       AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
@@ -2260,6 +2268,7 @@ function applyThresholdValues(v){
   const safeF = (x) => { const n = parseFloat(x); return isNaN(n) ? null : n; };
   const safeI = (x) => { const n = parseInt(x); return isNaN(n) ? null : n; };
   let n;
+  if((n=safeF(v.ATT_LOW))!=null && n>0 && n<=100) ATT_LOW=n;   // a percentage; reject nonsense
   if((n=safeF(v.CT_AB))!=null) CT_AB=n;
   if((n=safeF(v.CT_EF))!=null) CT_EF=n;
   if((n=safeF(v.CT_SC))!=null) CT_SC=n;
@@ -2303,7 +2312,7 @@ function applyThresholdValues(v){
 
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
-  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10,
+  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, ATT_LOW:90,
   SA_YRS:2, SA_MIN:5, SA_SHARE:40, SA_LEAD:2,
   CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
@@ -2317,6 +2326,7 @@ const _THRESHOLD_DEFAULTS = {
 
 // Map of global name → DOM input id. Used to push values into Admin inputs after reset.
 const _THRESHOLD_INPUTS = {
+  ATT_LOW:'att-low',
   CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
   CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct',
   SA_YRS:'sa-yrs', SA_MIN:'sa-abs-min', SA_SHARE:'sa-share', SA_LEAD:'sa-lead',
@@ -2389,6 +2399,7 @@ function applyCT(){
   CT_AM=parseInt(document.getElementById('ct-am').value)||3;
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
   CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
+  ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
   CG_AT=parseFloat(document.getElementById('cg-at').value)||1.3;
   CG_PA_PCT=parseFloat(document.getElementById('cg-pa-pct').value)||10;
   CG_SC=parseFloat(document.getElementById('cg-sc').value)||1.5;
@@ -7635,13 +7646,20 @@ function _hmPanelPeers(){
   const ps = _hmPeerData();
   const stats = {};
   peers.forms.forEach(f => { stats[f.reg] = ps ? ps[f.reg] : _hmFormStats(f.pupils); });
-  const _below90 = st => {
-    const b = st && st.attBands;
-    return b ? (b.u85 || 0) + (b.u90 || 0) : null;
+  // Count against the Admin threshold rather than pre-made bands. The engine used
+  // to ship u85/u90/u95/o95 and this had to add two of them back together; now it
+  // ships the values, so any cutoff works and a change applies without a rebuild.
+  // attVals is sorted ascending, so a scan is fine at form size (~25).
+  const _belowLow = st => {
+    const v = st && st.attVals;
+    if(!Array.isArray(v)) return null;
+    let n = 0;
+    for(const x of v){ if(x < ATT_LOW) n++; else break; }   // sorted: stop at the first pass
+    return n;
   };
   const mk = (field, wfield) => peers.forms.map(f => {
     const st = stats[f.reg] || {};
-    const v = field === 'below90' ? _below90(st) : st[field];
+    const v = field === 'belowLow' ? _belowLow(st) : st[field];
     return { reg: f.reg, v: v, w: wfield ? st[wfield] : null };
   });
 
@@ -7655,9 +7673,9 @@ function _hmPanelPeers(){
     { id: 'hm-ig-att', key: 'hmIgAtt', field: 'att', wfield: null, title: 'Attendance',
       opts: { label: 'Attendance', color: PAL.sky, fromZero: false, hardMax: 100,
               fmt: v => (Math.round(v * 10) / 10) + '%' } },
-    { id: 'hm-ig-low', key: 'hmIgLow', field: 'below90', wfield: null,
-      title: 'Pupils below 90%',
-      opts: { label: 'Pupils below 90%', color: PAL.orange, fromZero: true,
+    { id: 'hm-ig-low', key: 'hmIgLow', field: 'belowLow', wfield: null,
+      title: `Pupils below ${ATT_LOW}%`,
+      opts: { label: `Pupils below ${ATT_LOW}%`, color: PAL.orange, fromZero: true,
               fmt: v => Math.round(v) } },
     { id: 'hm-ig-pos', key: 'hmIgPos', field: 'pos', wfield: 'posW', title: 'Positives per pupil',
       opts: { label: 'Positives per pupil', color: PAL.green, fromZero: true,
@@ -13462,6 +13480,12 @@ function rPeer(){
           'Concerns tab → Pupil Concerns; Pupil tab',
           inputRow('Decline multiplier','ct-at',CT_AT,{min:1.0,max:3.0,step:0.05,hint:'Recent absence rate must exceed the older rate by this multiplier to fire. Default 1.3 (i.e. 30% higher).'})+
           inputRow('Minimum recent absences','ct-am',CT_AM,{min:0,max:50,step:1,hint:'A pupil must have at least this many absent periods in the recent 20-day window before any flag fires. Default 3.'})
+        )}
+        ${groupPanel(
+          'Attendance Display',
+          'Where the line falls between low and acceptable attendance. This is a DISPLAY setting \u2014 it changes what the chart counts, not who is flagged as a concern.',
+          'Heatmap tabs \u2192 "How your form is doing" \u2192 Pupils below X%',
+          inputRow('Low attendance threshold (%)','att-low',ATT_LOW,{min:50,max:100,step:0.5,hint:'Pupils below this figure are counted in the "Pupils below X%" chart, and the chart title follows this setting. 90% is the DfE definition of persistent absence and is what the national comparison figure (24.2% for England secondary) is based on \u2014 raising it will make this chart no longer comparable with the national number.'})
         )}
         ${groupPanel(
           'Persistent Absence',
