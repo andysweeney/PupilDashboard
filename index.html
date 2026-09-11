@@ -2012,9 +2012,9 @@ function classTeachers(ink,x,subj,clsNum){
   const slots=[];
   const subjKey=Object.entries(DD.subjectKeys||{}).find(([n,k])=>n===subj)?.[1];
   if(!subjKey){return{primary:enrolPrimary,all:[enrolPrimary],isMulti:false,label:enrolPrimary}}
-  for(let d=0;d<5;d++){
+  for(let d=0;d<TT_ND;d++){
     if(d>=grid.length)continue;
-    for(let p=0;p<5;p++){
+    for(let p=0;p<TT_PER;p++){
       if(p>=grid[d].length)continue;
       const cell=grid[d][p];
       if(!cell)continue;
@@ -2591,8 +2591,18 @@ function ord(n){const s=['th','st','nd','rd'];const v=n%100;return n+(s[(v-20)%1
 function toggleAll(chartKey,show){const ch=_c[chartKey];if(!ch)return;ch.data.datasets.forEach((_,i)=>{ch.setDatasetVisibility(i,show)});ch.update()}
 
 // ── TIMETABLE ──
-const TT_DAYS=['Mon','Tue','Wed','Thu','Fri'];
-const TT_PERIODS=5;
+// ── TIMETABLE SHAPE ──
+// Was hardcoded 5 days x 5 periods, assumed in 68 places. That silently hid period 6+
+// and any Saturday teaching — and the engine discarded those rows outright, so the
+// attendance denominator was wrong too, with no error anywhere.
+// The engine now derives the real shape from the attendance data and publishes it as
+// DD.ttDays / DD.ttPeriods. Every grid in data.json is TT_ND x TT_PERIODS.
+// Fallback is the old 5x5 so an older data.json still renders.
+// NOTE: PER / PL elsewhere are ASSESSMENT collection periods (terms). Unrelated.
+const TT_DAYS=(DD.ttDays&&DD.ttDays.length)?DD.ttDays:['Mon','Tue','Wed','Thu','Fri'];
+const TT_PERIODS=DD.ttPeriods||5;
+const TT_ND=TT_DAYS.length;
+const TT_PER=TT_PERIODS;   // alias: both names are used below
 const _ttColorPalette=[PAL.sky,PAL.blue,PAL.green,PAL.pink,PAL.orangeMid,PAL.lilac,PAL.gold,PAL.red,PAL.teal,PAL.orange,PAL.pinkDeep,PAL.purple,PAL.cyan,PAL.lime,PAL.magenta,PAL.greenMid,PAL.rose,PAL.tealBright,PAL.violet,PAL.greenDeep,PAL.redDeep,PAL.indigo,PAL.amber,PAL.tealDark];
 const TT_COLORS={'Non-Lesson':PAL.slate};
 (DD.config?.subjects||[]).forEach((s,i)=>{TT_COLORS[s]=_ttColorPalette[i%_ttColorPalette.length]});
@@ -2711,7 +2721,7 @@ function analyseAbsencePattern(px, ay){
   // ay: a specific academic-year string (e.g. '2025') or 'all' (aggregate every year).
   let pAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
   const pMarks=(DD.attendanceMarks||{})[String(px)]||{};
-  const DAYS=['Mon','Tue','Wed','Thu','Fri'];
+  const DAYS=TT_DAYS;
   const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
   if(ay && ay!=='all') pAbsSubj=pAbsSubj.filter(r=>_ayOf(r[0])===String(ay));
 
@@ -2752,14 +2762,14 @@ function analyseAbsencePattern(px, ay){
   let _slotDenomFull;
   if(ay==='all'){
     _slotDenomFull=Array.from({length:5},()=>Array(5).fill(0));
-    for(const g of Object.values(_denomByAY)){ if(Array.isArray(g)&&g.length===5) for(let d=0;d<5;d++)for(let p=0;p<5;p++) _slotDenomFull[d][p]+=(g[d]&&g[d][p]||0); }
+    for(const g of Object.values(_denomByAY)){ if(Array.isArray(g)&&g.length===5) for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++) _slotDenomFull[d][p]+=(g[d]&&g[d][p]||0); }
   } else {
     _slotDenomFull=_denomByAY[String(ay)]||DD.slotDenominators;
   }
   let pupilOverallRate=null;
   if(_slotDenomFull && Array.isArray(_slotDenomFull) && _slotDenomFull.length===5){
     let totalScheduled=0;
-    for(let d=0;d<5;d++) for(let p=0;p<5;p++) totalScheduled+=(_slotDenomFull[d][p]||0);
+    for(let d=0;d<TT_ND;d++) for(let p=0;p<TT_PER;p++) totalScheduled+=(_slotDenomFull[d][p]||0);
     if(totalScheduled>0) pupilOverallRate=(totalAbs/totalScheduled*100);
   }
 
@@ -2783,8 +2793,8 @@ function analyseAbsencePattern(px, ay){
     return{slotAbs,slotUnauth,dayAbs,totalAbs,weekCount,dayFlags,slotFlags,pupilOverallRate,suppressedHighAbs:true};
   }
 
-  for(let d=0;d<5;d++){
-    for(let p=0;p<5;p++){
+  for(let d=0;d<TT_ND;d++){
+    for(let p=0;p<TT_PER;p++){
       const denom2=_slotDenomFull[d][p];
       if(slotAbs[d][p]>=AP_MIN&&denom2>0){
         const rate=(slotAbs[d][p]/denom2*100);
@@ -2832,7 +2842,7 @@ function renderAbsencePattern(px,containerId,ay){
     return;
   }
 
-  const DAYS=['Mon','Tue','Wed','Thu','Fri'];
+  const DAYS=TT_DAYS;
   const maxSlot=Math.max(...slotAbs.flat(),1);
   // Subject labels come from a real timetable grid (latest year for the 'all' view).
   const _gridAY = ay==='all' ? (pAYS[pAYS.length-1]||'') : ay;
@@ -2862,14 +2872,14 @@ function renderAbsencePattern(px,containerId,ay){
   let _slotDenom;
   if(ay==='all'){
     _slotDenom=Array.from({length:5},()=>Array(5).fill(0));
-    for(const g of Object.values(_denomByAY2)){ if(Array.isArray(g)&&g.length===5) for(let d=0;d<5;d++)for(let p=0;p<5;p++) _slotDenom[d][p]+=(g[d]&&g[d][p]||0); }
+    for(const g of Object.values(_denomByAY2)){ if(Array.isArray(g)&&g.length===5) for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++) _slotDenom[d][p]+=(g[d]&&g[d][p]||0); }
   } else {
     _slotDenom=_denomByAY2[String(ay)]||DD.slotDenominators||[[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29],[29,29,29,29,29]];
   }
 
-  for(let p=0;p<5;p++){
+  for(let p=0;p<TT_PER;p++){
     html+=`<div class="tt-per">P${p+1}</div>`;
-    for(let d=0;d<5;d++){
+    for(let d=0;d<TT_ND;d++){
       const count=slotAbs[d][p];
       const unauth=slotUnauth[d][p];
       const heat=absHeat(count);
@@ -3092,7 +3102,7 @@ function renderTimetable(x, ay){
 
   // Count lessons per subject
   const subjCount={};
-  for(let d=0;d<5;d++)for(let p=0;p<5;p++){
+  for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){
     const cell=grid[d][p];
     if(cell)subjCount[cell[0]]=(subjCount[cell[0]]||0)+1;
   }
@@ -3139,7 +3149,7 @@ function renderTimetable(x, ay){
 
   for(let p=0;p<TT_PERIODS;p++){
     html+=`<div class="tt-per">P${p+1}</div>`;
-    for(let d=0;d<5;d++){
+    for(let d=0;d<TT_ND;d++){
       const cell=grid[d][p];
       if(cell){
         const isSplit=cell.length===4;
@@ -3206,7 +3216,7 @@ function renderTimetable(x, ay){
     });
     let nlMaxScore=0;
     const nlScores={};
-    for(let d=0;d<5;d++){
+    for(let d=0;d<TT_ND;d++){
       const sc2=nlByDay[d];
       const score=(sc2.b||0)+(sc2.u||0)+(sc2.e||0)+(sc2.a||0)+(sc2.d||0)*SW_DET;
       nlScores[d]=score;
@@ -3224,7 +3234,7 @@ function renderTimetable(x, ay){
       return'background:rgba(181,72,59,0.42)';
     }
     html+=`<div class="tt-per" style="font-size:.55rem;white-space:nowrap">Non<br>Lesson</div>`;
-    for(let d=0;d<5;d++){
+    for(let d=0;d<TT_ND;d++){
       const sc2=nlByDay[d];
       const score=nlScores[d]||0;
       const heat=heatBgNL(score);
@@ -3282,7 +3292,7 @@ function renderHPTimetable(x, ay){
 
   // Subject summary (lessons/week) — same as the sanctions timetable
   const subjCount={};
-  for(let d=0;d<5;d++)for(let p=0;p<5;p++){const c=grid[d][p];if(c)subjCount[c[0]]=(subjCount[c[0]]||0)+1}
+  for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){const c=grid[d][p];if(c)subjCount[c[0]]=(subjCount[c[0]]||0)+1}
   const totalLessons=Object.values(subjCount).reduce((a,b)=>a+b,0);
   const subjSummary=Object.entries(subjCount).sort((a,b)=>b[1]-a[1]).map(([s,n])=>{
     const col=TT_COLORS[s]||'var(--ac)';
@@ -3329,7 +3339,7 @@ function renderHPTimetable(x, ay){
 
   for(let p=0;p<TT_PERIODS;p++){
     html+=`<div class="tt-per">P${p+1}</div>`;
-    for(let d=0;d<5;d++){
+    for(let d=0;d<TT_ND;d++){
       const cell=grid[d][p];
       if(cell){
         const isSplit=cell.length===4;
@@ -3354,11 +3364,11 @@ function renderHPTimetable(x, ay){
     const nlByDay={0:{hp:0,poc:0},1:{hp:0,poc:0},2:{hp:0,poc:0},3:{hp:0,poc:0},4:{hp:0,poc:0}};
     nlHP.forEach(r=>{const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;if(dow>=0&&dow<5){if(r[1]===1)nlByDay[dow].poc++;else nlByDay[dow].hp++}});
     let nlMax=0;const nlScores={};
-    for(let d=0;d<5;d++){const sc2=nlByDay[d];const score=(sc2.hp||0)*wHP+(sc2.poc||0)*wPOC;nlScores[d]=score;if(score>nlMax)nlMax=score}
+    for(let d=0;d<TT_ND;d++){const sc2=nlByDay[d];const score=(sc2.hp||0)*wHP+(sc2.poc||0)*wPOC;nlScores[d]=score;if(score>nlMax)nlMax=score}
     const combinedMax=Math.max(maxScore,nlMax);
     function heatBgNL(score){if(!score||!combinedMax)return'';const i=Math.min(score/combinedMax,1);if(i<0.15)return'background:rgba(46,148,105,0.07)';if(i<0.3)return'background:rgba(46,148,105,0.14)';if(i<0.5)return'background:rgba(46,148,105,0.22)';if(i<0.7)return'background:rgba(46,138,95,0.30)';if(i<0.85)return'background:rgba(46,138,95,0.40)';return'background:rgba(46,122,85,0.50)'}
     html+=`<div class="tt-per" style="font-size:.55rem;white-space:nowrap">Non<br>Lesson</div>`;
-    for(let d=0;d<5;d++){
+    for(let d=0;d<TT_ND;d++){
       const sc2=nlByDay[d];const heat=heatBgNL(nlScores[d]||0);
       if(sc2.hp||sc2.poc){
         const parts=[];if(sc2.hp)parts.push(`<span style="color:var(--green-dark)">${sc2.hp} HP</span>`);if(sc2.poc)parts.push(`<span style="color:var(--navy)">${sc2.poc} POC</span>`);
@@ -3384,7 +3394,7 @@ function renderHPTimetable(x, ay){
    Conduct splits exactly (dated HP/sanction records). Presence splits absences
    exactly and prorates the per-era denominator by per-era school-week count.
    ─────────────────────────────────────────────────────────────────────── */
-const PTW_DAYS=['Mon','Tue','Wed','Thu','Fri'];
+const PTW_DAYS=TT_DAYS;
 function _ptwAYs(x){const b=DD.timetablesByAY||{};return Object.keys(b).filter(a=>b[a]&&b[a][String(x)]).sort();}
 function _ptwGrid(x,ay){return ((DD.timetablesByAY||{})[String(ay)]||{})[String(x)]||(DD.timetables||{})[String(x)]||[];}
 function _ptwTeach(x,ay){return ((DD.slotTeachersByAY||{})[String(ay)]||{})[String(x)]||(DD.slotTeachers||{})[String(x)]||[];}
@@ -3394,10 +3404,10 @@ function _ptwDom(list){if(!list||!list.length)return null;let b=list[0];for(cons
 function _ptwShort(s){if(!s)return'';return s.length<=11?s:s.slice(0,10)+'…';}
 function _ptwTeacherElsewhere(grid,teach,subj,sd,sp){
   // Prefer NORMAL (unchanged) slots teaching this subject — their teacher is unambiguous.
-  for(let d=0;d<5;d++)for(let p=0;p<5;p++){if(d===sd&&p===sp)continue;const c=grid[d]&&grid[d][p];if(!c||c.length===4)continue;
+  for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){if(d===sd&&p===sp)continue;const c=grid[d]&&grid[d][p];if(!c||c.length===4)continue;
     if(c[0]===subj){const t=_ptwDom(teach[d]&&teach[d][p]);if(t!=null)return t;}}
   // Fall back to the current-era subject of other split slots only if no normal slot matched.
-  for(let d=0;d<5;d++)for(let p=0;p<5;p++){if(d===sd&&p===sp)continue;const c=grid[d]&&grid[d][p];if(!c||c.length!==4)continue;
+  for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){if(d===sd&&p===sp)continue;const c=grid[d]&&grid[d][p];if(!c||c.length!==4)continue;
     if(c[2]===subj){const t=_ptwDom(teach[d]&&teach[d][p]);if(t!=null)return t;}}
   return null;}
 function _ptwEraTeachers(grid,teach,d,p,priorSubj,curSubj){
@@ -3499,9 +3509,9 @@ function renderPresenceGrid(x, ay){
   const A=_ptwAbs(x,ay),mondays=_ptwAYMondays(ay);
   let body=`<div style="display:grid;grid-template-columns:30px repeat(5,1fr);gap:5px;padding:.5rem .75rem .5rem">`;
   body+=`<div></div>`+PTW_DAYS.map(d=>`<div style="text-align:center;font-size:.66rem;font-weight:600;color:var(--tx);padding-bottom:2px">${d}</div>`).join('');
-  for(let p=0;p<5;p++){
+  for(let p=0;p<TT_PER;p++){
     body+=`<div style="display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:600;color:var(--mu)">P${p+1}</div>`;
-    for(let d=0;d<5;d++){
+    for(let d=0;d<TT_ND;d++){
       const c=grid[d]&&grid[d][p];const dn=(denom[d]&&denom[d][p])||0;
       if(!c){body+=_ptwCellEmpty();continue;}
       if(c.length===4){
@@ -3539,12 +3549,12 @@ function renderConductGrid(x, ay){
   if(!grid||!grid.length){wrap.innerHTML=`<div class="dw" style="padding:0;overflow:hidden">${_ptwHead('Conduct — typical week','',sel)}<div class="tt-body" style="padding:1rem;color:var(--mu);font-size:.8rem">No timetable for this year.</div></div>`;return;}
   const Cd=_ptwConduct(x,ay);
   let maxHP=1,maxSN=1,totHP=0,totSN=0;
-  for(let d=0;d<5;d++)for(let p=0;p<5;p++){if(Cd.hp[d][p]>maxHP)maxHP=Cd.hp[d][p];if(Cd.sn[d][p]>maxSN)maxSN=Cd.sn[d][p];totHP+=Cd.hp[d][p];totSN+=Cd.sn[d][p];}
+  for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){if(Cd.hp[d][p]>maxHP)maxHP=Cd.hp[d][p];if(Cd.sn[d][p]>maxSN)maxSN=Cd.sn[d][p];totHP+=Cd.hp[d][p];totSN+=Cd.sn[d][p];}
   let body=`<div style="display:grid;grid-template-columns:30px repeat(5,1fr);gap:5px;padding:.5rem .75rem .5rem">`;
   body+=`<div></div>`+PTW_DAYS.map(d=>`<div style="text-align:center;font-size:.66rem;font-weight:600;color:var(--tx);padding-bottom:2px">${d}</div>`).join('');
-  for(let p=0;p<5;p++){
+  for(let p=0;p<TT_PER;p++){
     body+=`<div style="display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:600;color:var(--mu)">P${p+1}</div>`;
-    for(let d=0;d<5;d++){
+    for(let d=0;d<TT_ND;d++){
       const c=grid[d]&&grid[d][p];
       if(!c){body+=_ptwCellEmpty();continue;}
       if(c.length===4){
@@ -3628,7 +3638,7 @@ function rP(){
   // Get active subjects from timetable if no grades
   const ttGrid=TT_DATA[String(x)]||[];
   const ttSubjs=[];
-  if(ttGrid.length){for(let dd=0;dd<5;dd++)for(let pp2=0;pp2<5;pp2++){const c=ttGrid[dd]?.[pp2];if(c){if(c[0])ttSubjs.push(c[0]);if(c.length===4&&c[2])ttSubjs.push(c[2])}}}
+  if(ttGrid.length){for(let dd=0;dd<TT_ND;dd++)for(let pp2=0;pp2<TT_PER;pp2++){const c=ttGrid[dd]?.[pp2];if(c){if(c[0])ttSubjs.push(c[0]);if(c.length===4&&c[2])ttSubjs.push(c[2])}}}
   const uniqueTTSubjs=[...new Set(ttSubjs)].sort();
 
   // Populate subject dropdown with only this pupil's subjects
@@ -4645,7 +4655,7 @@ function rHeatmaps(x,ink,subjFilter){
   }).join('');
 
   // ── 2. DISTRIBUTION CHARTS (rendered separately in p-dist) ──
-  const dowNames=['Mon','Tue','Wed','Thu','Fri'];
+  const dowNames=TT_DAYS;
 
   // Academic year parsing (shared by all breakdowns)
   const aySet=new Set();
@@ -6002,7 +6012,7 @@ function rSEND(){
           // Approximate subject lessons YTD: total lessons × (subject lpw / 25)
           const grid2=TT_DATA[String(px)];
           let sLPW=0;
-          if(grid2){for(let dd=0;dd<5;dd++)for(let pp2=0;pp2<5;pp2++){const gc=grid2[dd]?.[pp2];if(gc&&(gc[0]===s||(gc.length===4&&gc[2]===s)))sLPW++}}
+          if(grid2){for(let dd=0;dd<TT_ND;dd++)for(let pp2=0;pp2<TT_PER;pp2++){const gc=grid2[dd]?.[pp2];if(gc&&(gc[0]===s||(gc.length===4&&gc[2]===s)))sLPW++}}
           let sYtdTotalL=0,sTtdTotalL=0;
           for(const[w,tl]of Object.entries(WLK)){
             if(w>=ayStart&&w<=_sTodayISO) sYtdTotalL+=sLPW;
@@ -6409,7 +6419,7 @@ function renderDistCharts(){
   }
 
   const distTipData={};
-  const dowNames=['Mon','Tue','Wed','Thu','Fri'];
+  const dowNames=TT_DAYS;
 
   // DOW
   const dowAyCounts={},dowItems={};
@@ -6533,7 +6543,7 @@ function renderHPDistCharts(){
   if(filterVal!=='all'){const ay=parseInt(filterVal);const lbl=`${ay}-${(ay+1)%100}`;filtered=all.filter(r=>r.ay===lbl);visAy=[lbl]}
 
   const tipData={};
-  const dowNames=['Mon','Tue','Wed','Thu','Fri'];
+  const dowNames=TT_DAYS;
   const TLAB=['House Points','Positive on-calls'];const TSHORT=['HP','POC'];const TCOL=[PAL.green,PAL.cyan];
   const noun=n=>`${n} house point${n!==1?'s':''}`;
   function typeBody(items){const c=[0,0];items.forEach(r=>c[r.t]++);return`<div>${TLAB.map((n,i)=>c[i]?`<span style="color:${TCOL[i]};font-weight:600">${c[i]} ${n}</span>`:null).filter(Boolean).join(' · ')}</div>`}
@@ -6647,7 +6657,7 @@ function renderAttTable(){
     if(!g) continue;
     const _den=(DD.slotDenominatorsByAY||{})[_ay]||[];
     const _meta=((DD.splitSlotMeta||{})[_ay]||{})[String(px)]||{};
-    for(let d=0;d<5;d++) for(let p=0;p<5;p++){
+    for(let d=0;d<TT_ND;d++) for(let p=0;p<TT_PER;p++){
       const c=g[d][p];
       if(!c) continue;
       const _sd=(_den[d]&&_den[d][p])||0;
@@ -10229,7 +10239,7 @@ function rCL(){
   const samplePx=lr.length?lr[0][0]:null;
   const sampleGrid=samplePx!=null?(DD.timetables||{})[samplePx]:null;
   let subjLPW=0,totalLPW=25;
-  if(sampleGrid){for(let d=0;d<5;d++)for(let p=0;p<5;p++){const c=sampleGrid[d][p];if(c&&c[0]===sub)subjLPW++}}
+  if(sampleGrid){for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){const c=sampleGrid[d][p];if(c&&c[0]===sub)subjLPW++}}
   const lessonPct=totalLPW>0?Math.round(subjLPW/totalLPW*100):0;
 
   // Calculate equivalent point last academic year
@@ -10552,7 +10562,7 @@ function rCC(){
       const grid=TT_DATA[String(px)];
       if(!grid) continue;
       let subjSlots=0,totalSlots=0;
-      for(let d=0;d<5;d++) for(let p=0;p<5;p++){
+      for(let d=0;d<TT_ND;d++) for(let p=0;p<TT_PER;p++){
         if(grid[d][p]){totalSlots++;if(grid[d][p][0]===sub) subjSlots++}
       }
       if(totalSlots===0) continue;
@@ -11543,7 +11553,7 @@ function rPeer(){
       pupils.forEach(px=>{
         const tt=TT_DATA[String(px)];
         let lpw=0;
-        if(tt){for(let d=0;d<5;d++)for(let p=0;p<5;p++){const gc=tt[d]?.[p];if(gc&&(gc[0]===sub||(gc.length===4&&gc[2]===sub)))lpw++}}
+        if(tt){for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){const gc=tt[d]?.[p];if(gc&&(gc[0]===sub||(gc.length===4&&gc[2]===sub)))lpw++}}
         totalLessons+=lpw*totalWeeks;
         const pAbs=(DD.attAbsSubj||{})[String(px)]||[];
         totalAbs+=pAbs.filter(r=>r[1]===sub&&r[0]>=ayStart&&r[0]<=todayISO).length;
@@ -11572,7 +11582,7 @@ function rPeer(){
         pupils.forEach(px=>{
           const tt=TT_DATA[String(px)];
           let lpw=0;
-          if(tt){for(let d=0;d<5;d++)for(let p=0;p<5;p++){const gc=tt[d]?.[p];if(gc&&(gc[0]===sub||(gc.length===4&&gc[2]===sub)))lpw++}}
+          if(tt){for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){const gc=tt[d]?.[p];if(gc&&(gc[0]===sub||(gc.length===4&&gc[2]===sub)))lpw++}}
           totalLessons+=lpw*totalWeeks;
           const pAbs=(DD.attAbsSubj||{})[String(px)]||[];
           totalAbs+=pAbs.filter(r=>r[1]===sub&&r[0]>=ayStart&&r[0]<=todayISO).length;
@@ -11642,8 +11652,8 @@ function rPeer(){
 
     // Count lessons per subject from timetable
     const subjLPW={};
-    for(let d=0;d<5;d++){
-      for(let p=0;p<5;p++){
+    for(let d=0;d<TT_ND;d++){
+      for(let p=0;p<TT_PER;p++){
         const cell=grid[d]?.[p];
         if(cell){
           const subj=_SKR2[cell[0]]||cell[0];
@@ -12428,9 +12438,9 @@ function rPeer(){
     pupilPxs.forEach(px=>{
       const grid=TT_DATA[String(px)];
       if(!grid)return;
-      for(let d=0;d<5;d++){
+      for(let d=0;d<TT_ND;d++){
         const day=grid[d];if(!day)continue;
-        for(let p=0;p<5;p++){
+        for(let p=0;p<TT_PER;p++){
           const cell=day[p];if(!cell)continue;
           // Cell formats: [subjKey, period] or [subjKey1, p+1, subjKey2, fromDate]
           let subjKey;
@@ -12471,7 +12481,7 @@ function rPeer(){
     const subjOverall={}; // subj -> {abs, sched, rate}
     subjects.forEach(subj=>{
       let totAbs=0,totSched=0;
-      for(let d=0;d<5;d++)for(let p=0;p<5;p++){
+      for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){
         totSched+=scheduled[subj][d][p];
         totAbs+=(absent[subj]?.[d]?.[p])||0;
       }
@@ -12530,7 +12540,7 @@ function rPeer(){
       const score=reds*1.0+ambers*0.5;
       // Find dominant slot for this subject's avoiders
       let dominantSlot=null,dominantCount=0,totalSlotAbs=0;
-      for(let d=0;d<5;d++)for(let p=0;p<5;p++){
+      for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){
         const c=info.slotAbs[d][p];
         totalSlotAbs+=c;
         if(c>dominantCount){dominantCount=c;dominantSlot={d,p,count:c}}
@@ -12540,7 +12550,7 @@ function rPeer(){
     }).sort((a,b)=>b.score-a.score);
     
     // ── Render heatmap ──
-    const days=['Mon','Tue','Wed','Thu','Fri'];
+    const days=TT_DAYS;
     const periods=[1,2,3,4,5];
     
     // Cell colour: in absolute mode, traffic-light by raw rate;
@@ -12577,7 +12587,7 @@ function rPeer(){
     let header=`<tr><th style="text-align:left;font-size:.65rem;background:var(--sf2);padding:.4rem .5rem;position:sticky;left:0;z-index:2">Subject</th>`;
     days.forEach((d,di)=>{
       periods.forEach(p=>{
-        header+=`<th style="text-align:center;font-size:.55rem;color:var(--mu);background:var(--sf2);padding:.3rem .2rem;${p===5&&di<4?'border-right:2px solid var(--bd)':''}">${d.slice(0,3)}<br>P${p}</th>`;
+        header+=`<th style="text-align:center;font-size:.55rem;color:var(--mu);background:var(--sf2);padding:.3rem .2rem;${p===TT_PER&&di<TT_ND-1?'border-right:2px solid var(--bd)':''}">${d.slice(0,3)}<br>P${p}</th>`;
       });
     });
     header+=`<th style="text-align:center;font-size:.6rem;background:var(--sf2);padding:.3rem .4rem;border-left:2px solid var(--bd)">Subject<br>Avg</th></tr>`;
@@ -12585,14 +12595,14 @@ function rPeer(){
     const bodyRows=subjList.map(subj=>{
       const overall=subjOverall[subj];
       let row=`<tr><td style="text-align:left;font-size:.7rem;font-weight:500;padding:.25rem .5rem;background:var(--sf);position:sticky;left:0;z-index:1;border-right:1px solid var(--bd);white-space:nowrap">${subj}</td>`;
-      for(let d=0;d<5;d++){
-        for(let p=0;p<5;p++){
+      for(let d=0;d<TT_ND;d++){
+        for(let p=0;p<TT_PER;p++){
           const sched=scheduled[subj][d][p]||0;
           const abs=absent[subj]?.[d]?.[p]||0;
           const rate=sched>0?(abs/sched*100):null;
           const bg=cellColour(rate,overall.rate);
           const fg=cellTextColour(rate,overall.rate);
-          const borderR=p===4&&d<4?'border-right:2px solid var(--bd)':'';
+          const borderR=p===TT_PER-1&&d<TT_ND-1?'border-right:2px solid var(--bd)':'';
           if(rate==null){
             row+=`<td style="background:var(--sf);text-align:center;font-size:.55rem;color:var(--mu);padding:.25rem .15rem;${borderR}">·</td>`;
           }else{
@@ -12611,7 +12621,7 @@ function rPeer(){
     const anomalies=[];
     subjList.forEach(subj=>{
       const overall=subjOverall[subj];
-      for(let d=0;d<5;d++)for(let p=0;p<5;p++){
+      for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){
         const sched=scheduled[subj][d][p]||0;
         if(sched<5)continue; // require minimum sample size
         const abs=absent[subj]?.[d]?.[p]||0;
@@ -12638,8 +12648,8 @@ function rPeer(){
       // Mini slot grid for this subject's avoidance absences (5x5)
       const maxSlotC=Math.max(...[].concat(...r.slotAbs),1);
       let miniGrid='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;width:9rem">';
-      for(let d=0;d<5;d++){
-        for(let p=0;p<5;p++){
+      for(let d=0;d<TT_ND;d++){
+        for(let p=0;p<TT_PER;p++){
           const c=r.slotAbs[d][p];
           const intensity=c/maxSlotC;
           const bg=c===0?'var(--sf2)':`rgba(154,51,40,${0.15+intensity*0.7})`;
@@ -12754,7 +12764,7 @@ function rPeer(){
               const samplePx=[...info.pupils][0];
               const grid=TT_DATA[String(samplePx)];
               if(grid){
-                for(let d=0;d<5;d++){const day=grid[d];if(!day)continue;for(let p=0;p<5;p++){
+                for(let d=0;d<TT_ND;d++){const day=grid[d];if(!day)continue;for(let p=0;p<TT_PER;p++){
                   const cell=day[p];if(!cell)continue;
                   const sk=cell.length===4?cell[2]:cell[0];
                   const cellSubj=SKR[sk]||sk;
@@ -12794,8 +12804,8 @@ function rPeer(){
         
         // Build the wide table
         let hdr=`<tr><th style="text-align:left;font-size:.6rem;background:var(--sf2);padding:.3rem .4rem;position:sticky;left:0;z-index:2">Class</th><th style="text-align:center;font-size:.6rem;background:var(--sf2);padding:.3rem .3rem">Pup</th><th style="text-align:center;font-size:.6rem;background:var(--sf2);padding:.3rem .3rem;border-right:2px solid var(--bd)">Total</th>`;
-        for(let d=0;d<5;d++){for(let p=0;p<5;p++){
-          hdr+=`<th style="text-align:center;font-size:.55rem;color:var(--mu);background:var(--sf2);padding:.3rem .15rem;${p===4&&d<4?'border-right:2px solid var(--bd)':''}">${days[d].slice(0,3)}<br>P${p+1}</th>`;
+        for(let d=0;d<TT_ND;d++){for(let p=0;p<TT_PER;p++){
+          hdr+=`<th style="text-align:center;font-size:.55rem;color:var(--mu);background:var(--sf2);padding:.3rem .15rem;${p===TT_PER-1&&d<TT_ND-1?'border-right:2px solid var(--bd)':''}">${days[d].slice(0,3)}<br>P${p+1}</th>`;
         }}
         hdr+='</tr>';
         
@@ -12810,11 +12820,11 @@ function rPeer(){
         }
         const body=classRows.map(c=>{
           let row=`<tr><td style="text-align:left;font-size:.65rem;font-weight:500;padding:.2rem .4rem;background:var(--sf);position:sticky;left:0;z-index:1;border-right:1px solid var(--bd);white-space:nowrap">Y${c.yg} ${c.subj} <span style="color:var(--mu);font-weight:400">Cl ${c.cls}</span></td><td style="text-align:center;font-size:.65rem;color:var(--mu);padding:.2rem .3rem">${c.nPupils}</td><td style="text-align:center;font-size:.7rem;font-weight:600;font-family:'IBM Plex Mono',monospace;padding:.2rem .3rem;border-right:2px solid var(--bd)">${c.totalAbs}</td>`;
-          for(let d=0;d<5;d++){for(let p=0;p<5;p++){
+          for(let d=0;d<TT_ND;d++){for(let p=0;p<TT_PER;p++){
             const slotKey=`${d}|${p}`;
             const isUsed=c.slotsUsed.includes(slotKey);
             const cnt=c.cellAbs[slotKey];
-            const borderR=p===4&&d<4?'border-right:2px solid var(--bd)':'';
+            const borderR=p===TT_PER-1&&d<TT_ND-1?'border-right:2px solid var(--bd)':'';
             if(!isUsed){
               row+=`<td style="background:var(--sf);text-align:center;color:var(--mu);font-size:.55rem;padding:.2rem .15rem;${borderR}">·</td>`;
             }else{
@@ -12889,13 +12899,13 @@ function rPeer(){
         const grid=TT_DATA[String(px)];
         if(grid){
           let foundSlot=null;
-          outer:for(let d=0;d<5;d++){
+          outer:for(let d=0;d<TT_ND;d++){
             const day=grid[d];if(!day)continue;
-            for(let p=0;p<5;p++){
+            for(let p=0;p<TT_PER;p++){
               const cell=day[p];if(!cell)continue;
               const sk=cell.length===4?cell[2]:cell[0];
               const cellSubj=SKR[sk]||sk;
-              if(cellSubj===subj){foundSlot=`${['Mon','Tue','Wed','Thu','Fri'][d]} P${p+1}`;break outer}
+              if(cellSubj===subj){foundSlot=`${TT_DAYS[d]} P${p+1}`;break outer}
             }
           }
           classToSlot[k]=foundSlot;
