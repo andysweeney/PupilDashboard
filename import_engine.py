@@ -311,6 +311,49 @@ def get_monday(date_str):
     d = datetime.strptime(date_str, '%Y-%m-%d')
     return (d - timedelta(days=d.weekday())).strftime('%Y-%m-%d')
 
+
+# ── DfE ACADEMIC WEEK NUMBERING ──
+# The DfE publishes attendance by "Week 1", "Week 2" ... and the national comparison
+# figures are keyed on those numbers. A school MUST use the same numbering or the
+# comparison silently compares different points in the year.
+#
+# THE TRAP: a school's first teaching day is not Week 1. TWS starts 4 September 2025,
+# which is DfE Week 5. Numbering from the first lesson puts every comparison four
+# weeks out — worst in the autumn term, when attendance is changing fastest, and
+# invisible because both numbers are called "week 10".
+#
+# THE RULE: weeks run Monday-Sunday, anchored on 1 August.
+#   1 Aug is Mon/Tue/Wed/Thu -> Week 1 is the week CONTAINING 1 August
+#   1 Aug is Fri/Sat/Sun     -> most of that week belongs to July, so Week 1 starts
+#                               the FOLLOWING Monday
+# Same four-day majority logic as ISO weeks, anchored on August rather than January.
+#
+# Two consequences that surprise people:
+#   * Week 1 can START IN JULY — 31 Jul 2023, 29 Jul 2024 — when 1 Aug is Tue-Thu.
+#   * A 53-week academic year happens. 1 Aug 2025 is Week 53 of 2024/25, not Week 1
+#     of 2025/26. Anything assuming 52 weeks loses a week every few years.
+
+def dfe_week1_monday(ay_start_year):
+    """Monday that begins DfE Academic Week 1 for the year starting 1 Aug <year>."""
+    aug1 = datetime(ay_start_year, 8, 1)
+    monday = aug1 - timedelta(days=aug1.weekday())
+    return monday if aug1.weekday() <= 3 else monday + timedelta(days=7)
+
+
+def dfe_week(date_str):
+    """(academic_year_start, week_number) for an ISO date, or (None, None).
+
+    Anchored on 1 August, NOT on the school's first day of term.
+    """
+    if not date_str:
+        return None, None
+    try:
+        d = datetime.strptime(str(date_str)[:10], '%Y-%m-%d')
+    except (ValueError, TypeError):
+        return None, None
+    y = d.year if d >= dfe_week1_monday(d.year) else d.year - 1
+    return y, (d - dfe_week1_monday(y)).days // 7 + 1
+
 def _norm_raw(v):
     """Normalise a raw report cell to a lookup key: strip, drop a trailing '.0'
     (so a float-read '1.0' matches '1'), and Title-case bare words."""
@@ -608,6 +651,16 @@ _per_seen = _per_seen[(_per_seen >= 1) & (_per_seen <= 20)]   # 20 = sanity ceil
 N_PER = int(_per_seen.max()) if len(_per_seen) else 5
 
 print(f"Timetable shape: {N_DAY} days {DAY_NAMES} x {N_PER} periods")
+
+# DfE academic week on every row, for national comparison. Anchored on 1 August,
+# not on the school's first teaching day — see dfe_week().
+_dfe = att_all['DateISO'].map(lambda x: dfe_week(x) if x else (None, None))
+att_all['DfeAY'] = [t[0] for t in _dfe]
+att_all['DfeWeek'] = [t[1] for t in _dfe]
+_wk = att_all[att_all['DfeWeek'].notna()]
+if len(_wk):
+    print(f"DfE weeks present: {int(_wk['DfeWeek'].min())}-{int(_wk['DfeWeek'].max())}"
+          f" (week 1 of {CAY} begins {dfe_week1_monday(CAY).strftime('%Y-%m-%d')})")
 _unknown_days = sorted(d for d in _days_seen if d and d not in DAY_MAP)
 if _unknown_days:
     # Never silently drop. A day we cannot place is a data problem the school should see.
@@ -1915,6 +1968,10 @@ output = {
         # every grid in this file is len(ttDays) x ttPeriods.
         "ttDays": DAY_NAMES,
         "ttPeriods": N_PER,
+        # DfE academic week anchor. The browser needs this to label a week the same
+        # way the national figures do — a school's first teaching day is NOT week 1
+        # (TWS starts on DfE week 5). Week n begins dfeWeek1 + 7*(n-1) days.
+        "dfeWeek1": dfe_week1_monday(CAY).strftime('%Y-%m-%d'),
         "period_labels": period_labels,
         # Dated spells, so a historic view can ask "was this pupil SEND then"
         # rather than "are they SEND now". senStatus below stays as the current
