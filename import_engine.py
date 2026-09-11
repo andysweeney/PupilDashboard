@@ -2106,21 +2106,28 @@ def _slice_output(full, keep_px):
 # this school's data the top clamp removes 0.02 points and the bottom adds 1.49.
 # The low tail is the finding, so it is counted rather than trimmed. Bands
 # rather than a single threshold, so the cut can move without a rebuild.
-_ATT_BANDS = [('u85', 85), ('u90', 90), ('u95', 95)]
+def _att_values(vals):
+    """Per-pupil attendance percentages, sorted, one decimal place.
 
-def _att_bands(vals):
-    out = {k: 0 for k, _ in _ATT_BANDS}
-    out['o95'] = 0
-    for v in vals:
-        if v is None:
-            continue
-        for k, cut in _ATT_BANDS:
-            if v < cut:
-                out[k] += 1
-                break
-        else:
-            out['o95'] += 1
-    return out
+    This REPLACES _att_bands(), which pre-counted pupils into u85/u90/u95/o95.
+    Two problems with that:
+
+      * it decided the threshold at BUILD time, so the browser could not offer
+        a different one without a rebuild — unlike every other threshold, which
+        lives in the Admin panel and applies immediately;
+      * it discarded the values, so nothing could be recomputed. The only
+        consumer (_below90 in the "Pupils below 90%" chart) had to add u85 and
+        u90 back together, which is the giveaway — the banding was partly
+        undone at the point of use. u95 and o95 were never read at all.
+
+    A sorted list lets the browser count against ANY cutoff, exactly. Rounding
+    to 1dp rather than integers matters: 89.6 rounded to 90 would be counted as
+    meeting a 90% threshold when it does not.
+
+    Size: a form is ~25 pupils, so this is ~25 short numbers where the bands
+    were 4 — a few hundred bytes per group, against a 11MB file.
+    """
+    return sorted(round(v, 1) for v in vals if v is not None)
 
 
 def _winsor_mean(vals, p=0.10):
@@ -2250,7 +2257,7 @@ def _build_peer_stats(full):
         by_form[form] = {
             'year':   reg[pxs[0]].get('year'),
             'n':      len(pxs),
-            'attBands': _att_bands(att),
+            'attVals': _att_values(att),
             'att':    rnd(statistics.fmean(att) if att else None),
             'attW':   rnd(_winsor_mean(att)),
             'pos':    rnd(statistics.fmean(pv) if pv else None),
@@ -2282,7 +2289,7 @@ def _build_peer_stats(full):
         rnd = lambda x: None if x is None else round(x, 3)
         year_rows[yr] = {
             'n': len(pxs),
-            'attBands': _att_bands(att),
+            'attVals': _att_values(att),
             'att': rnd(statistics.fmean(att) if att else None), 'attW': rnd(_winsor_mean(att)),
             'pos': rnd(statistics.fmean(pv)),                   'posW': rnd(_winsor_mean(pv)),
             'neg': rnd(statistics.fmean(nv)),                   'negW': rnd(_winsor_mean(nv)),
@@ -2395,7 +2402,7 @@ def _build_cohort_stats(full):
 
             out.setdefault(str(yg), {})[str(ay)] = {
                 'n': len(pxs), 'intake': intake,
-                'attBands': _att_bands(att),
+                'attVals': _att_values(att),
                 'att': rnd(statistics.fmean(att)), 'attW': rnd(_winsor_mean(att)),
                 'pos': rnd(statistics.fmean(pv)),  'posW': rnd(_winsor_mean(pv)),
                 'neg': rnd(statistics.fmean(nv)),  'negW': rnd(_winsor_mean(nv)),
