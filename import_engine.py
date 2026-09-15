@@ -871,9 +871,29 @@ for _p, _L in _ledger.items():
     if _p not in _CURRENT_ROSTER and _p in _att_pids and _L.get('sen') and _p not in sen_map:
         sen_map[_p] = _L['sen']
 
-ehcp_set = {p for p, s in sen_map.items() if s == 'E'}
-send_set = set(sen_map.keys())
+# ── WHICH SEN CODES MEAN "HAS SEN"? ──
+# send_set used to be every pupil with a non-empty status code. A SEN export carries a
+# row per pupil INCLUDING those with no need, so "N" (No SEN) was counted as SEN and the
+# whole roll came out SEND — 478 of 478 at TWS. That also emptied the FSM-only and
+# "neither" groups, because the grouping tests SEN before either of them.
+# DfE codes: N = no SEN, K = SEN support, E = EHC plan. A/P/S are the pre-2014 codes
+# (School Action, Action Plus, Statement) and still appear in historic exports.
+_NO_SEN = {'N', 'NO', 'NONE', 'NA', 'N/A', '0', '-'}
+
+def _has_sen(code):
+    return bool(code) and str(code).strip().upper() not in _NO_SEN
+
+ehcp_set = {p for p, s in sen_map.items() if str(s).strip().upper() in ('E', 'S')}
+send_set = {p for p, s in sen_map.items() if _has_sen(s)}
+_no_sen_n = len(sen_map) - len(send_set)
 print(f"FSM: {len(fsm_set)}, SEND: {len(send_set)}, EHCP: {len(ehcp_set)}")
+print(f"  SEN codes seen: {sorted(set(str(v).strip().upper() for v in sen_map.values()))}")
+print(f"  {_no_sen_n} pupils carry a 'no SEN' code and are correctly NOT counted as SEND")
+if send_set and len(send_set) == len(registry):
+    print("  !! EVERY pupil is flagged SEND — check the SEN export's status codes")
+if not fsm_set:
+    print("  !! NO pupil is flagged FSM — check the roster 'fsm' column and FSM.csv "
+          "('Eligible for free meals' should read Y/Yes/T)")
 
 # ── DATED SEN / EHCP / FSM SPELLS ─────────────────────────────────────────────
 # The sets above are point-in-time, and worse, the engine stamped them onto every
@@ -915,7 +935,9 @@ for df_sen, col_pref in [(sen_y10, 'SEN Status Code'), (sen_y11, 'SEN Status')]:
     for _, row in df_sen.iterrows():
         p = pid(row['Name'])
         status = row.get(col)
-        if p not in registry or pd.isna(status) or not str(status).strip():
+        # Same "N means no SEN" rule as send_set above — without this a no-SEN row
+        # becomes an open SEN spell and every pupil reads SEND at every collection.
+        if p not in registry or pd.isna(status) or not _has_sen(status):
             continue
         f, t = _spell_dates(row)
         if f or t:
@@ -955,8 +977,10 @@ def _spell_active(spells, p, iso):
         return sp['code']
     return None
 
-def send_at(p, iso):  return _spell_active(sen_spells, p, iso) is not None
-def ehcp_at(p, iso):  return _spell_active(sen_spells, p, iso) == 'E'
+def send_at(p, iso):  return _has_sen(_spell_active(sen_spells, p, iso))
+def ehcp_at(p, iso):
+    _c = _spell_active(sen_spells, p, iso)
+    return bool(_c) and str(_c).strip().upper() in ('E', 'S')   # E = EHC plan, S = statement
 def fsm_at(p, iso):   return _spell_active(fsm_spells, p, iso) is not None
 
 print(f"  dated spells: {_dated_sen} SEN rows, {_dated_fsm} FSM rows carry dates"
