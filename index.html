@@ -1081,6 +1081,28 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   // ── Boot the app ──
   const CFG=DD.config,REG=DD.registry,PRG=DD.progress,ENR=DD.enrolments;
 let SUBS=CFG.subjects;const PER=CFG.periods,PL=CFG.period_labels,CAY=CFG.current_acad_year;
+// ── PROGRESS ROW SHAPE — resolve by NAME, never by a hardcoded index ──
+// progress rows are positional arrays and the length has changed between engine
+// versions. Two readers here once assumed different lengths, so the Pupil tab and the
+// SLT tab disagreed about the same pupil's SEN status. Worse, it failed SILENTLY:
+// the misaligned reader landed on the scores object, and {} is TRUTHY in JavaScript,
+// so every pupil came out SEND rather than anything throwing.
+// The engine now declares its column order in data.json. Older files predate that, so
+// fall back on length: 7 keeps the pupil id at index 1, 6 does not.
+const _PC=(function(){
+  const d=DD.progressCols;
+  if(Array.isArray(d)&&d.length){ const m={}; d.forEach((c,i)=>m[c]=i); return m; }
+  return null;   // resolved per row below
+})();
+function progCol(row,name){
+  if(_PC&&_PC[name]!=null)return row[_PC[name]];
+  const n=row.length;                       // no declaration: count from the end
+  const off={fsm:n-1,ehcp:n-2,send:n-3,scores:n-4,reg:n-5,px:0};
+  return row[off[name]];
+}
+if(!_PC&&typeof console!=='undefined')
+  console.warn('data.json has no progressCols — row shape inferred from length. '
+    +'Rebuild with the current engine to remove the guesswork.');
 // Reports sit on their own dated axis. Terms stay for attendance, which is a
 // genuine per-term aggregation; a report is an event on a date, and bucketing
 // two collections into one term used to make the second overwrite the first.
@@ -2124,7 +2146,15 @@ function pDate(p){
 }
 function clAt(en,s,p){const d=pDate(p);return en.filter(r=>r.t==='cls'&&r.s===s).reverse().find(r=>r.f<=d&&(r.u===null||r.u>d))||null}
 function sDrop(en,s){const r=en.find(e=>e.t==='subj'&&e.s===s);return r?r.u:null}
-function getProg(ink,x){const a=PRG[inkKey(ink)]||{};const o={};for(const[p,rs]of Object.entries(a)){const r=rs.find(r=>r[0]===x);if(r)o[p]={x:r[0],pid:r[1],tg:r[2],sc:r[3],send:r[4],ehcp:r[5],fsm:r[6]}}
+// ⚠️ ROW LENGTH VARIES BY ENGINE VERSION — read the flags from the END.
+//     6: [pupilId, reg, scores, send, ehcp, fsm]
+//     7: [pupilId, id, reg, scores, send, ehcp, fsm]
+// This function assumed 7 while _hmFlags assumed 6, so on any given file ONE of
+// the two tabs was wrong — the Pupil tab and the SLT tab disagreed about the same
+// pupil's SEN status, which is exactly how the fault was found.
+// The last three elements are always send, ehcp, fsm; scores is always the one
+// before them. Count back and both versions work.
+function getProg(ink,x){const a=PRG[inkKey(ink)]||{};const o={};for(const[p,rs]of Object.entries(a)){const r=rs.find(r=>r[0]===x);if(r)o[p]={x:r[0],pid:(r.length>6?r[1]:null),tg:progCol(r,'reg'),sc:progCol(r,'scores'),send:progCol(r,'send')===true,ehcp:progCol(r,'ehcp')===true,fsm:progCol(r,'fsm')===true}}
   if(SUBJ&&SUBJ.hasLineage){for(const p in o){const src=o[p].sc;if(!src)continue;let cl=null;
     for(const ch of SUBJ.children){
       if(src[ch]!=null) continue;
@@ -7270,11 +7300,12 @@ function _hmFlags(){
   Object.values(DD.progress||{}).forEach(ay=>Object.values(ay||{}).forEach(rows=>{
     (rows||[]).forEach(r=>{
       if(!Array.isArray(r)||r.length<6)return;
-      const k=String(r[0]), n=r.length;
+      const k=String(r[0]);
       if(!f[k])f[k]={send:false,ehcp:false,fsm:false};
-      if(r[n-3]===true)f[k].send=true;
-      if(r[n-2]===true)f[k].ehcp=true;
-      if(r[n-1]===true)f[k].fsm=true;   // === true: never trust a truthy object
+      // === true, never truthiness: the scores object is truthy and sits next door.
+      if(progCol(r,'send')===true)f[k].send=true;
+      if(progCol(r,'ehcp')===true)f[k].ehcp=true;
+      if(progCol(r,'fsm') ===true)f[k].fsm =true;
     });
   }));
   _HM_FLAGS=f; return f;
@@ -8511,14 +8542,25 @@ function _hmSLT(){
   const order=['fsm','ehcp','sen','both','neither'];
   const mxU=Math.max(...order.map(k=>grp[k].length?sum(grp[k],un)/grp[k].length:0))||1;
   const body='<table style="width:100%;font-size:.72rem;border-collapse:collapse">'
-    +'<tr style="color:var(--tx2);text-align:left"><th style="font-weight:500;padding:.2rem 0">Group</th><th style="font-weight:500;text-align:right">n</th><th style="font-weight:500;padding-left:.8rem">Unprepared per pupil</th><th style="font-weight:500;text-align:right">All</th><th style="font-weight:500;text-align:right">vs base</th></tr>'
+    +'<tr style="color:var(--tx2);text-align:left">'
+      +'<th style="font-weight:500;padding:.2rem 0">Group</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">n</th>'
+      +'<th style="font-weight:500;padding-left:.4rem" colspan="2">Unprepared per pupil</th>'
+      +'<th style="font-weight:500;text-align:right">All</th>'
+      +'<th style="font-weight:500;text-align:right">vs base</th></tr>'
     +order.filter(k=>grp[k].length).map(k=>{
       const n=grp[k].length, u=sum(grp[k],un)/n, t=sum(grp[k],tot)/n;
       const ratio=base?t/base:0;
-      return '<tr><td style="padding:.25rem 0">'+labels[k]+'</td><td style="text-align:right;color:var(--tx2)">'+n+'</td>'
-        +'<td style="padding-left:.8rem">'+_hmBar(100*u/mxU,u/mxU>0.7?'bad':u/mxU>0.4?'warn':'ok')+' <span style="color:var(--tx2)">'+u.toFixed(1)+'</span></td>'
-        +'<td style="text-align:right">'+t.toFixed(0)+'</td>'
-        +'<td style="text-align:right;font-weight:600;color:'+(ratio>=2?'var(--red)':ratio>=1.5?'var(--orange)':'var(--tx2)')+'">'+(ratio?ratio.toFixed(1)+'×':'—')+'</td></tr>';
+      // The bar and its value shared one unbounded cell, so a long bar pushed its own
+      // number onto the next line and the row lost alignment. The bar is width-capped
+      // and the value now sits in its own fixed cell after it.
+      return '<tr><td style="padding:.25rem 0;white-space:nowrap">'+labels[k]+'</td>'
+        +'<td style="text-align:right;color:var(--tx2);padding:0 .5rem;width:38px">'+n+'</td>'
+        +'<td style="padding-left:.4rem"><div style="max-width:220px">'
+          +_hmBar(100*u/mxU,u/mxU>0.7?'bad':u/mxU>0.4?'warn':'ok')+'</div></td>'
+        +'<td style="text-align:right;color:var(--tx2);width:52px;white-space:nowrap">'+u.toFixed(1)+'</td>'
+        +'<td style="text-align:right;width:48px">'+t.toFixed(0)+'</td>'
+        +'<td style="text-align:right;font-weight:600;width:56px;color:'+(ratio>=2?'var(--red)':ratio>=1.5?'var(--orange)':'var(--tx2)')+'">'+(ratio?ratio.toFixed(1)+'\u00d7':'\u2014')+'</td></tr>';
     }).join('')+'</table>';
 
   const fsmAll=[...grp.fsm,...grp.both], fsmR=fsmAll.length&&base?(sum(fsmAll,tot)/fsmAll.length)/base:0;
@@ -8593,7 +8635,11 @@ function _hmSLT(){
       +'<span style="width:36px;text-align:right">'+c[2]+'%</span></div>').join('');
     h+=_hmPanel('What share of each group\u2019s sanctions is unpreparedness',
       'Composition holds up better than a raw rate when a group is small \u2014 a single pupil moves a mean, not a share. '
-      +'Groups are \u201cever\u201d, not \u201cnow\u201d.',cb);
+      +'Groups are \u201cever\u201d, not \u201cnow\u201d. '
+      +'\u26a0\ufe0f Unpreparedness is matched on incident WORDING, so it is only as '
+      +'good as the incident map \u2014 43 incident types are currently unmatched, '
+      +'including \u201cLate to lesson\u201d (2,017 incidents). Check the '
+      +'unmapped_incident flag in Admin before quoting these figures.',cb);
   }
   return h;
 }
