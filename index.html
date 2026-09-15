@@ -7239,6 +7239,19 @@ function _hmYear(px){return ((DD.registry||{})[String(px)]||{}).year||'';}
 
 // SEND / EHCP / FSM live on the progress rows, not the registry.
 let _HM_FLAGS=null;
+// ⚠️ THESE ARE "EVER" FLAGS, NOT "NOW" FLAGS.
+// The loop below ORs across every academic year and every collection, so a pupil who
+// was SEN, EHCP or FSM at ANY point reads true forever. That is deliberate while the
+// source data is undated: a point-in-time snapshot stamped onto historic collections
+// would be worse, because it would rewrite a pupil's past.
+//
+// It does mean this disagrees with the Pupil tab, which reads DD.senStatus — the
+// pupil's status NOW. Anywhere these flags are shown, say "ever" in the label.
+//
+// WHEN DATED DATA ARRIVES (senSpells / fsmSpells, or GroupHistory via the API),
+// switch this to resolve as-of a date and drop the "ever" wording. The engine already
+// computes send_at / ehcp_at / fsm_at per collection — the dated answer is in
+// DD.progress rows 3/4/5 already; it is this OR that flattens it.
 function _hmFlags(){
   if(_HM_FLAGS)return _HM_FLAGS;
   const f={};
@@ -8476,6 +8489,8 @@ function _hmSLT(){
   // 'neither' excludes EHCP as well as FSM and SEN — the old label said only two of
   // the three. The five groups are MUTUALLY EXCLUSIVE, so FSM pupils are split across
   // 'fsm' and 'both' and no row shows FSM as a whole; see anyFsm below.
+  // "Ever" throughout — see _hmFlags(). A pupil flagged at any point counts here even
+  // if the flag has since lapsed. Say so rather than letting a reader assume current.
   const labels={fsm:'FSM only',ehcp:'EHCP only',sen:'SEN only',
                 both:'FSM and either SEN or EHCP',neither:'None of the above'};
   const order=['fsm','ehcp','sen','both','neither'];
@@ -8502,7 +8517,7 @@ function _hmSLT(){
     +_hmCard('Sanctions per pupil','' +(totalSanc/(all.length||1)).toFixed(1),
              'since September')
     +_hmCard('FSM sanction gap',fsmR?fsmR.toFixed(1)+'\u00d7':'\u2014',
-             'more than pupils with no FSM or SEN',fsmR>=2?'bad':'')
+             'more than pupils never FSM, SEN or EHCP',fsmR>=2?'bad':'')
     +_hmCard('Pupils with no sanctions',clean+' of '+all.length,
              Math.round(100*clean/(all.length||1))+'% of the school')
     +'</div>';
@@ -8539,13 +8554,17 @@ function _hmSLT(){
 
   h+=_hmPanel('Pupils triggering a concern, by group',
     'Using the school\u2019s own Concerns thresholds rather than a raw count. '
-    +'The first three rows overlap \u2014 an FSM pupil with SEN is counted in both.',
+    +'The first three rows overlap \u2014 an FSM pupil with SEN is counted in both. '
+    +'<strong>Groups are \u201cever\u201d, not \u201cnow\u201d</strong>: a pupil flagged FSM, SEN or EHCP '
+    +'at any point in the data counts here, even if the flag has since lapsed. The Pupil '
+    +'tab shows current status, so the two can differ.',
     summary.map(r=>bar(r[0],conRate(r[1]),r[1].length,r[2])).join('')
     +'<div style="height:.45rem;border-top:1px solid var(--bd);margin:.45rem 0 .4rem"></div>'
     +'<div style="font-size:.66rem;color:var(--tx2);margin-bottom:.35rem">Broken down, no pupil counted twice</div>'
     +order.filter(k=>grp[k].length).map(k=>bar(labels[k],conBy[k],grp[k].length,'')).join(''));
   h+=_hmPanel('Sanctions per pupil by group',
-    'Unprepared means equipment, uniform or homework — the incidents a school can design out.',body);
+    'Unprepared means equipment, uniform or homework — the incidents a school can design out. '
+    +'Groups are “ever”, not “now” — see above.',body);
 
   // A composition read is far more robust than a rate when a group is small.
   const comp=order.filter(k=>grp[k].length>=5).map(k=>{
@@ -8558,7 +8577,8 @@ function _hmSLT(){
       +'<span style="flex:1">'+_hmBar(c[2],c[2]>45?'bad':c[2]>30?'warn':'ok')+'</span>'
       +'<span style="width:36px;text-align:right">'+c[2]+'%</span></div>').join('');
     h+=_hmPanel('What share of each group\u2019s sanctions is unpreparedness',
-      'Composition holds up better than a raw rate when a group is small \u2014 a single pupil moves a mean, not a share.',cb);
+      'Composition holds up better than a raw rate when a group is small \u2014 a single pupil moves a mean, not a share. '
+      +'Groups are \u201cever\u201d, not \u201cnow\u201d.',cb);
   }
   return h;
 }
