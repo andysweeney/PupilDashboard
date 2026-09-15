@@ -7255,11 +7255,26 @@ let _HM_FLAGS=null;
 function _hmFlags(){
   if(_HM_FLAGS)return _HM_FLAGS;
   const f={};
+  // ⚠️ READ THE FLAGS FROM THE END OF THE ROW, NOT FROM FIXED OFFSETS.
+  // Two engine versions are in the wild and they emit different row lengths:
+  //     6: [pupilId, reg, scores, send, ehcp, fsm]
+  //     7: [pupilId, id, reg, scores, send, ehcp, fsm]
+  // Hardcoding 3/4/5 reads the SCORES DICT as `send` on a 7-element row — and
+  // **an empty object is TRUTHY in JavaScript**, so every pupil came out SEND.
+  // That produced 478/478 SEND at TWS and emptied the FSM and "none" groups.
+  // It also hid itself: the same check in Python counts {} as falsy, so a
+  // server-side sanity check disagreed with the browser and the fault looked
+  // like stale data rather than an index error.
+  // The last three elements are always send, ehcp, fsm, whichever engine built
+  // the file — so count back from the end and both versions work.
   Object.values(DD.progress||{}).forEach(ay=>Object.values(ay||{}).forEach(rows=>{
     (rows||[]).forEach(r=>{
-      const k=String(r[0]);
+      if(!Array.isArray(r)||r.length<6)return;
+      const k=String(r[0]), n=r.length;
       if(!f[k])f[k]={send:false,ehcp:false,fsm:false};
-      if(r[3])f[k].send=true; if(r[4])f[k].ehcp=true; if(r[5])f[k].fsm=true;
+      if(r[n-3]===true)f[k].send=true;
+      if(r[n-2]===true)f[k].ehcp=true;
+      if(r[n-1]===true)f[k].fsm=true;   // === true: never trust a truthy object
     });
   }));
   _HM_FLAGS=f; return f;
