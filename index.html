@@ -8455,13 +8455,17 @@ function _hmSLT(){
   const end=_hmToday(), ayStart=(end.slice(5)>='09-01'?end.slice(0,4):(+end.slice(0,4)-1))+'-09-01';
   const reg=DD.registry||{};
   const all=Object.keys(reg).map(Number);
-  const grp={neither:[],ehcp:[],sen:[],fsm:[],both:[]};
+  // Five mutually exclusive groups. Order matters: FSM-AND-need is tested FIRST so a
+  // pupil with both lands in the combined group rather than being swallowed by EHCP.
+  // (The old order put EHCP first, so an FSM pupil with an EHCP never reached 'both'.)
+  const grp={fsm:[],ehcp:[],sen:[],both:[],neither:[]};
   all.forEach(p=>{
     const f=F[String(p)]||{};
-    if(f.ehcp)grp.ehcp.push(p);
-    else if(f.send&&f.fsm)grp.both.push(p);
-    else if(f.send)grp.sen.push(p);
+    const need=f.ehcp||f.send;
+    if(f.fsm&&need)grp.both.push(p);
     else if(f.fsm)grp.fsm.push(p);
+    else if(f.ehcp)grp.ehcp.push(p);
+    else if(f.send)grp.sen.push(p);
     else grp.neither.push(p);
   });
   const tot={},un={};
@@ -8472,8 +8476,9 @@ function _hmSLT(){
   // 'neither' excludes EHCP as well as FSM and SEN — the old label said only two of
   // the three. The five groups are MUTUALLY EXCLUSIVE, so FSM pupils are split across
   // 'fsm' and 'both' and no row shows FSM as a whole; see anyFsm below.
-  const labels={neither:'No FSM, SEN or EHCP',ehcp:'EHCP',sen:'SEN support, no EHCP',fsm:'FSM, no SEN',both:'FSM and SEN'};
-  const order=['neither','ehcp','sen','fsm','both'];
+  const labels={fsm:'FSM only',ehcp:'EHCP only',sen:'SEN only',
+                both:'FSM and either SEN or EHCP',neither:'None of the above'};
+  const order=['fsm','ehcp','sen','both','neither'];
   const mxU=Math.max(...order.map(k=>grp[k].length?sum(grp[k],un)/grp[k].length:0))||1;
   const body='<table style="width:100%;font-size:.72rem;border-collapse:collapse">'
     +'<tr style="color:var(--tx2);text-align:left"><th style="font-weight:500;padding:.2rem 0">Group</th><th style="font-weight:500;text-align:right">n</th><th style="font-weight:500;padding-left:.8rem">Unprepared per pupil</th><th style="font-weight:500;text-align:right">All</th><th style="font-weight:500;text-align:right">vs base</th></tr>'
@@ -8517,7 +8522,7 @@ function _hmSLT(){
   // uses all FSM pupils, so without this row the card and the panel disagree.
   // These two rows OVERLAP the ones above and are shown separately for that reason.
   const anyFsm=[...grp.fsm,...grp.both];
-  const anySen=[...grp.sen,...grp.both,...grp.ehcp];
+  const anySen=[...grp.sen,...grp.ehcp,...grp.both];
   const summary=[
     ['Any FSM',anyFsm,'includes FSM pupils who are also SEN'],
     ['Any SEN or EHCP',anySen,'includes SEN pupils who are also FSM'],
