@@ -8469,7 +8469,10 @@ function _hmSLT(){
   const sum=(list,m)=>list.reduce((a,p)=>a+(m[p]||0),0);
   const base=grp.neither.length?sum(grp.neither,tot)/grp.neither.length:0;
 
-  const labels={neither:'Neither FSM nor SEN',ehcp:'EHCP',sen:'SEN support, no EHCP',fsm:'FSM, no SEN',both:'FSM and SEN'};
+  // 'neither' excludes EHCP as well as FSM and SEN — the old label said only two of
+  // the three. The five groups are MUTUALLY EXCLUSIVE, so FSM pupils are split across
+  // 'fsm' and 'both' and no row shows FSM as a whole; see anyFsm below.
+  const labels={neither:'No FSM, SEN or EHCP',ehcp:'EHCP',sen:'SEN support, no EHCP',fsm:'FSM, no SEN',both:'FSM and SEN'};
   const order=['neither','ehcp','sen','fsm','both'];
   const mxU=Math.max(...order.map(k=>grp[k].length?sum(grp[k],un)/grp[k].length:0))||1;
   const body='<table style="width:100%;font-size:.72rem;border-collapse:collapse">'
@@ -8484,26 +8487,58 @@ function _hmSLT(){
     }).join('')+'</table>';
 
   const fsmAll=[...grp.fsm,...grp.both], fsmR=fsmAll.length&&base?(sum(fsmAll,tot)/fsmAll.length)/base:0;
+  // All three cards read SANCTIONS, and none of them used to say so — "Per pupil
+  // this year", "FSM gap" and "Pupils with none" left the reader to infer the
+  // subject from a panel further down the page. Say the noun, say the window,
+  // and say what a ratio is a ratio OF.
+  const totalSanc=Object.values(tot).reduce((a,b)=>a+b,0);
+  const clean=all.filter(p=>!tot[p]).length;
   let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
-    +_hmCard('Per pupil this year',(Object.values(tot).reduce((a,b)=>a+b,0)/(all.length||1)).toFixed(1),'')
-    +_hmCard('FSM gap',fsmR?fsmR.toFixed(1)+'×':'—','vs no FSM or SEN',fsmR>=2?'bad':'')
-    +_hmCard('Pupils with none',all.filter(p=>!tot[p]).length+' of '+all.length,'')
+    +_hmCard('Sanctions per pupil','' +(totalSanc/(all.length||1)).toFixed(1),
+             'since September')
+    +_hmCard('FSM sanction gap',fsmR?fsmR.toFixed(1)+'\u00d7':'\u2014',
+             'more than pupils with no FSM or SEN',fsmR>=2?'bad':'')
+    +_hmCard('Pupils with no sanctions',clean+' of '+all.length,
+             Math.round(100*clean/(all.length||1))+'% of the school')
     +'</div>';
   // Concern rate by group, on the school's own triggers — the same question the
   // gap table asks, but through the lens the school has already calibrated.
+  // Rate of pupils with a live concern, per group.
+  const conRate=list=>{
+    if(!list.length)return null;
+    let n=0; list.forEach(p=>{ const r=_hmItems(p); if(r.live.length)n++; });
+    return 100*n/list.length;
+  };
   const conBy={};
-  order.forEach(k=>{
-    let n=0;
-    grp[k].forEach(p=>{ const r=_hmItems(p); if(r.live.length)n++; });
-    conBy[k]=grp[k].length?100*n/grp[k].length:0;
-  });
-  const mxC=Math.max(...Object.values(conBy))||1;
+  order.forEach(k=>{ conBy[k]=conRate(grp[k])||0; });
+
+  // The five groups above are mutually exclusive, so FSM is split between 'fsm' and
+  // 'both' and nothing shows FSM AS A WHOLE. The FSM gap card at the top of this tab
+  // uses all FSM pupils, so without this row the card and the panel disagree.
+  // These two rows OVERLAP the ones above and are shown separately for that reason.
+  const anyFsm=[...grp.fsm,...grp.both];
+  const anySen=[...grp.sen,...grp.both,...grp.ehcp];
+  const summary=[
+    ['Any FSM',anyFsm,'includes FSM pupils who are also SEN'],
+    ['Any SEN or EHCP',anySen,'includes SEN pupils who are also FSM'],
+    ['No FSM, SEN or EHCP',grp.neither,'the comparison group']
+  ].filter(r=>r[1].length);
+
+  const allRates=[...Object.values(conBy),...summary.map(r=>conRate(r[1])||0)];
+  const mxC=Math.max(...allRates)||1;
+  const bar=(name,rate,n,note)=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+      +'<span style="width:150px;color:var(--tx2)"'+(note?' title="'+note+'"':'')+'>'+name+'</span>'
+      +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+n+'</span>'
+      +'<span style="flex:1">'+_hmBar(100*rate/mxC,rate/mxC>0.7?'bad':'warn')+'</span>'
+      +'<span style="width:44px;text-align:right">'+Math.round(rate)+'%</span></div>';
+
   h+=_hmPanel('Pupils triggering a concern, by group',
-    'Using the school\u2019s own Concerns thresholds rather than a raw count.',
-    order.filter(k=>grp[k].length).map(k=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
-      +'<span style="width:150px;color:var(--tx2)">'+labels[k]+'</span>'
-      +'<span style="flex:1">'+_hmBar(100*conBy[k]/mxC,conBy[k]/mxC>0.7?'bad':'warn')+'</span>'
-      +'<span style="width:44px;text-align:right">'+Math.round(conBy[k])+'%</span></div>').join(''));
+    'Using the school\u2019s own Concerns thresholds rather than a raw count. '
+    +'The first three rows overlap \u2014 an FSM pupil with SEN is counted in both.',
+    summary.map(r=>bar(r[0],conRate(r[1]),r[1].length,r[2])).join('')
+    +'<div style="height:.45rem;border-top:1px solid var(--bd);margin:.45rem 0 .4rem"></div>'
+    +'<div style="font-size:.66rem;color:var(--tx2);margin-bottom:.35rem">Broken down, no pupil counted twice</div>'
+    +order.filter(k=>grp[k].length).map(k=>bar(labels[k],conBy[k],grp[k].length,'')).join(''));
   h+=_hmPanel('Sanctions per pupil by group',
     'Unprepared means equipment, uniform or homework — the incidents a school can design out.',body);
 
