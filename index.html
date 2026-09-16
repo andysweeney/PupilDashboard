@@ -7344,6 +7344,16 @@ function _hmPanel(title,sub,body){
     +(sub?'<div style="font-size:.7rem;color:var(--tx2);margin-bottom:.5rem">'+sub+'</div>':'')
     +body+'</div>';
 }
+// Section heading for the SLT tab. Panels group into domains — Behaviour,
+// Attendance, Concerns, Ability, Effort — and without headings the tab reads as one
+// undifferentiated list. `note` carries a short line for a section that is not yet
+// populated, so an empty domain reads as "not built" rather than "broken".
+function _hmSection(title,note){
+  return '<div style="margin:1.1rem 0 .55rem;padding-bottom:.3rem;border-bottom:2px solid var(--bd)">'
+    +'<span style="font-weight:700;font-size:.95rem;letter-spacing:.01em">'+title+'</span>'
+    +(note?'<span style="font-size:.68rem;color:var(--tx2);margin-left:.5rem">'+note+'</span>':'')
+    +'</div>';
+}
 function _hmBar(pct,tone){
   const c=tone==='bad'?'var(--red)':tone==='warn'?'var(--orange)':'var(--sky)';
   return '<span style="display:inline-block;width:'+Math.max(2,Math.round(pct))+'%;height:7px;background:'+c+';border-radius:4px;vertical-align:middle"></span>';
@@ -8578,9 +8588,26 @@ function _hmSLT(){
              'more than pupils never FSM, SEN or EHCP',fsmR>=2?'bad':'')
     +_hmCard('Pupils with no sanctions',clean+' of '+all.length,
              Math.round(100*clean/(all.length||1))+'% of the school')
+    // Attendance year-to-date, whole school. Reuses _hmFormStats rather than
+    // computing a second time: it already derives per-pupil attendance from
+    // countAbsPeriods against scheduled periods, and a parallel calculation here
+    // would drift from the figures shown everywhere else in this tab.
+    // Both numbers are shown because they answer different questions — the mean is
+    // the school's headline, the Winsorised mean is the typical pupil once the
+    // handful of very low attenders are pulled in rather than dropped.
+    +(function(){
+        const st=_hmFormStats(all);
+        if(st.att==null)return _hmCard('Attendance year to date','\u2014','no attendance data');
+        const bad=st.att<ATT_LOW;
+        return _hmCard('Attendance year to date',st.att.toFixed(1)+'%',
+          'mean \u00b7 Winsorised '+(st.attW!=null?st.attW.toFixed(1)+'%':'\u2014'),
+          bad?'bad':'');
+      })()
     +'</div>';
   // Concern rate by group, on the school's own triggers — the same question the
   // gap table asks, but through the lens the school has already calibrated.
+  h+=_hmSection('Behaviour');
+
   // ── MEAN vs WINSORISED MEAN, per group ──
   // The plain mean is dragged by a handful of very high-sanction pupils: with 27,510
   // sanctions across 478 pupils, one child on 400 moves the school mean by most of a
@@ -8631,7 +8658,32 @@ function _hmSLT(){
       +'twice, and \u201cever\u201d rather than \u201cnow\u201d.',mwBody);
   }
 
-  // Rate of pupils with a live concern, per group.
+  h+=_hmPanel('Sanctions per pupil by group',
+    'Unprepared means equipment, uniform or homework — the incidents a school can design out. '
+    +'Groups are “ever”, not “now” — see above.',body);
+
+  // A composition read is far more robust than a rate when a group is small.
+  const comp=order.filter(k=>grp[k].length>=5).map(k=>{
+    const t=sum(grp[k],tot),u=sum(grp[k],un);
+    return [labels[k],grp[k].length,t?Math.round(100*u/t):0];
+  }).sort((a,b)=>b[2]-a[2]);
+  if(comp.length){
+    const cb=comp.map(c=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+      +'<span style="width:150px;color:var(--tx2)">'+c[0]+'</span>'
+      +'<span style="flex:1">'+_hmBar(c[2],c[2]>45?'bad':c[2]>30?'warn':'ok')+'</span>'
+      +'<span style="width:36px;text-align:right">'+c[2]+'%</span></div>').join('');
+    h+=_hmPanel('What share of each group\u2019s sanctions is unpreparedness',
+      'Composition holds up better than a raw rate when a group is small \u2014 a single pupil moves a mean, not a share. '
+      +'Groups are \u201cever\u201d, not \u201cnow\u201d. '
+      +'\u26a0\ufe0f Unpreparedness is matched on incident WORDING, so it is only as '
+      +'good as the incident map \u2014 43 incident types are currently unmatched, '
+      +'including \u201cLate to lesson\u201d (2,017 incidents). Check the '
+      +'unmapped_incident flag in Admin before quoting these figures.',cb);
+  }
+
+  h+=_hmSection('Concerns');
+
+  // Rate of pupils with a live concern, per group. (Rendered under Concerns below.)
   const conRate=list=>{
     if(!list.length)return null;
     let n=0; list.forEach(p=>{ const r=_hmItems(p); if(r.live.length)n++; });
@@ -8708,28 +8760,20 @@ function _hmSLT(){
       +'thresholds are in Admin \u2192 Concern thresholds. Instances exceed pupils where a concern '
       +'fires per subject or per teacher. Dismissed items are excluded.',mixBody);
   }
-  h+=_hmPanel('Sanctions per pupil by group',
-    'Unprepared means equipment, uniform or homework — the incidents a school can design out. '
-    +'Groups are “ever”, not “now” — see above.',body);
+  // ── SECTIONS NOT YET POPULATED ──
+  // Headings are shown deliberately, so an empty domain reads as "not built yet"
+  // rather than "broken". Remove each note as its panels land.
+  //
+  // ATTENDANCE has the most available immediately: the session figure, the below-X%
+  //   chart that already exists on the Heatmap tabs, and the national comparison
+  //   (PAPerc, England secondary) once headline attendance moves to sessions.
+  // ABILITY and EFFORT both need the report data. Effort is thin — TWS runs three
+  //   effort collections a year, and at Green Abbey no effort aspect carried any
+  //   results at all, so expect this section to be sparse at some schools.
+  h+=_hmSection('Attendance','nothing here yet');
+  h+=_hmSection('Ability','nothing here yet');
+  h+=_hmSection('Effort','nothing here yet');
 
-  // A composition read is far more robust than a rate when a group is small.
-  const comp=order.filter(k=>grp[k].length>=5).map(k=>{
-    const t=sum(grp[k],tot),u=sum(grp[k],un);
-    return [labels[k],grp[k].length,t?Math.round(100*u/t):0];
-  }).sort((a,b)=>b[2]-a[2]);
-  if(comp.length){
-    const cb=comp.map(c=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
-      +'<span style="width:150px;color:var(--tx2)">'+c[0]+'</span>'
-      +'<span style="flex:1">'+_hmBar(c[2],c[2]>45?'bad':c[2]>30?'warn':'ok')+'</span>'
-      +'<span style="width:36px;text-align:right">'+c[2]+'%</span></div>').join('');
-    h+=_hmPanel('What share of each group\u2019s sanctions is unpreparedness',
-      'Composition holds up better than a raw rate when a group is small \u2014 a single pupil moves a mean, not a share. '
-      +'Groups are \u201cever\u201d, not \u201cnow\u201d. '
-      +'\u26a0\ufe0f Unpreparedness is matched on incident WORDING, so it is only as '
-      +'good as the incident map \u2014 43 incident types are currently unmatched, '
-      +'including \u201cLate to lesson\u201d (2,017 incidents). Check the '
-      +'unmapped_incident flag in Admin before quoting these figures.',cb);
-  }
   return h;
 }
 
