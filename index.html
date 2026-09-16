@@ -8537,6 +8537,9 @@ function _hmSLT(){
     else if(f.send)grp.sen.push(p);
     else grp.neither.push(p);
   });
+  // pupil -> group key, for anything that walks the sanction list rather than the roll
+  const gOf={};
+  Object.keys(grp).forEach(k=>grp[k].forEach(p=>{gOf[p]=k;}));
   const tot={},un={};
   SAN.forEach((r,i)=>{ if(_hmDate(r)<ayStart)return; tot[r[0]]=(tot[r[0]]||0)+1; if(_hmIsUnprep(i))un[r[0]]=(un[r[0]]||0)+1; });
   const sum=(list,m)=>list.reduce((a,p)=>a+(m[p]||0),0);
@@ -8581,9 +8584,20 @@ function _hmSLT(){
   const totalSanc=Object.values(tot).reduce((a,b)=>a+b,0);
   const clean=all.filter(p=>!tot[p]).length;
   let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
-    +_hmCard('Sanctions per pupil','' +(totalSanc/(all.length||1)).toFixed(1),
-             'mean since September \u00b7 Winsorised '
-             +((_hmWinsorMean(all.map(p=>tot[p]||0))||0).toFixed(1)))
+    // Sanctions and house points on ONE card: shown apart, a reader takes the sanction
+    // figure as the whole behaviour picture. The school issues several times more
+    // positives than sanctions and the ratio is the number worth leading with.
+    +(function(){
+        const ay0=ayStart;
+        const hpTot={};
+        (DD.housePoints||[]).forEach(r=>{const dt=_hmDate(r); if(dt>=ay0)hpTot[r[0]]=(hpTot[r[0]]||0)+1;});
+        const totalHP=all.reduce((a,p)=>a+(hpTot[p]||0),0);
+        const perS=totalSanc/(all.length||1), perH=totalHP/(all.length||1);
+        const ratio=perS?perH/perS:0;
+        return _hmCard('Positives per sanction',ratio?ratio.toFixed(1)+':1':'\u2014',
+          perH.toFixed(1)+' house points \u00b7 '+perS.toFixed(1)+' sanctions, per pupil since September',
+          ratio&&ratio<1?'bad':'');
+      })()
     +_hmCard('FSM sanction gap',fsmR?fsmR.toFixed(1)+'\u00d7':'\u2014',
              'more than pupils never FSM, SEN or EHCP',fsmR>=2?'bad':'')
     +_hmCard('Pupils with no sanctions',clean+' of '+all.length,
@@ -8662,23 +8676,51 @@ function _hmSLT(){
     'Unprepared means equipment, uniform or homework — the incidents a school can design out. '
     +'Groups are “ever”, not “now” — see above.',body);
 
-  // A composition read is far more robust than a rate when a group is small.
-  const comp=order.filter(k=>grp[k].length>=5).map(k=>{
-    const t=sum(grp[k],tot),u=sum(grp[k],un);
-    return [labels[k],grp[k].length,t?Math.round(100*u/t):0];
-  }).sort((a,b)=>b[2]-a[2]);
-  if(comp.length){
-    const cb=comp.map(c=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
-      +'<span style="width:150px;color:var(--tx2)">'+c[0]+'</span>'
-      +'<span style="flex:1">'+_hmBar(c[2],c[2]>45?'bad':c[2]>30?'warn':'ok')+'</span>'
-      +'<span style="width:36px;text-align:right">'+c[2]+'%</span></div>').join('');
-    h+=_hmPanel('What share of each group\u2019s sanctions is unpreparedness',
-      'Composition holds up better than a raw rate when a group is small \u2014 a single pupil moves a mean, not a share. '
+  // ── SANCTION TYPES: full composition, not just "unprepared vs not" ──
+  // This used to show one number per group — the share that was unpreparedness,
+  // matched by a regex over incident wording. That threw away everything else and
+  // depended on a pattern that misses 43 of the school's incident types.
+  // It now uses the school's OWN eight categories (Admin -> incident codes), so the
+  // whole composition is visible and the categories are the ones the school named.
+  // A stacked bar rather than a rate: composition holds up when a group is small,
+  // where a single pupil can move a mean but not a share.
+  const catTot={};
+  order.forEach(k=>{ catTot[k]={}; });
+  SAN.forEach((r,i)=>{
+    const dt=_hmDate(r); if(dt<ayStart)return;
+    const g=gOf[r[0]]; if(!g)return;
+    const cat=(SANC_DET[i]&&SANC_DET[i][1])||'Other';
+    const key=incCatKey(cat);
+    catTot[g][key]=(catTot[g][key]||0)+1;
+  });
+  const catsUsed=INC_CATS.filter(c=>order.some(k=>catTot[k]&&catTot[k][c.key]));
+  const stackRows=order.filter(k=>grp[k].length>=5&&incCatTotal(catTot[k]));
+  if(stackRows.length&&catsUsed.length){
+    const legend='<div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.45rem;font-size:.66rem;color:var(--tx2)">'
+      +catsUsed.map(c=>'<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
+        +c.color+';margin-right:.25rem;vertical-align:middle"></span>'+c.id+'</span>').join('')+'</div>';
+    const cb=legend+stackRows.map(k=>{
+      const t=incCatTotal(catTot[k])||1;
+      const segs=catsUsed.map(c=>{
+        const n=catTot[k][c.key]||0; if(!n)return '';
+        const pct=100*n/t;
+        return '<span title="'+c.id+': '+n+' ('+Math.round(pct)+'%)" style="display:block;float:left;height:13px;'
+          +'width:'+pct+'%;background:'+c.color+'"></span>';
+      }).join('');
+      return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.32rem;font-size:.72rem">'
+        +'<span style="width:150px;color:var(--tx2);white-space:nowrap">'+labels[k]+'</span>'
+        +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+grp[k].length+'</span>'
+        +'<span style="flex:1;min-width:120px"><span style="display:block;overflow:hidden;border-radius:3px;background:var(--bd)">'
+          +segs+'<span style="display:block;clear:both"></span></span></span>'
+        +'<span style="width:54px;text-align:right;color:var(--tx2)">'+t+'</span></div>';
+    }).join('');
+    h+=_hmPanel('Sanction types by group',
+      'The school\u2019s own incident categories, as a share of each group\u2019s sanctions since '
+      +'September. Composition rather than a rate \u2014 a single pupil moves a mean, not a share. '
+      +'The count on the right is the group\u2019s total. Hover a segment for its number. '
       +'Groups are \u201cever\u201d, not \u201cnow\u201d. '
-      +'\u26a0\ufe0f Unpreparedness is matched on incident WORDING, so it is only as '
-      +'good as the incident map \u2014 43 incident types are currently unmatched, '
-      +'including \u201cLate to lesson\u201d (2,017 incidents). Check the '
-      +'unmapped_incident flag in Admin before quoting these figures.',cb);
+      +'\u26a0\ufe0f Uncategorised incidents fall into \u201cOther\u201d \u2014 check the unmapped_incident '
+      +'flag in Admin, as a large Other slice means the categories, not the behaviour.',cb);
   }
 
   h+=_hmSection('Concerns');
