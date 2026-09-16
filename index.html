@@ -9514,55 +9514,6 @@ function _hmSLT(){
       }
     }
 
-    // ── 3. EFFORT AGAINST ATTAINMENT ──
-    // The quadrant view heads of department ask for. Four counts, not a scatter: with
-    // 236 pupils across 20 subjects a scatter is an unreadable cloud, and the question
-    // is "how many are in each quadrant", not "where is this dot".
-    const abOfP={};
-    Object.values(DD.progress||{}).forEach(ay=>Object.entries(ay||{}).forEach(([pk,rows])=>{
-      if(pk!==lastK)return;
-      (rows||[]).forEach(r=>{
-        const sc=progCol(r,'scores')||{};
-        let sum=0,n=0;
-        Object.values(sc).forEach(c=>{ const rk=abRk(c); if(rk){sum+=rk;n++;} });
-        if(n)abOfP[r[0]]=sum/n;
-      });
-    }));
-    const pairs=[];
-    Object.entries(perE[lastK]||{}).forEach(([p,o])=>{
-      const e=meanE(o), a=abOfP[p];
-      if(e!=null&&a!=null)pairs.push({p:p,e:e,a:a});
-    });
-    if(pairs.length>=20){
-      const medE=pairs.map(x=>x.e).sort((a,b)=>a-b)[Math.floor(pairs.length/2)];
-      const medA=pairs.map(x=>x.a).sort((a,b)=>a-b)[Math.floor(pairs.length/2)];
-      // effort: LOWER is better, so "high effort" is e <= median
-      const q={hiEhiA:0,hiEloA:0,loEhiA:0,loEloA:0};
-      pairs.forEach(x=>{
-        const hiE=x.e<=medE, hiA=x.a>=medA;
-        if(hiE&&hiA)q.hiEhiA++; else if(hiE&&!hiA)q.hiEloA++;
-        else if(!hiE&&hiA)q.loEhiA++; else q.loEloA++;
-      });
-      const cell=(t,n,note,tone)=>'<div style="flex:1;min-width:150px;background:var(--sf);border:1px solid var(--bd);'
-        +'border-radius:8px;padding:.5rem .6rem">'
-        +'<div style="font-size:.66rem;color:var(--tx2)">'+t+'</div>'
-        +'<div style="font-size:1.25rem;font-weight:600;color:'+tone+'">'+n
-        +' <span style="font-size:.66rem;font-weight:500;color:var(--tx2)">'+Math.round(100*n/pairs.length)+'%</span></div>'
-        +'<div style="font-size:.64rem;color:var(--tx2);margin-top:.15rem">'+note+'</div></div>';
-      h+=_hmPanel('Effort against attainment, '+lbl(lastK),
-        'Each pupil\u2019s mean effort and mean ability rank, split at the median of each \u2014 '
-        +pairs.length+' pupils with both. Medians, not fixed thresholds, so the split follows '
-        +'this cohort rather than an assumption. <strong>Counts, not a scatter</strong>: with '
-        +pairs.length+' pupils across '+Object.keys(DD.subjectKeys||{}).length
-        +' subjects a scatter is a cloud, and the question is how many sit in each quadrant.',
-        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.5rem">'
-        +cell('Higher effort, higher attainment',q.hiEhiA,'working and achieving','var(--green)')
-        +cell('Higher effort, lower attainment',q.hiEloA,'trying \u2014 needs support, not pressure','var(--orange)')
-        +'</div><div style="display:flex;gap:.6rem;flex-wrap:wrap">'
-        +cell('Lower effort, higher attainment',q.loEhiA,'coasting \u2014 capable of more','var(--orange)')
-        +cell('Lower effort, lower attainment',q.loEloA,'the group most at risk','var(--red)')
-        +'</div>');
-    }
 
     // ── 4. BY SUBJECT ── (inverted: a LOWER mean is better)
     const subj={};
@@ -9635,12 +9586,12 @@ function _hmSLT(){
     };
 
     const MEAS=[
-      {key:'att', title:'Attendance',  unit:'%',  better:'high', f:attOf,
-       note:'percentage points vs the comparison group'},
-      {key:'san', title:'Sanctions',   unit:'',   better:'low',  f:sanOf,
-       note:'per pupil \u2014 a longer bar is worse'},
-      {key:'ab',  title:'Attainment',  unit:'',   better:'high', f:abOf,
-       note:'mean ability rank across a pupil\u2019s subjects'}
+      {key:'att', title:'Attendance',  unit:'pts', better:'high', f:attOf,
+       note:'percentage points vs comparison'},
+      {key:'san', title:'Sanctions',   unit:'',    better:'low',  f:sanOf,
+       note:'sanctions per pupil vs comparison'},
+      {key:'ab',  title:'Attainment',  unit:'',    better:'high', f:abOf,
+       note:'reference bands vs comparison'}
     ];
 
     const cols=[];
@@ -9657,7 +9608,8 @@ function _hmSLT(){
 
     // shared row order and a per-measure scale, since the units differ
     const box=cols.map(c=>{
-      const vals=c.rows.map(r=>r.v).filter(v=>v!=null);
+      // scale on the GAP magnitude now, not the raw value
+      const vals=c.rows.map(r=>r.gap).filter(v=>v!=null).map(Math.abs);
       if(!vals.length) return '<div style="flex:1;min-width:190px">'
         +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">'+c.m.title+'</div>'
         +'<div style="font-size:.66rem;color:var(--tx2);padding:.4rem .5rem;border:1px dashed var(--bd);border-radius:6px">'
@@ -9675,11 +9627,26 @@ function _hmSLT(){
           const isBase=r.k==='neither';
           const worse=(c.m.better==='high')?(r.gap<0):(r.gap>0);
           const tone=isBase?'var(--mu)':(worse?'var(--red)':'var(--green)');
+          // Show the DIFFERENCE from the comparison group, not the raw mean. Three raw
+          // means in three different units (percentage points, sanctions per pupil,
+          // ability rank) cannot be read across a row — which is the one thing this
+          // section exists for. A difference can: "0.9 points below on attendance,
+          // 22 sanctions above, 0.7 bands below" is the sentence someone would say.
+          // The comparison group is the zero, so its row is a marker rather than a bar.
+          const g=r.gap==null?null:r.gap;
+          const pct=(g==null||!mx)?0:Math.min(100,Math.abs(g)/mx*100);
+          const bar=isBase
+            ? '<span style="display:block;height:11px;border-left:2px solid var(--mu);margin-left:50%"></span>'
+            : '<span style="display:block;height:11px;position:relative">'
+              +'<span style="position:absolute;left:50%;top:0;bottom:0;border-left:1px dashed var(--bd)"></span>'
+              +'<span style="position:absolute;top:0;height:11px;border-radius:3px;background:'+tone+';'
+                +(g<0?('right:50%;width:'+pct/2+'%'):('left:50%;width:'+pct/2+'%'))+'"></span></span>';
+          const shown=isBase?'baseline':((g>0?'+':'')+g.toFixed(1)+c.m.unit);
           return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.28rem;font-size:.68rem" title="'
-            +r.label+': '+r.v.toFixed(1)+c.m.unit+'">'
-            +'<span style="flex:1;min-width:60px"><span style="display:block;height:11px;border-radius:3px;background:var(--bd)">'
-              +'<span style="display:block;height:11px;border-radius:3px;width:'+(100*r.v/mx)+'%;background:'+tone+'"></span></span></span>'
-            +'<span style="width:52px;text-align:right;font-variant-numeric:tabular-nums">'+r.v.toFixed(1)+c.m.unit+'</span></div>';
+            +r.label+': '+r.v.toFixed(1)+c.m.unit+' (comparison group '+c.base.toFixed(1)+c.m.unit+')">'
+            +'<span style="flex:1;min-width:60px">'+bar+'</span>'
+            +'<span style="width:58px;text-align:right;font-variant-numeric:tabular-nums;color:'
+              +(isBase?'var(--mu)':tone)+'">'+shown+'</span></div>';
         }).join('')
         +'<div style="font-size:.62rem;color:var(--tx2);margin-top:.3rem">'
         +(c.covered<all.length?c.covered+' of '+all.length+' pupils have data':'all pupils')+'</div>'
@@ -9695,12 +9662,75 @@ function _hmSLT(){
       +'</div>';
 
     h+=_hmPanel('The same groups, across all three measures',
-      'A gap on its own does not say what to do about it. Attainment low <em>and</em> attendance low '
-      +'points at attendance as the lever. Attainment low, attendance level, sanctions high points at '
-      +'the sanction system rather than the pupils. <strong>Read across the row.</strong> '
-      +'Grey is the comparison group; red is worse than it, green better. '
-      +'Scales differ by measure, so bar lengths are comparable within a column, not between.',
+      'Every number is the <strong>difference from pupils with no FSM, SEN or EHCP</strong>, who sit '
+      +'at the centre line. Left of the line is worse, right is better, and red always means worse '
+      +'whichever way the measure runs. <strong>Read across the row.</strong> '
+      +'A gap on its own does not say what to do about it: attainment low <em>and</em> attendance low '
+      +'points at attendance as the lever; attainment low with attendance level and sanctions high '
+      +'points at the sanction system rather than the pupils. '
+      +'Units differ by column — percentage points, sanctions, reference bands — so compare '
+      +'direction and size within a column, not between.',
       '<div style="display:flex;gap:1rem;flex-wrap:wrap">'+labelCol+box+'</div>');
+
+    // ── EFFORT AGAINST ATTAINMENT, BY GROUP ──
+    // Moved here from the Effort section, and split by the five groups on the way.
+    // Whole-school it answers "how many pupils are coasting"; by group it answers
+    // "which pupils are working hard and still not getting there", which is a gap
+    // question and belongs with the others.
+    // ⚠️ Effort is 1 = BEST, ability rank is best-LAST. "Higher effort" therefore means
+    // a LOWER effort number. Split at the median of each so the cut follows this cohort
+    // rather than an assumed threshold.
+    const effOf=p=>{
+      let sum=0,n=0;
+      Object.values(DD.progress||{}).forEach(ay=>Object.values(ay||{}).forEach(rows=>{
+        const r=(rows||[]).find(x=>x[0]===p); if(!r)return;
+        const sc=progCol(r,'scores')||{};
+        Object.values(sc).forEach(c=>{ const e=(c&&c[1]!=null)?Number(c[1]):null;
+          if(e!=null&&!isNaN(e)&&efValid(c[1])){sum+=e;n++;} });
+      }));
+      return n?sum/n:null;
+    };
+    const pairs=[];
+    all.forEach(p=>{ const e=effOf(p), a=abOf(p);
+      if(e!=null&&a!=null)pairs.push({p:p,e:e,a:a,g:gOf[p]}); });
+    if(pairs.length>=20){
+      const medE=pairs.map(x=>x.e).sort((a,b)=>a-b)[Math.floor(pairs.length/2)];
+      const medA=pairs.map(x=>x.a).sort((a,b)=>a-b)[Math.floor(pairs.length/2)];
+      const QK=[['hiEloA','Working, not getting there','var(--orange)'],
+                ['hiEhiA','Working and achieving','var(--green)'],
+                ['loEhiA','Coasting','var(--orange)'],
+                ['loEloA','Most at risk','var(--red)']];
+      const qOf=x=>{ const hiE=x.e<=medE, hiA=x.a>=medA;
+        return hiE?(hiA?'hiEhiA':'hiEloA'):(hiA?'loEhiA':'loEloA'); };
+      const tally={}; order.concat(['__all']).forEach(k=>tally[k]={hiEhiA:0,hiEloA:0,loEhiA:0,loEloA:0,n:0});
+      pairs.forEach(x=>{ const q=qOf(x);
+        if(x.g&&tally[x.g]){tally[x.g][q]++;tally[x.g].n++;}
+        tally.__all[q]++; tally.__all.n++; });
+      const row=(label,t)=>{
+        if(!t.n)return '';
+        const segs=QK.map(([k,,col])=>{ const v=t[k]; if(!v)return '';
+          return '<span title="'+label+' \u2014 '+QK.find(q=>q[0]===k)[1]+': '+v+'" '
+            +'style="display:block;float:left;height:13px;width:'+(100*v/t.n)+'%;background:'+col+'"></span>'; }).join('');
+        return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.7rem">'
+          +'<span style="width:150px;color:var(--tx2);white-space:nowrap">'+label+'</span>'
+          +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+t.n+'</span>'
+          +'<span style="flex:1;min-width:120px"><span style="display:block;overflow:hidden;border-radius:3px;background:var(--bd)">'
+            +segs+'<span style="display:block;clear:both"></span></span></span></div>';
+      };
+      h+=_hmPanel('Effort against attainment, by group',
+        '<div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.4rem;font-size:.66rem">'
+        +QK.map(q=>'<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
+          +q[2]+';margin-right:.25rem;vertical-align:middle"></span>'+q[1]+'</span>').join('')+'</div>'
+        +'Each pupil placed by their mean effort and mean ability rank, split at the median of each '
+        +'('+pairs.length+' pupils with both). <strong>\u201cWorking, not getting there\u201d is the one to '
+        +'read</strong> \u2014 a group concentrated there is trying and needs support, not pressure. '
+        +'⚠️ Effort is 1 = best, so higher effort means a lower number. Medians follow this cohort, '
+        +'so half the school sits either side by construction; compare groups against each other, '
+        +'not against 50%.',
+        row('All pupils',tally.__all)
+        +'<div style="border-top:1px solid var(--bd);margin:.35rem 0"></div>'
+        +order.filter(k=>tally[k].n).map(k=>row(labels[k],tally[k])).join(''));
+    }
   })();
 
 
