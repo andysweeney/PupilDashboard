@@ -8906,7 +8906,103 @@ function _hmSLT(){
   // ABILITY and EFFORT both need the report data. Effort is thin — TWS runs three
   //   effort collections a year, and at Green Abbey no effort aspect carried any
   //   results at all, so expect this section to be sparse at some schools.
-  h+=_hmSection('Attendance','nothing here yet');
+  // ══════════════════════════════════════════════════════════════════════════
+  //  ATTENDANCE
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⚠️ THESE FIGURES ARE LESSON-BASED, NOT SESSION-BASED.
+  // The DfE measures attendance in AM/PM SESSIONS, and every national comparator —
+  // PAPerc (24.21% England secondary), the 90% persistent-absence line — is built on
+  // sessions. Ours is derived from per-lesson marks, so a pupil present at
+  // registration and absent from period 3 scores differently here than in a DfE
+  // return. The two will not agree and are not meant to.
+  // Session attendance arrives with the API: Xporter serves it via attendanceType=S
+  // and school.attendancesummary, and TWS's statutory sessions are periods 1 and 4.
+  // Until then the session row below is deliberately shown as unavailable rather than
+  // silently filled with the lesson figure — a plausible wrong number is worse than a
+  // visible gap, because nobody checks a number that looks right.
+  h+=_hmSection('Attendance','lesson-based \u2014 session figures arrive with the API');
+
+  (function(){
+    const sd=_hmSchoolDays();
+    if(!sd.length){ h+=_hmPanel('Attendance','No attendance data for this academic year.',''); return; }
+    const sched=sd.length*_hmPerPerDay();
+    const pctOf=(px,a,b)=>{
+      const days=sd.filter(d=>(!a||d>=a)&&(!b||d<=b));
+      if(!days.length)return null;
+      const n=days.length*_hmPerPerDay();
+      const abs=countAbsPeriods(px,days[0],days[days.length-1]).total;
+      return n>0?100-(abs/n*100):null;
+    };
+    const cur=all.map(p=>pctOf(p)).filter(v=>v!=null);
+
+    // ── 1. DISTRIBUTION ──
+    // A mean is the wrong headline: a school on 91.8% could have everyone near 92, or
+    // most pupils at 97 and a tail at 40. Same number, different problem, different
+    // response. Bands are the DfE's own vocabulary, so a reader already knows them.
+    const BANDS=[
+      ['97% and above', v=>v>=97,      'ok'],
+      ['95 to 97%',     v=>v>=95&&v<97,'ok'],
+      ['90 to 95%',     v=>v>=90&&v<95,'warn'],
+      ['85 to 90%',     v=>v>=85&&v<90,'bad'],
+      ['Below 85%',     v=>v<85,       'bad']
+    ];
+    const counts=BANDS.map(b=>cur.filter(b[1]).length);
+    const mxB=Math.max(...counts)||1;
+    const below=cur.filter(v=>v<ATT_LOW).length;
+    const distBody=BANDS.map((b,i)=>
+      '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.32rem;font-size:.72rem">'
+      +'<span style="width:150px;color:var(--tx2)">'+b[0]+'</span>'
+      +'<span style="width:44px;text-align:right;font-weight:600">'+counts[i]+'</span>'
+      +'<span style="flex:1;min-width:120px"><div style="max-width:260px">'+_hmBar(100*counts[i]/mxB,b[2])+'</div></span>'
+      +'<span style="width:48px;text-align:right;color:var(--tx2)">'+Math.round(100*counts[i]/(cur.length||1))+'%</span></div>').join('')
+      +'<div style="border-top:1px solid var(--bd);margin:.45rem 0 .35rem"></div>'
+      +'<div style="display:flex;gap:1.2rem;font-size:.72rem;flex-wrap:wrap">'
+        +'<span>Mean <strong>'+(cur.reduce((a,b)=>a+b,0)/(cur.length||1)).toFixed(1)+'%</strong></span>'
+        +'<span>Winsorised <strong>'+((_hmWinsorMean(cur)||0).toFixed(1))+'%</strong></span>'
+        +'<span>Median <strong>'+(cur.slice().sort((a,b)=>a-b)[Math.floor(cur.length/2)]||0).toFixed(1)+'%</strong></span>'
+        +'<span style="color:'+(below?'var(--red)':'var(--tx2)')+'">Below '+ATT_LOW+'%: <strong>'+below+' pupils</strong></span>'
+      +'</div>'
+      +'<div style="margin-top:.5rem;padding:.4rem .5rem;border:1px dashed var(--bd);border-radius:6px;font-size:.68rem;color:var(--tx2)">'
+        +'<strong>Session attendance (DfE basis)</strong> \u2014 not yet available. '
+        +'Arrives with the API; the figures above are lesson-based and will differ.'
+      +'</div>';
+    h+=_hmPanel('Attendance spread',
+      'Pupils by band, not an average \u2014 a mean cannot tell a whole-school dip from a '
+      +'small tail, and they need completely different responses. '
+      +'Bands are the DfE\u2019s, and '+ATT_LOW+'% is the persistent-absence line (Admin \u2192 '
+      +'Attendance Display). \u26a0\ufe0f Lesson-based, so these will not match a DfE return.',distBody);
+
+    // ── 2. BAND MOVEMENT ──
+    // Where pupils are GOING, not where they are. Attendance is recoverable early and
+    // almost never late, so a pupil who has just crossed below the line matters far
+    // more than one who has been there two years — and nothing else on the dashboard
+    // surfaces that.
+    const mid=sd[Math.floor(sd.length/2)];
+    const bandOf=v=>{ if(v==null)return null; for(let i=0;i<BANDS.length;i++) if(BANDS[i][1](v)) return i; return null; };
+    const moved={down:[],up:[],crossed:[]};
+    all.forEach(p=>{
+      const a=pctOf(p,sd[0],mid), b=pctOf(p,mid,sd[sd.length-1]);
+      const ba=bandOf(a), bb=bandOf(b);
+      if(ba==null||bb==null)return;
+      if(bb>ba)moved.down.push(p); else if(bb<ba)moved.up.push(p);
+      if(a>=ATT_LOW&&b<ATT_LOW)moved.crossed.push(p);
+    });
+    const mvBody='<div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.72rem">'
+      +[['Fell a band',moved.down.length,'var(--red)'],
+        ['Rose a band',moved.up.length,'var(--green)'],
+        ['Crossed below '+ATT_LOW+'%',moved.crossed.length,'var(--red)']]
+        .map(c=>'<div style="flex:1;min-width:130px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.45rem .6rem">'
+          +'<div style="font-size:.66rem;color:var(--tx2)">'+c[0]+'</div>'
+          +'<div style="font-size:1.15rem;font-weight:600;color:'+c[2]+'">'+c[1]+'</div></div>').join('')
+      +'</div>';
+    h+=_hmPanel('Movement between bands, first half to second half of the year',
+      'Where pupils are <em>going</em>, not where they are. Attendance is recoverable early '
+      +'and rarely late, so a pupil who has just crossed below '+ATT_LOW+'% is the one to act '
+      +'on \u2014 not one who has been there for two years. '
+      +'\u26a0\ufe0f The two halves are split on school days, so a short second half makes small '
+      +'numbers move more; read the direction, not the size.',mvBody);
+  })();
+
   h+=_hmSection('Ability','nothing here yet');
   h+=_hmSection('Effort','nothing here yet');
 
