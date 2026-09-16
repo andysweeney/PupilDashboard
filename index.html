@@ -9597,11 +9597,9 @@ function _hmSLT(){
     const cols=[];
     MEAS.forEach(m=>{
       const baseVal=meanOf(base,m.f);
-      const rows=order.filter(k=>grp[k].length).map(k=>{
-        const v=meanOf(grp[k],m.f);
-        return {k:k,label:labels[k],n:grp[k].length,v:v,
-                gap:(v==null||baseVal==null)?null:v-baseVal};
-      });
+      const rows=[{k:'__all',label:'All pupils',n:all.length,v:meanOf(all,m.f)}]
+        .concat(order.filter(k=>grp[k].length).map(k=>({k:k,label:labels[k],n:grp[k].length,v:meanOf(grp[k],m.f)})))
+        .map(r=>Object.assign(r,{gap:(r.v==null||baseVal==null)?null:r.v-baseVal}));
       const covered=rows.reduce((a,r)=>a+(r.v!=null?r.n:0),0);
       cols.push({m:m,base:baseVal,rows:rows,covered:covered});
     });
@@ -9610,12 +9608,14 @@ function _hmSLT(){
     const box=cols.map(c=>{
       // scale on the GAP magnitude now, not the raw value
       const vals=c.rows.map(r=>r.gap).filter(v=>v!=null).map(Math.abs);
-      if(!vals.length) return '<div style="flex:1;min-width:190px">'
+      if(!vals.length) return '<div style="flex:1;min-width:200px;padding:0 .6rem;border-left:1px solid var(--bd)">'
         +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">'+c.m.title+'</div>'
         +'<div style="font-size:.66rem;color:var(--tx2);padding:.4rem .5rem;border:1px dashed var(--bd);border-radius:6px">'
         +'No data yet.</div></div>';
       const mx=Math.max(...vals)||1;
-      return '<div style="flex:1;min-width:190px">'
+      // A visible boundary per column: without it the value at the right of one column
+      // sits against the next column's bars and reads as belonging to it.
+      return '<div style="flex:1;min-width:200px;padding:0 .6rem;border-left:1px solid var(--bd)">'
         +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">'+c.m.title+'</div>'
         +'<div style="font-size:.64rem;color:var(--tx2);margin-bottom:.35rem">'+c.m.note+'</div>'
         +c.rows.map(r=>{
@@ -9656,15 +9656,23 @@ function _hmSLT(){
     const labelCol='<div style="min-width:150px">'
       +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">&nbsp;</div>'
       +'<div style="font-size:.64rem;color:var(--tx2);margin-bottom:.35rem">&nbsp;</div>'
-      +order.filter(k=>grp[k].length).map(k=>
-        '<div style="height:11px;margin-bottom:.28rem;font-size:.68rem;color:var(--tx2);white-space:nowrap;line-height:11px">'
-        +labels[k]+' <span style="color:var(--mu)">'+grp[k].length+'</span></div>').join('')
+      +[{label:'All pupils',n:all.length}]
+        .concat(order.filter(k=>grp[k].length).map(k=>({label:labels[k],n:grp[k].length})))
+        .map((r,i)=>
+        '<div style="height:11px;margin-bottom:.28rem;font-size:.68rem;color:var(--tx2);white-space:nowrap;line-height:11px'
+        +(i===0?';font-weight:600':'')+'">'
+        +r.label+' <span style="color:var(--mu)">'+r.n+'</span></div>').join('')
       +'</div>';
 
     h+=_hmPanel('The same groups, across all three measures',
       'Every number is the <strong>difference from pupils with no FSM, SEN or EHCP</strong>, who sit '
       +'at the centre line. Left of the line is worse, right is better, and red always means worse '
-      +'whichever way the measure runs. <strong>Read across the row.</strong> '
+      +'whichever way the measure runs. '
+      +'<em>Not</em> against all pupils: the disadvantaged groups are inside that figure, so a school '
+      +'with more FSM pupils would show a smaller gap for the same underlying difference. Measuring '
+      +'against pupils with no flags is also how the DfE reports a disadvantage gap. The All pupils '
+      +'row is shown for context, and its own bar is the school’s distance from that same baseline. '
+      +'<strong>Read across the row.</strong> '
       +'A gap on its own does not say what to do about it: attainment low <em>and</em> attendance low '
       +'points at attendance as the lever; attainment low with attendance level and sanctions high '
       +'points at the sanction system rather than the pupils. '
@@ -9696,9 +9704,12 @@ function _hmSLT(){
     if(pairs.length>=20){
       const medE=pairs.map(x=>x.e).sort((a,b)=>a-b)[Math.floor(pairs.length/2)];
       const medA=pairs.map(x=>x.a).sort((a,b)=>a-b)[Math.floor(pairs.length/2)];
-      const QK=[['hiEloA','Working, not getting there','var(--orange)'],
+      // ⚠️ FOUR DISTINCT COLOURS. "Working, not getting there" and "Coasting" were both
+      // var(--orange) and rendered identically — the two quadrants that differ most in
+      // meaning, indistinguishable on the chart.
+      const QK=[['hiEloA','Working, not getting there','var(--sky)'],
                 ['hiEhiA','Working and achieving','var(--green)'],
-                ['loEhiA','Coasting','var(--orange)'],
+                ['loEhiA','Coasting','var(--gold)'],
                 ['loEloA','Most at risk','var(--red)']];
       const qOf=x=>{ const hiE=x.e<=medE, hiA=x.a>=medA;
         return hiE?(hiA?'hiEhiA':'hiEloA'):(hiA?'loEhiA':'loEloA'); };
