@@ -333,6 +333,15 @@ def get_monday(date_str):
 #   * A 53-week academic year happens. 1 Aug 2025 is Week 53 of 2024/25, not Week 1
 #     of 2025/26. Anything assuming 52 weeks loses a week every few years.
 
+# ⚠️ THE DfE ACADEMIC YEAR RUNS 1 AUGUST TO 31 JULY.
+# Used by the week numbering below and by _ay_of(). Note the engine still writes
+# f'{CAY}-09-01' in a handful of places as a synthetic "start of year" stamp for
+# enrolment records — that is a PLACEHOLDER DATE, not a boundary test, and is left
+# alone deliberately. Anything that ASKS "which academic year is this date in" must
+# use _ay_of() / AY_START_MONTH, never a September comparison.
+AY_START_MONTH = 8
+
+
 def dfe_week1_monday(ay_start_year):
     """Monday that begins DfE Academic Week 1 for the year starting 1 Aug <year>."""
     aug1 = datetime(ay_start_year, 8, 1)
@@ -437,9 +446,14 @@ N_PER = 5
 
 @lru_cache(maxsize=None)
 def acad_year(date_str):
-    """Academic year (start calendar year) for an ISO (YYYY-MM-DD) date."""
+    """Academic year (start calendar year) for an ISO (YYYY-MM-DD) date.
+
+    DfE basis: the academic year runs 1 AUGUST to 31 July, matching
+    dfe_week1_monday() and _ay_of(). A September test would put 15 August 2025 in
+    AY2024 while the week numbering called it week 2 of AY2025.
+    """
     y, m = int(date_str[:4]), int(date_str[5:7])
-    return y if m >= 9 else y - 1
+    return y if m >= AY_START_MONTH else y - 1
 
 @lru_cache(maxsize=None)
 def get_term(date_str):
@@ -448,6 +462,9 @@ def get_term(date_str):
         return None
     m = int(date_str[5:7])
     ay = acad_year(date_str)
+    # ⚠️ TERMS are NOT the academic year boundary. T1 is September to December; August
+    # belongs to the academic year (see acad_year) but not to term 1, so it falls into
+    # T3 below with the rest of the summer. Do not "align" this to AY_START_MONTH.
     if m >= 9:      t = 1   # Sep-Dec  -> T1
     elif m <= 3:    t = 2   # Jan-Mar  -> T2
     else:           t = 3   # Apr-Aug  -> T3
@@ -2242,8 +2259,11 @@ def _winsor_mean(vals, p=0.10):
 
 
 def _ay_of(iso):
+    # DfE basis: 1 August, matching dfe_week1_monday() above. A September test would
+    # file 15 August 2025 in AY2024 while the week numbering called it week 2 of
+    # AY2025 — the two must agree.
     y, m = int(iso[:4]), int(iso[5:7])
-    return str(y if m >= 9 else y - 1)
+    return str(y if m >= AY_START_MONTH else y - 1)
 
 
 def _month_row(pxs, m, sched_m, abs_m, pos_m, neg_m):
@@ -2270,7 +2290,7 @@ def _build_peer_stats(full):
 
     # School days in the current AY, and the mean periods per day, exactly as
     # _hmSchoolDays()/_hmPerPerDay() derive them in the browser.
-    ay_start = f'{cay}-09-01'
+    ay_start = f'{cay}-0{AY_START_MONTH}-01'
     today = _date.today().isoformat()
     school_days = []
     for wk in sorted(week_lessons):
@@ -2419,7 +2439,7 @@ def _build_cohort_stats(full):
     if not week_lessons:
         return None
     # Local, so this block stands on its own if lifted out of the engine.
-    _ay = lambda iso: int(iso[:4]) if int(iso[5:7]) >= 9 else int(iso[:4]) - 1
+    _ay = lambda iso: int(iso[:4]) if int(iso[5:7]) >= AY_START_MONTH else int(iso[:4]) - 1
 
     vals = list(week_lessons.values())
     per_day = (sum(vals) / len(vals)) / 5 if vals else 5
