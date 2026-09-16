@@ -9605,80 +9605,71 @@ function _hmSLT(){
     });
 
     // shared row order and a per-measure scale, since the units differ
-    const box=cols.map(c=>{
-      // scale on the GAP magnitude now, not the raw value
-      const vals=c.rows.map(r=>r.gap).filter(v=>v!=null).map(Math.abs);
-      if(!vals.length) return '<div style="flex:1;min-width:200px;padding:0 .6rem;border-left:1px solid var(--bd)">'
-        +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">'+c.m.title+'</div>'
-        +'<div style="font-size:.66rem;color:var(--tx2);padding:.4rem .5rem;border:1px dashed var(--bd);border-radius:6px">'
-        +'No data yet.</div></div>';
-      const mx=Math.max(...vals)||1;
-      // A visible boundary per column: without it the value at the right of one column
-      // sits against the next column's bars and reads as belonging to it.
-      return '<div style="flex:1;min-width:200px;padding:0 .6rem;border-left:1px solid var(--bd)">'
-        +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">'+c.m.title+'</div>'
-        +'<div style="font-size:.64rem;color:var(--tx2);margin-bottom:.35rem">'+c.m.note+'</div>'
-        +c.rows.map(r=>{
-          if(r.v==null) return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.28rem;font-size:.68rem">'
-            +'<span style="flex:1;min-width:60px"><span style="display:block;height:11px;border:1px dashed var(--bd);border-radius:3px"></span></span>'
-            +'<span style="width:52px;text-align:right;color:var(--mu)">\u2014</span></div>';
-          // grey for the comparison group, one hue for the rest: colour carries
-          // "baseline vs the groups we are asking about", not five categories
-          const isBase=r.k==='neither';
-          const worse=(c.m.better==='high')?(r.gap<0):(r.gap>0);
-          const tone=isBase?'var(--mu)':(worse?'var(--red)':'var(--green)');
-          // Show the DIFFERENCE from the comparison group, not the raw mean. Three raw
-          // means in three different units (percentage points, sanctions per pupil,
-          // ability rank) cannot be read across a row — which is the one thing this
-          // section exists for. A difference can: "0.9 points below on attendance,
-          // 22 sanctions above, 0.7 bands below" is the sentence someone would say.
-          // The comparison group is the zero, so its row is a marker rather than a bar.
-          const g=r.gap==null?null:r.gap;
-          const pct=(g==null||!mx)?0:Math.min(100,Math.abs(g)/mx*100);
-          const bar=isBase
-            ? '<span style="display:block;height:11px;border-left:2px solid var(--mu);margin-left:50%"></span>'
-            : '<span style="display:block;height:11px;position:relative">'
-              +'<span style="position:absolute;left:50%;top:0;bottom:0;border-left:1px dashed var(--bd)"></span>'
-              +'<span style="position:absolute;top:0;height:11px;border-radius:3px;background:'+tone+';'
-                +(g<0?('right:50%;width:'+pct/2+'%'):('left:50%;width:'+pct/2+'%'))+'"></span></span>';
-          const shown=isBase?'baseline':((g>0?'+':'')+g.toFixed(1)+c.m.unit);
-          return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.28rem;font-size:.68rem" title="'
-            +r.label+': '+r.v.toFixed(1)+c.m.unit+' (comparison group '+c.base.toFixed(1)+c.m.unit+')">'
-            +'<span style="flex:1;min-width:60px">'+bar+'</span>'
-            +'<span style="width:58px;text-align:right;font-variant-numeric:tabular-nums;color:'
-              +(isBase?'var(--mu)':tone)+'">'+shown+'</span></div>';
-        }).join('')
-        +'<div style="font-size:.62rem;color:var(--tx2);margin-top:.3rem">'
-        +(c.covered<all.length?c.covered+' of '+all.length+' pupils have data':'all pupils')+'</div>'
-        +'</div>';
-    }).join('');
+    // ── ONE TABLE, NOT FOUR COLUMNS ──
+    // The label column and the three measure columns were separate div stacks with
+    // slightly different row heights, so they drifted apart down the panel and a value
+    // appeared to belong to the row above or below. A table guarantees that a row is a
+    // row, whatever the content.
+    const fmt=(r,c)=>{
+      if(r.gap==null)return '<span style="color:var(--mu)">\u2014</span>';
+      if(r.k==='neither')return '<span style="color:var(--mu)">baseline</span>';
+      const worse=(c.m.better==='high')?(r.gap<0):(r.gap>0);
+      return '<span style="color:'+(worse?'var(--red)':'var(--green)')+'">'
+        +(r.gap>0?'+':'')+r.gap.toFixed(1)+c.m.unit+'</span>';
+    };
+    const cellBar=(r,c,mx)=>{
+      if(r.gap==null)return '';
+      if(r.k==='neither')return '<span style="display:block;height:11px;border-left:2px solid var(--mu);margin-left:50%"></span>';
+      const worse=(c.m.better==='high')?(r.gap<0):(r.gap>0);
+      const pct=mx?Math.min(100,Math.abs(r.gap)/mx*100):0;
+      return '<span style="display:block;height:11px;position:relative">'
+        +'<span style="position:absolute;left:50%;top:0;bottom:0;border-left:1px dashed var(--bd)"></span>'
+        +'<span style="position:absolute;top:0;height:11px;border-radius:3px;background:'
+          +(worse?'var(--red)':'var(--green)')+';'
+          +(r.gap<0?('right:50%;width:'+pct/2+'%'):('left:50%;width:'+pct/2+'%'))+'"></span></span>';
+    };
+    const mxOf=c=>Math.max(...c.rows.map(r=>r.gap).filter(v=>v!=null).map(Math.abs))||1;
+    const order2=[{k:'__all',label:'All pupils',n:all.length}]
+      .concat(order.filter(k=>grp[k].length).map(k=>({k:k,label:labels[k],n:grp[k].length})));
 
-    const labelCol='<div style="min-width:150px">'
-      +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">&nbsp;</div>'
-      +'<div style="font-size:.64rem;color:var(--tx2);margin-bottom:.35rem">&nbsp;</div>'
-      +[{label:'All pupils',n:all.length}]
-        .concat(order.filter(k=>grp[k].length).map(k=>({label:labels[k],n:grp[k].length})))
-        .map((r,i)=>
-        '<div style="height:11px;margin-bottom:.28rem;font-size:.68rem;color:var(--tx2);white-space:nowrap;line-height:11px'
-        +(i===0?';font-weight:600':'')+'">'
-        +r.label+' <span style="color:var(--mu)">'+r.n+'</span></div>').join('')
-      +'</div>';
+    const tbl='<table style="width:100%;border-collapse:collapse;font-size:.7rem">'
+      +'<tr>'
+        +'<th style="text-align:left;font-weight:500;color:var(--tx2);padding:0 .4rem .2rem 0"></th>'
+        +'<th style="text-align:right;font-weight:500;color:var(--tx2);padding:0 .5rem .2rem 0"></th>'
+        +cols.map(c=>'<th colspan="2" style="text-align:left;font-weight:600;padding:0 .5rem .1rem;'
+          +'border-left:1px solid var(--bd)">'+c.m.title
+          +'<div style="font-weight:400;font-size:.62rem;color:var(--tx2)">'+c.m.note+'</div></th>').join('')
+      +'</tr>'
+      +order2.map((o,i)=>'<tr'+(i===0?' style="font-weight:600"':'')+'>'
+        +'<td style="padding:.18rem .4rem .18rem 0;white-space:nowrap;color:var(--tx2)">'+o.label+'</td>'
+        +'<td style="padding:.18rem .5rem .18rem 0;text-align:right;color:var(--mu);font-weight:400">'+o.n+'</td>'
+        +cols.map(c=>{
+          const r=c.rows.find(x=>x.k===o.k)||{gap:null,k:o.k};
+          return '<td style="padding:.18rem .3rem;min-width:90px;border-left:1px solid var(--bd)">'
+              +cellBar(r,c,mxOf(c))+'</td>'
+            +'<td style="padding:.18rem .5rem .18rem .2rem;text-align:right;white-space:nowrap;'
+              +'font-variant-numeric:tabular-nums">'+fmt(r,c)+'</td>';
+        }).join('')
+      +'</tr>').join('')
+      +'<tr><td colspan="2"></td>'
+      +cols.map(c=>'<td colspan="2" style="padding:.3rem .5rem 0;border-left:1px solid var(--bd);'
+        +'font-size:.62rem;color:var(--tx2)">'
+        +(c.covered<all.length?c.covered+' of '+all.length+' pupils':'all pupils')+'</td>').join('')
+      +'</tr></table>';
 
     h+=_hmPanel('The same groups, across all three measures',
-      'Every number is the <strong>difference from pupils with no FSM, SEN or EHCP</strong>, who sit '
-      +'at the centre line. Left of the line is worse, right is better, and red always means worse '
-      +'whichever way the measure runs. '
-      +'<em>Not</em> against all pupils: the disadvantaged groups are inside that figure, so a school '
-      +'with more FSM pupils would show a smaller gap for the same underlying difference. Measuring '
-      +'against pupils with no flags is also how the DfE reports a disadvantage gap. The All pupils '
-      +'row is shown for context, and its own bar is the school’s distance from that same baseline. '
-      +'<strong>Read across the row.</strong> '
-      +'A gap on its own does not say what to do about it: attainment low <em>and</em> attendance low '
-      +'points at attendance as the lever; attainment low with attendance level and sanctions high '
-      +'points at the sanction system rather than the pupils. '
-      +'Units differ by column — percentage points, sanctions, reference bands — so compare '
-      +'direction and size within a column, not between.',
-      '<div style="display:flex;gap:1rem;flex-wrap:wrap">'+labelCol+box+'</div>');
+      'Every number is the <strong>difference from pupils with no FSM, SEN or EHCP</strong> \u2014 the '
+      +'318 pupils in the \u201cNone of the above\u201d row, who are the baseline and show as zero. '
+      +'Left of the centre line is worse, right is better, and red always means worse whichever way '
+      +'the measure runs. '
+      +'<em>Not</em> measured against all pupils: the flagged groups sit inside that average, so a '
+      +'school with more FSM pupils would show a smaller gap for the same underlying difference. '
+      +'Measuring against the unflagged group is also how the DfE reports a disadvantage gap. '
+      +'<strong>Read across the row.</strong> A gap alone does not say what to do about it: '
+      +'attainment low <em>and</em> attendance low points at attendance as the lever; attainment low '
+      +'with attendance level and sanctions high points at the sanction system rather than the pupils. '
+      +'Units differ by column, so compare within a column, not between.',
+      tbl);
 
     // ── EFFORT AGAINST ATTAINMENT, BY GROUP ──
     // Moved here from the Effort section, and split by the five groups on the way.
