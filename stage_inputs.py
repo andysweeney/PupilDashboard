@@ -1,2589 +1,389 @@
 #!/usr/bin/env python3
-"""Import real school data (attendance, codes, detentions, FSM, SEN) into dashboard data.json format.
+"""stage_inputs.py — turn a folder of RAW school exports into the import engine's staged inputs.
 
-Enrichment steps (added May 2026):
-- Y-codes (school closure) excluded from absence counting → not_counted category
-- suppressedAbsences: mixed present+absent slots → present wins
-- slotDenominators: per day×period counts, <10 non-Y marks → exclude slot
-- slotTeachers: teacher session counts per pupil per slot
-- schoolDayCounts: actual school days per day of week
-- attendanceMarks: mark codes stored per date per pupil
-- attAbsSubj includes mark codes for each absence record
-- SEN/incident code configs embedded in data.json
-- Duplicate registration detection and reporting
+The dashboard upload portal drops whatever the admin exports into UPLOAD_DIR. This module
+detects each file's role from its name (and falls back to column signatures), then writes the
+exact filenames import_engine.py expects into OUT_DIR. It folds in every real-world quirk found
+in the genuine SIMS exports:
 
-Role scoping (added September 2026):
-- Writes one data.json per role scope as well as the school-wide file:
-    {school}/data.json                SLT and platform owner
-    {school}/year/{n}/data.json       year leader
-    {school}/tutor/{form}/data.json   form tutor
-- peerStats: per-form aggregates with no pupil-level data, so a tutor's file
-  can still draw the year-group comparison charts without holding the year.
+  - four per-year attendance files per cohort, combined into one feed (engine derives year from date)
+  - the SIMS duplicate-header glitch where a trailing 'Name' column is really the teacher
+  - extra 'Year' column / reordered columns in the current-year attendance file
+  - 'Teacher Name' vs 'Teacher' in behaviour exports
+  - the house-points file naming the pupil column 'Forename' instead of 'Name'
+  - one combined FSM file covering all cohorts
+  - SEN delivered as .xlsx for Y10 and .csv for Y11 (matching the engine's two SEN sources)
+  - split grade exports ("On track for X" + "X Effort") parsed and joined by (pupil, raw subject)
+
+Subjects are passed through RAW — no mapping happens here. That is the Admin panel's job.
 """
-
+import os, re, sys, shutil, json
 import pandas as pd
-import json, re, os, glob, csv
-from collections import defaultdict, Counter
-from datetime import datetime, timedelta
-from functools import lru_cache
 
-# ── CONFIGURATION ──
+# ── Term-label recognition (for grade Resultsets) ─────────────────────────────
+# Built-in season words → T1/T2/T3. Deliberately CONSERVATIVE: only clearly-standard,
+# unambiguous wordings live here. Anything ambiguous (e.g. "Winter") or bespoke is left
+# unresolved and surfaced in Admin for the school to map, so a term is never silently
+# filed in the wrong place. Order matters only in that the first contained word wins.
+_SEASON_WORDS = [
+    ('michaelmas', 'T1'), ('mich', 'T1'), ('autumn', 'T1'), ('aut', 'T1'), ('fall', 'T1'),
+    ('lent', 'T2'), ('hilary', 'T2'), ('spring', 'T2'), ('spr', 'T2'),
+    ('trinity', 'T3'), ('summer', 'T3'), ('sum', 'T3'),
+]
+_MONTHS_RS = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+              'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
 
-# Attendance code classification
-PRESENT_CODES = {'/', 'L', 'K', 'V', 'P', 'W', 'B', 'D'}
-AUTH_ABSENT_CODES = {'C', 'C1', 'C2', 'E', 'I', 'J', 'J1', 'M', 'Q', 'R', 'S', 'T', 'X'}
-UNAUTH_ABSENT_CODES = {'O', 'G', 'U', 'N', '-', '?'}
-NOT_COUNTED_CODES = {'Y', 'Y1', 'Y2', 'Y3', 'Y4', 'Y5', 'Y6', 'Y7'}
-ALL_ABSENT_CODES = AUTH_ABSENT_CODES | UNAUTH_ABSENT_CODES
 
-# SEN code definitions
-SEN_CODES = {
-    'K': 'SEN Support',
-    'E': 'EHCP',
-    'Add': 'Additional Help',
-    'add': 'Additional Help',
-    'Strat': 'Strategies Applied',
-    'strat': 'Strategies Applied',
-    'N': 'SEN Monitoring',
-}
+def _norm_term(s):
+    """Canonical key for a Resultset label — must match the dashboard's normaliser exactly
+    (lowercase, runs of non-alphanumerics collapsed to one space, trimmed)."""
+    return re.sub(r'[^a-z0-9]+', ' ', str(s or '').lower()).strip()
 
-# Incident category mapping
-INCIDENT_CATEGORIES = {
-    'Home learning/prep not completed': 'Behaviour',
-    'Behaviour poor at break, lunch, or lesson changeover': 'Behaviour',
-    'Behaviour poor in lesson': 'Behaviour',
-    'Mobile phone confiscated (collect at 3.05pm from annexe)': 'Behaviour',
-    'Effort poor in lesson': 'Behaviour',
-    'Chewing gum': 'Behaviour',
-    'Refusal to follow the on call/senior teacher instructions': 'Behaviour',
-    'Behaviour disruptive in lesson (Senior Leader on-call used)': 'Behaviour',
-    'Behaviour disruptive in lesson (Department on-call used)': 'Behaviour',
-    'Protective measure': 'Behaviour',
-    'Detention not attended': 'Behaviour',
-    'Late to lesson': 'Attendance',
-    'Toilet visited during lesson': 'Attendance',
-    'Truancy from lesson (disruption to the normal working day of the school)': 'Attendance',
-    'Medical room visited': 'Attendance',
-    'One to one tutor review not attended': 'Attendance',
-    'Attendance': 'Attendance',
-    'Socks contrary to school policy': 'Uniform',
-    'Earrings contrary to school policy': 'Uniform',
-    'Blazer not worn': 'Uniform',
-    'Nail varnish worn': 'Uniform',
-    'Skirt contrary to school policy (cannot see waist band)': 'Uniform',
-    'Shirt untucked': 'Uniform',
-    'Bracelets worn contrary to school policy': 'Uniform',
-    'Shoes contrary to school policy': 'Uniform',
-    'Makeup excessive': 'Uniform',
-    'Nose piercing worn': 'Uniform',
-    'Jumper not worn': 'Uniform',
-    'Tie not worn or worn properly': 'Uniform',
-    'Uniform other': 'Uniform',
-    'Exercise book missing': 'Equipment',
-    'PE kit items missing': 'Equipment',
-    'Reading book/material missing': 'Equipment',
-    'Handbook missing': 'Equipment',
-    'Calculator missing': 'Equipment',
-    'Pen missing': 'Equipment',
-    'Subject specific equipment': 'Equipment',
-    'Ingredients missing': 'Equipment',
-}
 
-# ── REPORTS / GRADES (progress scores) ──
-# The dashboard stores, per pupil × term × subject:  sc[subject] = [abilityLetter, effort, OTE, abilityRank]  (rank on reference ladder, 1=best; Option 2)
-#   abilityLetter : 7-point B/D/W/M/C/S/E   (Below -> Excellent)
-#   effort        : 1..4                     (1 = Excellent .. 4 = Low; INVERTED vs ability)
-#   OTE           : optional GCSE target 1..9 (from "OTA Grade")
-#
-# !!! CONFIRM AGAINST THE REAL Reports EXPORT BEFORE TRUSTING THESE !!!
-# The maps below default to the dashboard's NATIVE scale (letters pass straight through,
-# effort 1..4 passes straight through) plus the obvious word forms. If the SIMS export uses
-# a school-specific scale (e.g. a 1-7 ability number, words like 'Secure'/'Emerging', or an
-# effort scale where 1 = Low instead of 1 = Excellent), add those raw values here. Any raw
-# value NOT found is reported on the console (⚠ unmapped ability/effort values) and skipped —
-# nothing is silently coerced. Look at the flagged values, then extend these two dicts.
-ABILITY_VALUE_MAP = {
-    'B': 'B', 'D': 'D', 'W': 'W', 'M': 'M', 'C': 'C', 'S': 'S', 'E': 'E',
-    'Below': 'B', 'Developing': 'D', 'Working': 'W', 'Meeting': 'M',
-    'Confident': 'C', 'Skilful': 'S', 'Skillful': 'S', 'Excellent': 'E',
-}
-# effort raw value -> 1..4 (1 = best/Excellent ... 4 = Low). CONFIRM the direction!
-EFFORT_VALUE_MAP = {
-    '1': 1, '2': 2, '3': 3, '4': 4,
-    'Excellent': 1, 'Good': 2, 'Developing': 3, 'Low': 4,
-}
+def _parse_term_date(s):
+    """If the label is (or contains) a date, return (month, year); else None. Only consulted
+    when no season word matched, so it never overrides an explicit season."""
+    s = str(s or '')
+    m = re.search(r'(20\d{2})[-/](\d{1,2})(?:[-/]\d{1,2})?', s)            # 2025-12, 2025/12/05
+    if m:
+        mo = int(m.group(2))
+        if 1 <= mo <= 12:
+            return (mo, int(m.group(1)))
+    m = re.search(r'\b([a-z]{3,})\s+(20\d{2})', s.lower())                  # December 2025 / Dec 2025
+    if m and m.group(1)[:3] in _MONTHS_RS:
+        return (_MONTHS_RS[m.group(1)[:3]], int(m.group(2)))
+    m = re.search(r'\b(\d{1,2})[/.](\d{1,2})[/.](20\d{2})\b', s)            # 05/12/2025 (d/m/y)
+    if m:
+        mo = int(m.group(2))
+        if 1 <= mo <= 12:
+            return (mo, int(m.group(3)))
+    return None
 
-# Current academic year
-CAY = 2025
 
-# Years from Y7 start to the end of Y11 — used to derive intake from the leaving cohort.
-YEARS_TO_GCSE = 5
-
-# Subject-name normalisation (raw spelling -> canonical). Populated from Admin export.
-SUBJECT_MAP = {}
-
-# House Points (positive behaviour). Only these achievement types are kept; index == the
-# stored type code. Each carries a weight (Admin-editable, like the sanction weights).
-HP_TYPES = ['House Point', 'Positive on call (SLT)']
-HOUSE_POINT_WEIGHTS = {'House Point': 1, 'Positive on call (SLT)': 5}
-
-# ── SCHOOL KEY: source ALL school-specific config from the school's own key ──
-# Phase 1 of the multi-school refactor. The literal constants above are now only a fallback
-# default template; when a key is present it is the single source of truth (see
-# school_data_key.schema.json). The dashboard Admin panel edits this key and saves it back per
-# school; this engine just consumes whatever key it is handed.
-from school_key import load_key, dump_flags
-KEY_PATH = os.environ.get('SCHOOL_KEY_PATH', '/home/claude/school_001_key.json')
-_KEY_ABILITY_MAP = None
-if os.path.exists(KEY_PATH):
-    print(f"Loading school key from {KEY_PATH}...")
-    KEY = load_key(KEY_PATH)
-    _ac = KEY['attendanceCodes']
-    PRESENT_CODES        = set(_ac['present'])
-    AUTH_ABSENT_CODES    = set(_ac['authorisedAbsent'])
-    UNAUTH_ABSENT_CODES  = set(_ac['unauthorisedAbsent'])
-    NOT_COUNTED_CODES    = set(_ac['notCounted'])
-    ALL_ABSENT_CODES     = AUTH_ABSENT_CODES | UNAUTH_ABSENT_CODES
-    SEN_CODES            = dict(KEY['senCodes'])
-    INCIDENT_CATEGORIES  = dict(KEY['incidentCategories'])
-    SUBJECT_MAP          = dict(KEY['subjects']['aliases'])
-    ABILITY_VALUE_MAP    = dict(KEY['scales']['abilityValueMap'])
-    EFFORT_VALUE_MAP     = {str(k): v for k, v in KEY['scales']['effortValueMap'].items()}
-    HP_TYPES             = list(KEY['housePoints']['types'])
-    HOUSE_POINT_WEIGHTS  = dict(KEY['housePoints']['weights'])
-    CAY                  = int(KEY['meta']['academicYearStart'])
-    YEARS_TO_GCSE        = int(KEY['meta']['yearsToGCSE'])
-    _KEY_ABILITY_MAP     = dict(KEY['scales']['attainment']['labels'])
-    print("  School key loaded.")
-else:
-    KEY = None
-    print("No school key found, using built-in defaults.")
-
-# ── HELPERS ──
-
-@lru_cache(maxsize=None)
-def pid(name):
-    """Numeric pupil ID from a name string, WITHOUT leading zeros.
-    The dashboard keys the registry by p.index (an int) and looks pupils up via
-    parseInt(...) / String(intId), so admission numbers like '017961' must be
-    normalised to '17961' or every per-pupil lookup misses."""
-    m = re.match(r'(\d+)', str(name))
-    return str(int(m.group(1))) if m else str(name)
-
-def cohort_of(name):
-    """Leaving cohort from '... (2027 cohort)' or '... (2027 leaver)' -> 2027, or None."""
-    m = re.search(r'\((\d{4})\s*(?:cohort|leaver)\)', str(name))
-    return int(m.group(1)) if m else None
-
-def intake_from_name(name, default_intake):
-    """Y7 intake year derived from the leaving cohort (cohort - 5), else the default."""
-    c = cohort_of(name)
-    return (c - YEARS_TO_GCSE) if c is not None else default_intake
-
-def strip_tg(reg):
-    """Tutor group without the tutor-initials suffix: '10W2-ELe' -> '10W2'."""
-    return str(reg).split('-')[0].strip()
-
-def norm_subject(s):
-    """Canonicalise a subject spelling via SUBJECT_MAP (trimmed identity if unmapped)."""
-    if pd.isna(s):
-        return s
-    s = str(s).strip()
-    return SUBJECT_MAP.get(s, s)
-
-# ── Subject spelling variants ─────────────────────────────────────────────────
-# Raw subject names arrive mis-cased, truncated by the export, and decorated with
-# qualification noise. This PROPOSES groups that are probably one subject. It never
-# merges anything: SUBJECT_MAP — the school's own choices, made in the Admin panel —
-# remains the only thing that collapses a name.
-#
-# Four passes, unioned together:
-#   tidy    'pe' / 'PE (9-1)'             -> 'pe'         exact match
-#   loose   'GCSE Maths' / 'Maths'         -> 'maths'      exact match
-#   squash  'P.E.' / 'PE'                  -> 'pe'         exact match
-#   prefix  'Histor'->'History', 'Sculp'->'Sculpt'->'Sculpture'   truncation
-#
-# The prefix pass fires only when the extra characters do NOT start with a space.
-# That is what keeps 'English' apart from 'English Language': a truncation finishes
-# a word, a different subject adds one. Grouping those two would be precisely the
-# mistake the naming spec warns against — they are a continuity relationship, and
-# continuity must never collapse.
-
-_QUAL_NOISE = re.compile(
-    r'\b(?:i?gcse|gce|btec|ncfe|cache|ocr|aqa|edexcel|wjec|eduqas|'
-    r'a\s*level|as\s*level|a2|ks\s*[1-5]|key\s*stage\s*[1-5]|'
-    r'level\s*[1-3]|year\s*\d{1,2}|yr\s*\d{1,2}|'
-    r'full\s*course|short\s*course)\b')
-_MIN_PREFIX = 4        # below this 'Art' would swallow 'Art and Design'
-
-def _subj_tidy(s):
-    """Case, brackets, punctuation and spacing stripped."""
-    t = re.sub(r'\(.*?\)', ' ', str(s).lower())
-    t = t.replace('&', ' and ')
-    t = re.sub(r'[^a-z0-9]+', ' ', t)
-    return re.sub(r'\s+', ' ', t).strip()
-
-def _subj_loose(s):
-    """As _subj_tidy, plus qualification words."""
-    return re.sub(r'\s+', ' ', _QUAL_NOISE.sub(' ', _subj_tidy(s))).strip()
-
-def _subj_squash(s):
-    """Spaces and joining 'and' gone too, so 'P.E.'/'PE' and 'Design & Technology'/
-    'Design Technology' meet. EXACT matching only — never used for prefixes, where
-    losing the word boundary would reunite 'English' with 'English Language'."""
-    return re.sub(r'\band\b', '', _subj_tidy(s)).replace(' ', '')
-
-def subject_variant_groups(raw_names, alias_map=None):
-    """{group key: {raw names}} for names that look like the same subject.
-
-    A group whose members already resolve to a single canonical under alias_map is
-    dropped, so the Admin flag clears once the school has mapped them rather than
-    nagging forever."""
-    names = sorted({str(n).strip() for n in raw_names
-                    if n is not None and str(n).strip()})
-    parent = {n: n for n in names}
-
-    def find(a):
-        while parent[a] != a:
-            parent[a] = parent[parent[a]]
-            a = parent[a]
-        return a
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    # Passes 1-3: identical keys.
-    for keyfn in (_subj_tidy, _subj_loose, _subj_squash):
-        buckets = {}
-        for n in names:
-            k = keyfn(n)
-            if k:
-                buckets.setdefault(k, []).append(n)
-        for members in buckets.values():
-            for m in members[1:]:
-                union(members[0], m)
-
-    # Pass 4: truncation.
-    tidy = {n: _subj_tidy(n) for n in names}
-    for a in names:
-        ka = tidy[a]
-        if len(ka) < _MIN_PREFIX:
-            continue
-        for b in names:
-            if a == b:
-                continue
-            kb = tidy[b]
-            if len(kb) > len(ka) and kb.startswith(ka) \
-               and not kb[len(ka):].startswith(' '):
-                union(a, b)
-
-    groups = {}
-    for n in names:
-        groups.setdefault(find(n), set()).add(n)
-
+def _load_term_map(upload_dir):
+    """Per-school overrides for term labels the built-ins don't know: {normalised label: 'T1'|'T2'|'T3'}.
+    Rides along like the other admin-editable engine inputs (_calibration_ks*.json, _ability_scale.json)."""
     out = {}
-    for root, members in groups.items():
-        if len(members) < 2:
-            continue
-        if alias_map:
-            if len({alias_map.get(m, m) for m in members}) == 1:
-                continue            # already resolved by the school
-        out[_subj_tidy(root) or root] = members
-    return out
-
-@lru_cache(maxsize=None)
-def parse_date_flex(date_str):
-    """Parse dates in various formats (incl. dd-Mon-yy like '04-Sep-25')."""
-    if pd.isna(date_str):
-        return None
-    s = str(date_str).strip()
-    for fmt in ['%d-%b-%y', '%d-%b-%Y', '%d/%m/%Y', '%d/%m/%y',
-                '%d %B %Y', '%Y-%m-%d', '%d-%m-%Y', '%d-%m-%y']:
-        try:
-            return datetime.strptime(s, fmt).strftime('%Y-%m-%d')
-        except ValueError:
-            continue
-    return None
-
-def get_monday(date_str):
-    d = datetime.strptime(date_str, '%Y-%m-%d')
-    return (d - timedelta(days=d.weekday())).strftime('%Y-%m-%d')
-
-
-# ── DfE ACADEMIC WEEK NUMBERING ──
-# The DfE publishes attendance by "Week 1", "Week 2" ... and the national comparison
-# figures are keyed on those numbers. A school MUST use the same numbering or the
-# comparison silently compares different points in the year.
-#
-# THE TRAP: a school's first teaching day is not Week 1. TWS starts 4 September 2025,
-# which is DfE Week 5. Numbering from the first lesson puts every comparison four
-# weeks out — worst in the autumn term, when attendance is changing fastest, and
-# invisible because both numbers are called "week 10".
-#
-# THE RULE: weeks run Monday-Sunday, anchored on 1 August.
-#   1 Aug is Mon/Tue/Wed/Thu -> Week 1 is the week CONTAINING 1 August
-#   1 Aug is Fri/Sat/Sun     -> most of that week belongs to July, so Week 1 starts
-#                               the FOLLOWING Monday
-# Same four-day majority logic as ISO weeks, anchored on August rather than January.
-#
-# Two consequences that surprise people:
-#   * Week 1 can START IN JULY — 31 Jul 2023, 29 Jul 2024 — when 1 Aug is Tue-Thu.
-#   * A 53-week academic year happens. 1 Aug 2025 is Week 53 of 2024/25, not Week 1
-#     of 2025/26. Anything assuming 52 weeks loses a week every few years.
-
-# ⚠️ THE DfE ACADEMIC YEAR RUNS 1 AUGUST TO 31 JULY.
-# Used by the week numbering below and by _ay_of(). Note the engine still writes
-# f'{CAY}-09-01' in a handful of places as a synthetic "start of year" stamp for
-# enrolment records — that is a PLACEHOLDER DATE, not a boundary test, and is left
-# alone deliberately. Anything that ASKS "which academic year is this date in" must
-# use _ay_of() / AY_START_MONTH, never a September comparison.
-AY_START_MONTH = 8
-
-
-def dfe_week1_monday(ay_start_year):
-    """Monday that begins DfE Academic Week 1 for the year starting 1 Aug <year>."""
-    aug1 = datetime(ay_start_year, 8, 1)
-    monday = aug1 - timedelta(days=aug1.weekday())
-    return monday if aug1.weekday() <= 3 else monday + timedelta(days=7)
-
-
-def dfe_week(date_str):
-    """(academic_year_start, week_number) for an ISO date, or (None, None).
-
-    Anchored on 1 August, NOT on the school's first day of term.
-    """
-    if not date_str:
-        return None, None
     try:
-        d = datetime.strptime(str(date_str)[:10], '%Y-%m-%d')
-    except (ValueError, TypeError):
-        return None, None
-    y = d.year if d >= dfe_week1_monday(d.year) else d.year - 1
-    return y, (d - dfe_week1_monday(y)).days // 7 + 1
-
-def _norm_raw(v):
-    """Normalise a raw report cell to a lookup key: strip, drop a trailing '.0'
-    (so a float-read '1.0' matches '1'), and Title-case bare words."""
-    if pd.isna(v):
-        return None
-    s = str(v).strip()
-    if not s or s.lower() == 'nan':
-        return None
-    if re.fullmatch(r'\d+\.0', s):      # 1.0 -> 1 (pandas reads numeric cols as float)
-        s = s[:-2]
-    return s
-
-def map_ability(v, flagset):
-    """Raw 'Ability Value' -> dashboard letter, or None (flagging the unknown raw value)."""
-    s = _norm_raw(v)
-    if s is None:
-        return None
-    if s in ABILITY_VALUE_MAP:
-        return ABILITY_VALUE_MAP[s]
-    if s.title() in ABILITY_VALUE_MAP:
-        return ABILITY_VALUE_MAP[s.title()]
-    if s.upper() in ABILITY_VALUE_MAP:
-        return ABILITY_VALUE_MAP[s.upper()]
-    flagset.add(s)
-    return None
-
-def map_effort(v, flagset):
-    """Raw 'Effort Value' -> the school's effort scale value, or None (flagging the unknown raw
-    value). A bare number with no explicit mapping passes straight through (effort "1" -> 1), so
-    numeric effort imports without setup; the Admin can still formalise the scale and its direction."""
-    s = _norm_raw(v)
-    if s is None:
-        return None
-    if s in EFFORT_VALUE_MAP:
-        return EFFORT_VALUE_MAP[s]
-    if s.title() in EFFORT_VALUE_MAP:
-        return EFFORT_VALUE_MAP[s.title()]
-    if re.fullmatch(r'\d{1,2}', s):
-        return int(s)                     # self-evident numeric effort passes through
-    flagset.add(s)
-    return None
-
-def map_ote(v):
-    """Raw 'OTA Grade' -> GCSE int 1..9, or None. Tolerates '7', '7.0', '7a', 'Grade 7'."""
-    s = _norm_raw(v)
-    if s is None:
-        return None
-    m = re.search(r'\d+', s)
-    if not m:
-        return None
-    n = int(m.group())
-    return n if 1 <= n <= 9 else None
-
-# ── TIMETABLE SHAPE ──
-# The grid used to be hardcoded 5 days x 5 periods. That silently DISCARDED data:
-# att_all['Per'].between(1, 5) dropped periods 6+, and a five-entry DAY_MAP dropped
-# Saturday. A school running 8 periods, or teaching on a Saturday, lost those rows
-# before data.json was written — no error, just a smaller denominator.
-#
-# The shape is derivable: 'Period Description' is 'Mon:1', so the distinct days and
-# the highest period ARE the timetable. DAY_NAMES / DAY_MAP / N_PER are rebuilt from
-# the data immediately after att_all is parsed (see "DERIVE TIMETABLE SHAPE" below),
-# and written into data.json so the browser reads dimensions instead of counting to 5.
-#
-# WEEK_ORDER is the canonical ordering only — a day appears in DAY_NAMES solely
-# because the data contains it. Sorting days alphabetically would put Fri before Mon.
-WEEK_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-# Fallbacks. Overwritten from the data below; kept so anything importing this module
-# before parsing still sees a sane shape.
-DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-DAY_MAP = {d: i for i, d in enumerate(DAY_NAMES)}
-N_DAY = len(DAY_NAMES)
-N_PER = 5
-
-# ── TERM / PERIOD RESOLUTION (year-aware) ──
-# An academic year is labelled by its START calendar year: AY 2025-26 -> "2025".
-# Term split (month-based default): T1 = Sep-Dec, T2 = Jan-Mar, T3 = Apr-Aug.
-# NOTE: the Apr (Easter) boundary floats year-to-year; month-rule is the default,
-# refine to attendance-gap detection or an explicit term-date table if needed.
-
-@lru_cache(maxsize=None)
-def acad_year(date_str):
-    """Academic year (start calendar year) for an ISO (YYYY-MM-DD) date.
-
-    DfE basis: the academic year runs 1 AUGUST to 31 July, matching
-    dfe_week1_monday() and _ay_of(). A September test would put 15 August 2025 in
-    AY2024 while the week numbering called it week 2 of AY2025.
-    """
-    y, m = int(date_str[:4]), int(date_str[5:7])
-    return y if m >= AY_START_MONTH else y - 1
-
-@lru_cache(maxsize=None)
-def get_term(date_str):
-    """Period label 'T{n} {AYstart}' for an ISO date, or None. Year-aware."""
-    if not date_str:
-        return None
-    m = int(date_str[5:7])
-    ay = acad_year(date_str)
-    # ⚠️ TERMS are NOT the academic year boundary. T1 is September to December; August
-    # belongs to the academic year (see acad_year) but not to term 1, so it falls into
-    # T3 below with the rest of the summer. Do not "align" this to AY_START_MONTH.
-    if m >= 9:      t = 1   # Sep-Dec  -> T1
-    elif m <= 3:    t = 2   # Jan-Mar  -> T2
-    else:           t = 3   # Apr-Aug  -> T3
-    return f"T{t} {ay}"
-
-def get_periods(intake, cay, min_yg=7):
-    """Period labels for a cohort: intake (Y7 start year) .. cay, capped at Y13 (end of KS5).
-    The cap reaches Year 13 so sixth-form cohorts and the GCSE→A-Level transition are charted;
-    cohorts not yet that old simply stop at the current year."""
-    # Iterating from `intake` assumed the cohort's first year at the school was
-    # Year 7. An all-through school has Reception seven years earlier, which
-    # makes the notional Y7 start a FUTURE year — range(intake, cay+1) is then
-    # empty and the whole cohort silently gets no periods. Start from Reception
-    # and let the year-group bounds do the work.
-    # min_yg is the lowest year group the school actually teaches, derived from
-    # the roster rather than assumed. A secondary school passes 7 and nothing
-    # changes; an all-through school passes 0 and Reception is included without
-    # generating seven empty years for every secondary cohort.
-    out = []
-    for ay in range(intake - 7, cay + 1):
-        yg = ay - intake + 7
-        if yg < min_yg:
-            continue
-        if yg > 13:     # past Year 13
-            break
-        for t in (1, 2, 3):
-            out.append(f"T{t} {ay}")
-    return out
-
-def term_sort_key(label):
-    """Chronological sort key for a 'T{n} {ay}' label."""
-    t, ay = label.split(' ')
-    return (int(ay), int(t[1:]))
-
-def period_label(p):
-    """Display label: 'T1 2025' -> 'T1 2025-2026'."""
-    t, ay = p.split(' ')
-    return f"{t} {ay}-{int(ay) + 1}"
-
-# ── Report collections ────────────────────────────────────────────────────────
-# Reports used to be bucketed into three terms a year by month, which meant two
-# collections in the same term overwrote each other and a school running four a
-# year silently lost one. A report is an event on a date, so it is keyed by that
-# date. Attendance keeps the term buckets above: attendance per term is a real
-# aggregation, a report is not.
-_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-
-# A collection is identified by its real date when the export carries one, and by
-# the school's own term label when it does not. Nominal dates are used ONLY to
-# put label-only collections in the right order — they are never displayed,
-# because an invented date on a chart axis reads as a fact.
-_NOMINAL = {'T1': '11-15', 'T2': '02-15', 'T3': '06-15'}
-
-def is_dated(c):
-    return bool(c) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(c)))
-
-def collection_sort_date(c):
-    """An ISO date for ordering. Real when we have one, nominal when we do not."""
-    if is_dated(c):
-        return c
-    m = re.fullmatch(r'(T[123])\s+(\d{4})', str(c) or '')
-    if not m:
-        return '9999-12-31'
-    t, ay = m.group(1), int(m.group(2))
-    md = _NOMINAL[t]
-    return f"{ay if t == 'T1' else ay + 1}-{md}"
-
-def collection_ay(c):
-    return acad_year(collection_sort_date(c))
-
-def collection_label(c):
-    """Display: a real date as '14 Nov 2025'; a term as the school sees it."""
-    if is_dated(c):
-        try:
-            return f"{int(c[8:10])} {_MONTHS[int(c[5:7]) - 1]} {c[:4]}"
-        except Exception:
-            return c
-    try:
-        return period_label(c)          # 'T1 2025' -> 'T1 2025-2026'
+        p = os.path.join(upload_dir, '_term_map.json')
+        if os.path.exists(p):
+            with open(p, encoding='utf-8') as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                for k, v in raw.items():
+                    vs = str(v).strip().upper()
+                    if vs in ('T1', 'T2', 'T3'):
+                        out[_norm_term(k)] = vs
     except Exception:
-        return str(c)
+        pass
+    return out
 
-def collection_in_cohort(c, intake, cay):
-    """Inside the cohort's school career? Same bounds the term grid used."""
-    ay = collection_ay(c)
-    if ay is None:
-        return False
-    yg = ay - intake + 7
-    return ay <= cay and MIN_YG <= yg <= 13
+ATT_COLS = ['Name', 'Reg', 'Mark', 'Date', 'Subject', 'Teacher', 'Period Description']
+BEH_COLS = ['Name', 'Date', 'Subject', 'Lesson - Period', 'Incident', 'Teacher']
 
-# ── LOAD DATA ──
-print("Loading data files...")
-UP = '/home/claude/import_input'   # staged inputs (concatenated / renamed as needed)
+# Grade term resolution: the report's "Resultset" (e.g. "*Year 10 Summer") carries the SEASON
+# (Autumn/Spring/Summer -> T1/T2/T3) and the YEAR GROUP it was collected in, but NOT a calendar
+# year. The academic year is recovered per pupil from their intake: AY = intake + (resultYG - 7).
+# So "Year 10 Summer" for an intake-2022 pupil -> AY 2025 -> "T3 2025", and the same label for an
+# intake-2021 (now Year 11) pupil -> AY 2024. No hard-coded default term: if a row can't be
+# resolved it is left blank for the engine to flag, never silently stamped with a guessed term.
 
-def _req_csv(name, **kw):
-    df = pd.read_csv(f'{UP}/{name}', encoding='utf-8-sig', **kw)
+
+def _read(path):
+    df = pd.read_csv(path, encoding='utf-8-sig', dtype=str)
     df.columns = df.columns.str.strip()
     return df
 
-def _opt_csv(name, cols):
-    """Read a CSV if present, else return an empty frame with the expected columns.
-    Lets a partial (e.g. Y10-only) import run before every file has been uploaded."""
-    p = f'{UP}/{name}'
-    if os.path.exists(p):
-        df = pd.read_csv(p, encoding='utf-8-sig')
-        df.columns = df.columns.str.strip()
-        return df
-    print(f"  (optional) {name} not found — using empty frame")
-    return pd.DataFrame(columns=cols)
 
-# ── COHORT-GENERIC INPUT READS ──
-# Attendance, behaviour and detentions are read by glob, so ANY number of cohorts works — each
-# cohort just contributes more files (the staging contract names them *attend_updated.csv /
-# Behave*.csv / Detention*.csv). FSM is one combined file; SEN keeps its two sources. A pupil's
-# cohort/intake comes from the roster, never from these files.
-def _read_glob(pattern, rename=None):
-    frames = []
-    for p in sorted(glob.glob(f'{UP}/{pattern}')):
-        df = pd.read_csv(p, encoding='utf-8-sig'); df.columns = df.columns.str.strip()
-        if rename: df = df.rename(columns=rename)
-        frames.append(df)
-    return frames
+def detect(fname):
+    """(role, year_group) from a filename; year_group is 10/11/None."""
+    f = fname.lower()
+    yg = 11 if re.search(r'(year[_ ]?11|y11|ys?7-10|_in_y(?:s)?7)', f) and '11' in f else None
+    if yg is None:
+        yg = 11 if re.search(r'year[_ ]?11|y11', f) else (10 if re.search(r'year[_ ]?10|y10', f) else None)
+    if 'in_year' in f:                                   return ('attendance', yg)
+    if 'on_track_for' in f:                              return ('grade_attain', yg)
+    if 'effort' in f:                                    return ('grade_effort', yg)
+    if 'behaviour_data' in f:                            return ('behave_current', yg)
+    if re.search(r'behave.*in.*y', f):                   return ('behave_historic', yg)
+    if 'detention' in f:                                 return ('detention', yg)
+    if 'fsm' in f:                                       return ('fsm', yg)
+    if 'housepoint' in f:                                return ('housepoints', yg)
+    if 'sen' in f:                                       return ('sen', yg)
+    return (None, None)
 
-att_frames = _read_glob('*attend_updated.csv')
-if not att_frames:
-    # A cohort can be established from its roster alone — e.g. a school setting up a year group
-    # before term has started. With no attendance yet, build from the roster and leave the
-    # attendance-derived views empty until data arrives. A rebuild is never blocked.
-    print("No attendance files yet — building from the roster alone "
-          "(attendance views stay empty until attendance data is uploaded).")
-    att_frames = [pd.DataFrame(columns=['Name', 'Date', 'Mark', 'Subject', 'Teacher',
-                                        'Period Description', 'Reg'])]
-codes_list = _read_glob('Behave*.csv',
-                        rename={'Teacher Name': 'Teacher', 'Lesson - Period': 'Period', 'Pupil name': 'Name'})
-dets_list = _read_glob('Detention*.csv')
-# FSM now rides in on the roster (captured into Roster.csv's 'FSM' column, alongside SEN and
-# gender). A legacy whole-school FSM.csv is still read if present, but it is OPTIONAL now —
-# a missing FSM file can never block a rebuild.
-fsm_y10 = _opt_csv('FSM.csv', ['Name', 'Eligible for free meals']); fsm_y11 = fsm_y10
-sen_y10 = (pd.read_excel(f'{UP}/SEN.xlsx') if os.path.exists(f'{UP}/SEN.xlsx')
-           else pd.DataFrame(columns=['Name', 'SEN Status Code']))
-sen_y11 = _opt_csv('SEN.csv', ['Name', 'SEN Status'])
 
-# House Points (positive behaviour) — OPTIONAL. Filenames TBC; skipped if not present.
-# Any CSV matching these is read; the processing is filename-agnostic.
-HP_PATHS = [f'{UP}/House_Points_Y10.csv',
-            f'{UP}/House_Points_Y11.csv',
-            f'{UP}/House_Points.csv',
-            f'{UP}/HousePoints.csv']
-hp_dfs = []
-for _p in HP_PATHS:
-    if os.path.exists(_p):
-        _df = pd.read_csv(_p, encoding='utf-8-sig')
-        _df.columns = _df.columns.str.strip()
-        hp_dfs.append(_df)
-print(f"House-point files found: {len(hp_dfs)}")
+def _att_norm(df):
+    """Map any attendance export to ATT_COLS, recovering the mislabelled teacher column."""
+    if 'Teacher' not in df.columns and 'Name.1' in df.columns:
+        df = df.rename(columns={'Name.1': 'Teacher'})
+    for c in ATT_COLS:
+        if c not in df.columns:
+            df[c] = ''
+    return df[ATT_COLS]
 
-# Reports / grades (progress scores) — OPTIONAL, multi-file per cohort supported.
-# Stage as Reports.csv (the importer also picks up Reports_Y10/Y11 and Report_data and
-# concatenates). Matching is by leading admission number, so cohort tags don't matter.
-REPORT_PATHS = [f'{UP}/Reports.csv', f'{UP}/Reports_Y10.csv', f'{UP}/Reports_Y11.csv',
-                f'{UP}/Report_data.csv']
-_report_dfs = []
-for _p in REPORT_PATHS:
-    if os.path.exists(_p):
-        _df = pd.read_csv(_p, encoding='utf-8-sig', dtype=str)
-        _df.columns = _df.columns.str.strip()
-        _report_dfs.append(_df)
-reports = (pd.concat(_report_dfs, ignore_index=True) if _report_dfs
-           else pd.DataFrame(columns=['Name', 'Date', 'Subject',
-                                      'Ability Value', 'Effort Value', 'OTA Grade']))
-print(f"Report files found: {len(_report_dfs)} ({len(reports)} grade rows)")
 
-# ── COMBINE & PARSE ATTENDANCE ──
-print("\nParsing attendance data...")
-att_all = pd.concat(att_frames, ignore_index=True)
-att_all = att_all.dropna(subset=['Period Description'])
-# Per-row transforms evaluated once per DISTINCT value, then mapped — same functions, identical
-# output, but a few hundred calls instead of one per row (big on a 50MB+ attendance frame).
-def _vmap(series, fn):
-    lut = {v: fn(v) for v in series.dropna().unique()}
-    return series.map(lut)
-_per_of = lambda x: int(str(x).split(':')[1]) if ':' in str(x) and str(x).split(':')[1].isdigit() else 0
-att_all['pid'] = _vmap(att_all['Name'], pid)
-att_all['Day'] = (att_all['Period Description'].astype(str).str.split(':').str[0]
-                  .str.strip().str[:3].str.title())   # 'Monday'/'MON'/'mon' -> 'Mon' (matches DAY_MAP)
-att_all['Per'] = _vmap(att_all['Period Description'], _per_of)
-att_all['DateISO'] = _vmap(att_all['Date'], parse_date_flex)
-
-# ── DERIVE TIMETABLE SHAPE (was hardcoded 5x5) ──
-# Every day the data actually contains, in week order; every period up to the highest
-# one seen. Periods are contiguous from 1 so a school that only uses 1,2,3,5 still gets
-# a slot for 4 rather than a ragged grid.
-_days_seen = set(att_all['Day'].dropna().unique())
-DAY_NAMES = [d for d in WEEK_ORDER if d in _days_seen] or ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-DAY_MAP = {d: i for i, d in enumerate(DAY_NAMES)}
-N_DAY = len(DAY_NAMES)
-
-_per_seen = pd.to_numeric(att_all['Per'], errors='coerce')
-_per_seen = _per_seen[(_per_seen >= 1) & (_per_seen <= 20)]   # 20 = sanity ceiling, not a shape
-N_PER = int(_per_seen.max()) if len(_per_seen) else 5
-
-print(f"Timetable shape: {N_DAY} days {DAY_NAMES} x {N_PER} periods")
-
-# DfE academic week on every row, for national comparison. Anchored on 1 August,
-# not on the school's first teaching day — see dfe_week().
-_dfe = att_all['DateISO'].map(lambda x: dfe_week(x) if x else (None, None))
-att_all['DfeAY'] = [t[0] for t in _dfe]
-att_all['DfeWeek'] = [t[1] for t in _dfe]
-_wk = att_all[att_all['DfeWeek'].notna()]
-if len(_wk):
-    print(f"DfE weeks present: {int(_wk['DfeWeek'].min())}-{int(_wk['DfeWeek'].max())}"
-          f" (week 1 of {CAY} begins {dfe_week1_monday(CAY).strftime('%Y-%m-%d')})")
-_unknown_days = sorted(d for d in _days_seen if d and d not in DAY_MAP)
-if _unknown_days:
-    # Never silently drop. A day we cannot place is a data problem the school should see.
-    print(f"  !! unrecognised day tokens, rows will be excluded: {_unknown_days}")
-_hi = pd.to_numeric(att_all['Per'], errors='coerce')
-_over = int((_hi > 20).sum())
-if _over:
-    print(f"  !! {_over} rows with a period above 20 — excluded, check the export")
-att_all['Teacher'] = att_all['Teacher'].apply(lambda x: int(x) if pd.notna(x) else None)
-att_all = att_all.dropna(subset=['DateISO'])
-# Academic year (start calendar year) per row — used to build per-year snapshots.
-att_all['AY'] = _vmap(att_all['DateISO'], acad_year)
-
-# Subject normalisation + propose spelling variants for mapping.
-# Every source that carries a subject is considered, not attendance alone, so a name
-# that only ever appears on reports or behaviour still gets surfaced for mapping.
-_raw_subjects = set(att_all['Subject'].dropna().astype(str).str.strip())
-for _df in [reports] + list(codes_list):
-    try:
-        if _df is not None and 'Subject' in _df.columns:
-            _raw_subjects |= set(_df['Subject'].dropna().astype(str).str.strip())
-    except Exception:
-        pass
-_raw_subjects.discard('')
-_subject_variants = subject_variant_groups(_raw_subjects, SUBJECT_MAP)
-if _subject_variants:
-    print("⚠ SUBJECT SPELLING VARIANTS (add a canonical form to subject_map):")
-    for _k, _v in sorted(_subject_variants.items()):
-        print(f"  {sorted(_v)}")
-else:
-    print(f"Subjects: {len(_raw_subjects)} distinct raw names, no variants proposed")
-att_all['Subject'] = _vmap(att_all['Subject'], norm_subject)
-
-# Flag unknown attendance codes
-all_marks = set(att_all['Mark'].dropna().unique())
-known_marks = PRESENT_CODES | ALL_ABSENT_CODES | NOT_COUNTED_CODES
-unknown_marks = all_marks - known_marks
-if unknown_marks:
-    print(f"⚠ UNKNOWN ATTENDANCE CODES: {unknown_marks}")
-    for m in unknown_marks:
-        count = len(att_all[att_all['Mark'] == m])
-        print(f"  '{m}': {count} occurrences — defaulting to unauthorised absent")
-    UNAUTH_ABSENT_CODES |= unknown_marks
-    ALL_ABSENT_CODES = AUTH_ABSENT_CODES | UNAUTH_ABSENT_CODES
-
-# ── BUILD REGISTRY (roster-driven) ──
-# The roster is authoritative for each pupil's cohort: intake comes from the pupil's CURRENT
-# year group (in the roster) anchored to the academic year — no "Y11 is the end" assumption, and
-# any number of cohorts works. Where no roster row exists we fall back to the leaving-cohort tag
-# in the Name. Year-group is derived from intake; TG has its year prefix stripped.
-print("Building pupil registry...")
-
-# ── PUPIL LEDGER ── persistent last-known characteristics for every pupil ever seen
-# on a roster, so leavers keep their name/gender/cohort/SEN/FSM after they drop off.
-# The current roster always wins; the ledger only fills pupils it no longer contains,
-# so it can never alter a current pupil.
-LEDGER_PATH = os.environ.get('LEDGER_PATH', '/home/claude/pupil_ledger.csv')
-
-def _load_ledger(path):
-    out = {}
-    if not os.path.exists(path):
-        return out
-    try:
-        with open(path, newline='', encoding='utf-8-sig') as _f:
-            for _row in csv.DictReader(_f):
-                _p = (_row.get('Pupil') or '').strip()
-                if not _p:
-                    continue
-                _iv = (_row.get('Intake') or '').strip()
-                try: _ik = int(_iv) if _iv else None
-                except (ValueError, TypeError): _ik = None
-                _g = (_row.get('Gender') or 'U').strip().upper()[:1]
-                out[_p] = {'name': (_row.get('Name') or '').strip(),
-                           'gender': _g if _g in ('M', 'F') else 'U',
-                           'intake': _ik,
-                           'sen': (_row.get('SEN') or '').strip(),
-                           'fsm': (_row.get('FSM') or 'N').strip().upper()[:1]}
-    except Exception as _e:
-        print(f"Ledger: could not read {path} ({_e}); treating as empty")
-    return out
-
-def _write_ledger(path, ledger):
-    try:
-        with open(path, 'w', newline='', encoding='utf-8') as _f:
-            _w = csv.writer(_f)
-            _w.writerow(['Pupil', 'Name', 'Gender', 'Intake', 'SEN', 'FSM'])
-            for _p in sorted(ledger):
-                _L = ledger[_p]
-                _w.writerow([_p, _L.get('name', ''), _L.get('gender', 'U'),
-                             ('' if _L.get('intake') is None else int(_L['intake'])),
-                             _L.get('sen', ''), _L.get('fsm', 'N')])
-        print(f"Ledger: wrote {len(ledger)} pupils -> {path}")
-    except Exception as _e:
-        print(f"Ledger: could not write {path} ({_e})")
-
-# Roster: pid -> {intake, gender, name}. Produced by the staging step (derive_roster) as Roster.csv.
-roster_map = {}
-_roster_path = f'{UP}/Roster.csv'
-if os.path.exists(_roster_path):
-    _rdf = pd.read_csv(_roster_path, encoding='utf-8-sig'); _rdf.columns = _rdf.columns.str.strip()
-    for _, _r in _rdf.iterrows():
-        _p = pid(_r['Name']) if pd.notna(_r.get('Name')) else None
-        if _p is None: continue
-        try: _ik = int(_r['Intake'])
-        except (ValueError, TypeError, KeyError): _ik = None
-        _g = str(_r.get('Gender', '')).strip().upper()[:1]
-        _rf = str(_r.get('FSM', '')).strip().upper()[:1]
-        roster_map[_p] = {'intake': _ik, 'gender': _g if _g in ('M', 'F') else 'U',
-                          'name': str(_r.get('Name', '')).strip(),
-                          'fsm': 'Y' if _rf == 'Y' else ''}
-    print(f"Roster: {len(roster_map)} pupils (authoritative cohort source)")
-else:
-    print("Roster: none found — falling back to cohort tags in pupil names")
-
-# Merge the ledger: current roster wins; the ledger supplies only pupils no longer on it.
-_ledger = _load_ledger(LEDGER_PATH)
-_CURRENT_ROSTER = set(roster_map.keys())
-# Pupils with actual data still in the store (attendance is the universal existence seed).
-# A ledger pupil whose data has been deleted drops out of this set, which gates both the
-# leaver-restore below and the ledger prune at the end — so wiping a cohort forgets them
-# instead of re-injecting them as empty 'ghost' records.
-_att_pids = set(att_all['pid'].dropna().astype(str).unique())
-_merged = 0
-for _p, _L in _ledger.items():
-    if _p not in roster_map and _L.get('intake') is not None and _p in _att_pids:
-        roster_map[_p] = {'intake': _L['intake'], 'gender': _L.get('gender', 'U'),
-                          'name': _L.get('name') or str(_p)}
-        _merged += 1
-print(f"Ledger: {len(_ledger)} known pupils, {_merged} leavers restored to roster")
-
-# Gender — authoritative from the roster, with any SEN 'Gender' column as a fallback.
-gender_map = {p: r['gender'] for p, r in roster_map.items() if r.get('gender') in ('M', 'F')}
-for _df in (sen_y10, sen_y11):
-    if 'Gender' in _df.columns:
-        for _, _r in _df.iterrows():
-            g = str(_r.get('Gender', '')).strip().upper()[:1]
-            if g in ('M', 'F'): gender_map.setdefault(pid(_r['Name']), g)
-print(f"Gender: {sum(1 for g in gender_map.values() if g=='M')} M, "
-      f"{sum(1 for g in gender_map.values() if g=='F')} F")
-
-registry = {}
-DEFAULT_INTAKE = min((r['intake'] for r in roster_map.values() if r.get('intake') is not None),
-                     default=CAY - YEARS_TO_GCSE + 1)
-for _, row in att_all.drop_duplicates('Name').iterrows():
-    p = pid(row['Name'])
-    r = roster_map.get(p)
-    intake = (r['intake'] if r and r.get('intake') is not None
-              else intake_from_name(row['Name'], DEFAULT_INTAKE))
-    yg = CAY - intake + 7
-    registry[p] = {'index': int(p), 'id': (r['name'] if r and r.get('name') else row['Name']), 'intake': intake, 'left': False,
-                   'gender': gender_map.get(p, 'U'), 'year': f'Year {yg}', 'reg': strip_tg(row['Reg'])}
-# Roster pupils with no attendance yet still belong in the registry.
-for p, r in roster_map.items():
-    if p not in registry and r.get('intake') is not None:
-        yg = CAY - r['intake'] + 7
-        registry[p] = {'index': int(p), 'id': r.get('name') or str(p), 'intake': r['intake'],
-                       'left': False, 'gender': gender_map.get(p, 'U'), 'year': f'Year {yg}', 'reg': ''}
-print(f"Registry: {len(registry)} pupils "
-      f"({sum(1 for v in registry.values() if v['gender']=='U')} with unknown gender)")
-
-# The roster is authoritative for who is currently on roll. If a roster has been provided,
-# anyone it no longer lists — but who is still known to us (has data, or was on roll before)
-# — is marked as having Left. Re-uploading a cohort's roster therefore flips departed pupils
-# to Left automatically, while they keep their history.
-if _CURRENT_ROSTER:
-    _left_n = 0
-    for _p in registry:
-        _is_left = _p not in _CURRENT_ROSTER
-        registry[_p]['left'] = _is_left
-        if _is_left:
-            _left_n += 1
-    print(f"On roll: {len(registry) - _left_n}; left (kept with history): {_left_n}")
-
-# ── FSM & SEN FLAGS ──
-print("Processing FSM and SEN flags...")
-fsm_set = set()
-# FSM is a pupil attribute carried on the roster (alongside SEN and gender), so current
-# on-roll FSM comes straight from the roster.
-for _p, _r in roster_map.items():
-    if _p in registry and _r.get('fsm') == 'Y':
-        fsm_set.add(_p)
-# A legacy whole-school FSM.csv export is still honoured if one is present (additive, optional).
-for _, row in fsm_y10.iterrows():
-    p = pid(row['Name']) if pd.notna(row.get('Name')) else None
-    _elig = str(row.get('Eligible for free meals', '')).strip().upper()[:1]
-    _flag = str(row.get('FSM', '')).strip().upper()[:1]
-    if p in registry and (_elig in ('T', 'Y') or _flag in ('Y', 'T', 'E')):
-        fsm_set.add(p)
-
-# Leaver FSM: keep last-known FSM for pupils no longer on the roster. Current pupils
-# already reflect the latest list above (including coming OFF free meals), so this
-# only ever adds leavers — it cannot change a current pupil's status.
-for _p, _L in _ledger.items():
-    if _p in registry and _p not in _CURRENT_ROSTER and _L.get('fsm') == 'Y':
-        fsm_set.add(_p)
-
-sen_map = {}
-for df_sen, col_pref in [(sen_y10, 'SEN Status Code'), (sen_y11, 'SEN Status')]:
-    col = col_pref if col_pref in df_sen.columns else ('SEN Status Code' if 'SEN Status Code' in df_sen.columns else 'SEN Status')
-    for _, row in df_sen.iterrows():
-        p = pid(row['Name'])
-        status = row.get(col)
-        if pd.notna(status) and str(status).strip():
-            sen_map[p] = str(status).strip()
-
-# Leaver SEN: keep last-known SEN status for pupils no longer on the roster.
-for _p, _L in _ledger.items():
-    if _p not in _CURRENT_ROSTER and _p in _att_pids and _L.get('sen') and _p not in sen_map:
-        sen_map[_p] = _L['sen']
-
-# ── WHICH SEN CODES MEAN "HAS SEN"? ──
-# send_set used to be every pupil with a non-empty status code. A SEN export carries a
-# row per pupil INCLUDING those with no need, so "N" (No SEN) was counted as SEN and the
-# whole roll came out SEND — 478 of 478 at TWS. That also emptied the FSM-only and
-# "neither" groups, because the grouping tests SEN before either of them.
-# DfE codes: N = no SEN, K = SEN support, E = EHC plan. A/P/S are the pre-2014 codes
-# (School Action, Action Plus, Statement) and still appear in historic exports.
-_NO_SEN = {'N', 'NO', 'NONE', 'NA', 'N/A', '0', '-'}
-
-def _has_sen(code):
-    return bool(code) and str(code).strip().upper() not in _NO_SEN
-
-ehcp_set = {p for p, s in sen_map.items() if str(s).strip().upper() in ('E', 'S')}
-send_set = {p for p, s in sen_map.items() if _has_sen(s)}
-_no_sen_n = len(sen_map) - len(send_set)
-print(f"FSM: {len(fsm_set)}, SEND: {len(send_set)}, EHCP: {len(ehcp_set)}")
-print(f"  SEN codes seen: {sorted(set(str(v).strip().upper() for v in sen_map.values()))}")
-print(f"  {_no_sen_n} pupils carry a 'no SEN' code and are correctly NOT counted as SEND")
-if send_set and len(send_set) == len(registry):
-    print("  !! EVERY pupil is flagged SEND — check the SEN export's status codes")
-if not fsm_set:
-    print("  !! NO pupil is flagged FSM — check the roster 'fsm' column and FSM.csv "
-          "('Eligible for free meals' should read Y/Yes/T)")
-
-# ── DATED SEN / EHCP / FSM SPELLS ─────────────────────────────────────────────
-# The sets above are point-in-time, and worse, the engine stamped them onto every
-# historic collection — so a pupil identified as SEND last month appeared SEND in
-# their Year 9 data too. That makes any historic comparison answer a different
-# question from the one asked, silently.
-#
-# A spell is {code, from, to}, with to=None meaning still open. Read from
-# optional date columns if the export carries them; otherwise one open spell
-# starting from the pupil's first day, which reproduces the old behaviour
-# exactly. Xporter supplies the real thing via StudentSENProvisionHistory and
-# EntitlementHistory, and both drop straight in here.
-_DATE_COLS_FROM = ['Start Date', 'StartDate', 'From', 'From Date', 'Date From', 'Valid From']
-_DATE_COLS_TO   = ['End Date', 'EndDate', 'To', 'To Date', 'Date To', 'Valid To']
-
-def _spell_dates(row):
-    """(from, to) as ISO, or (None, None) when the export carries no dates."""
-    f = t = None
-    for c in _DATE_COLS_FROM:
-        if c in row and pd.notna(row.get(c)):
-            f = parse_date_flex(row.get(c))
-            if f:
-                break
-    for c in _DATE_COLS_TO:
-        if c in row and pd.notna(row.get(c)):
-            t = parse_date_flex(row.get(c))
-            if t:
-                break
-    return f, t
-
-def _add_spell(store, p, code, frm, to):
-    store.setdefault(p, []).append({'code': code, 'from': frm, 'to': to})
-
-sen_spells, fsm_spells = {}, {}
-_dated_sen = _dated_fsm = 0
-
-for df_sen, col_pref in [(sen_y10, 'SEN Status Code'), (sen_y11, 'SEN Status')]:
-    col = col_pref if col_pref in df_sen.columns else ('SEN Status Code' if 'SEN Status Code' in df_sen.columns else 'SEN Status')
-    for _, row in df_sen.iterrows():
-        p = pid(row['Name'])
-        status = row.get(col)
-        # Same "N means no SEN" rule as send_set above — without this a no-SEN row
-        # becomes an open SEN spell and every pupil reads SEND at every collection.
-        if p not in registry or pd.isna(status) or not _has_sen(status):
+def _beh_norm(df, historic):
+    d = df.copy()
+    # Rename source->target ONLY when the target isn't already present; if a file carries both
+    # (e.g. 'Name' AND 'Pupil name'), renaming would create two identically-named columns, which
+    # makes the later pd.concat fail with "Reindexing only valid with uniquely valued Index objects".
+    # In that case keep the existing target column and drop the redundant source.
+    # ⚠️ CHOOSE ON CONTENT, NOT ON PRESENCE.
+    # The old rule was "if the target exists, drop the source" — which assumed the
+    # target is the good column. TWS's Year 11 behaviour exports carry a NINE-column
+    # header over FIVE-column data, so 'Name' exists but is empty on every row while
+    # 'Pupil name' holds the pupil. Dropping the source there discarded EVERY Year 11
+    # behaviour record: three academic years, silently, with no error anywhere.
+    # Keep whichever column actually has values; fall back to the old behaviour only
+    # when both are populated (which is the case the guard was written for).
+    for src, tgt in (('Pupil name', 'Name'), ('Teacher Name', 'Teacher')):
+        if src not in d.columns:
             continue
-        f, t = _spell_dates(row)
-        if f or t:
-            _dated_sen += 1
-        _add_spell(sen_spells, p, str(status).strip(), f, t)
-
-for _, row in fsm_y10.iterrows():
-    p = pid(row['Name']) if pd.notna(row.get('Name')) else None
-    if p not in registry:
-        continue
-    _elig = str(row.get('Eligible for free meals', '')).strip().upper()[:1]
-    _flag = str(row.get('FSM', '')).strip().upper()[:1]
-    if _elig in ('T', 'Y') or _flag in ('Y', 'T', 'E'):
-        f, t = _spell_dates(row)
-        if f or t:
-            _dated_fsm += 1
-        _add_spell(fsm_spells, p, 'FSM', f, t)
-
-# Anyone flagged by the undated route keeps an open spell, so behaviour is
-# unchanged until real dates arrive.
-for p in send_set:
-    if p not in sen_spells:
-        _add_spell(sen_spells, p, sen_map.get(p, 'K'), None, None)
-for p in fsm_set:
-    if p not in fsm_spells:
-        _add_spell(fsm_spells, p, 'FSM', None, None)
-
-def _spell_active(spells, p, iso):
-    """Was this flag in force on that date? An undated spell counts as always on."""
-    for sp in spells.get(p, ()):
-        if sp['from'] is None and sp['to'] is None:
-            return sp['code']
-        if sp['from'] and iso < sp['from']:
+        if tgt not in d.columns:
+            d = d.rename(columns={src: tgt})
             continue
-        if sp['to'] and iso > sp['to']:
-            continue
-        return sp['code']
-    return None
-
-def send_at(p, iso):  return _has_sen(_spell_active(sen_spells, p, iso))
-def ehcp_at(p, iso):
-    _c = _spell_active(sen_spells, p, iso)
-    return bool(_c) and str(_c).strip().upper() in ('E', 'S')   # E = EHC plan, S = statement
-def fsm_at(p, iso):   return _spell_active(fsm_spells, p, iso) is not None
-
-print(f"  dated spells: {_dated_sen} SEN rows, {_dated_fsm} FSM rows carry dates"
-      + ("" if (_dated_sen or _dated_fsm) else " \u2014 none, so flags stay point-in-time"))
-
-# Refresh the ledger from this run's current pupils (leaver rows are left untouched),
-# then persist it so the next rebuild can restore anyone who has since left.
-for _p in _CURRENT_ROSTER:
-    _r = roster_map.get(_p)
-    if not _r:
-        continue
-    _ledger[_p] = {'name': _r.get('name') or str(_p), 'gender': _r.get('gender', 'U'),
-                   'intake': _r.get('intake'), 'sen': sen_map.get(_p, ''),
-                   'fsm': 'Y' if _p in fsm_set else 'N'}
-# Prune anyone the store no longer holds data for and who isn't on the current roll, so a
-# deleted cohort's identity rows don't linger (and can't be re-injected next rebuild).
-_pruned = [_p for _p in list(_ledger) if _p not in _CURRENT_ROSTER and _p not in _att_pids]
-for _p in _pruned:
-    del _ledger[_p]
-if _pruned:
-    print(f"Ledger: pruned {len(_pruned)} pupils with no remaining data in the store")
-_write_ledger(LEDGER_PATH, _ledger)
-
-# ── BUILD TIMETABLES (per academic year) ──
-# A pupil's timetable differs each year, so timetables are nested by AY (start year):
-#   tt_out[ay_str][px] = 5x5 grid. Split cells ([primary,per,secondary,changeover])
-#   capture a mid-year subject change within that one year.
-print("Building per-year timetables...")
-# Vectorised build (equivalent to the former per-slot groupby loop, validated cell-for-cell
-# incl. split-subject cells on the real data). One grouped pass computes the earliest date per
-# (AY, pupil, day, period, subject); cells are then assembled from that. Within a slot, subjects
-# are ordered by (earliest-date, subject-name) — the same stable/alphabetical tie-break the old
-# code had — so primary = earliest-starting subject, secondary = latest, changeover = its start.
-tt_out = {}                       # ay_str -> px -> 5x5 grid
-_all_subject_set = set()
-tt_src = att_all[att_all['Per'].between(1, N_PER)]
-# Create an entry for every (AY, pupil) that has any period-1..5 row (matches old pid iteration).
-for ay, ay_grp in tt_src.groupby('AY', sort=False):
-    tt_out[str(int(ay))] = {p: [[None]*N_PER for _ in range(N_DAY)] for p in ay_grp['pid'].unique()}
-# Earliest DateISO per (AY, pupil, valid-day, period, subject), then ordered for tie-breaking.
-_tt_valid = tt_src[tt_src['Day'].isin(DAY_MAP)]
-_tt_min = (_tt_valid.groupby(['AY', 'pid', 'Day', 'Per', 'Subject'], sort=False)['DateISO']
-                    .min().reset_index())
-_all_subject_set.update(_tt_min['Subject'].unique().tolist())
-_tt_min = _tt_min.sort_values(['AY', 'pid', 'Day', 'Per', 'DateISO', 'Subject'], kind='stable')
-for (ay, p, day, per), slot in _tt_min.groupby(['AY', 'pid', 'Day', 'Per'], sort=False):
-    if per < 1 or per > 5:
-        continue
-    grid = tt_out[str(int(ay))][p]
-    di = DAY_MAP[day]
-    subs = slot['Subject'].tolist()      # already ordered by (earliest date, subject name)
-    if len(subs) == 1:
-        grid[di][per-1] = [subs[0], per]
-    else:
-        primary, secondary = subs[0], subs[-1]
-        changeover = slot['DateISO'].iloc[-1]
-        if primary != secondary:
-            grid[di][per-1] = [primary, per, secondary, changeover]
+        # fillna BEFORE astype: with dtype=str, pandas keeps NaN as a null inside a
+        # string array rather than rendering it as the text "nan", so a
+        # replace({'nan': ''}) test silently counts every empty cell as populated.
+        _filled = lambda c: d[c].fillna('').astype(str).str.strip().ne('').sum()
+        src_n, tgt_n = _filled(src), _filled(tgt)
+        if src_n > tgt_n:
+            d = d.drop(columns=[tgt]).rename(columns={src: tgt})
         else:
-            grid[di][per-1] = [primary, per]
-print(f"Timetables: {sum(len(v) for v in tt_out.values())} pupil-years across {len(tt_out)} academic year(s)")
+            d = d.drop(columns=[src])
+    # Belt-and-braces: collapse any remaining duplicate labels (keep first) so columns stay unique.
+    d = d.loc[:, ~d.columns.duplicated()]
+    if 'Teacher' not in d.columns:
+        d['Teacher'] = ''
+    for c in BEH_COLS:
+        if c not in d.columns:
+            d[c] = ''
+    return d[BEH_COLS]
 
-# ── ATTAINMENT SCALE RESOLUTION (year-group aware; Phase-1 scale migration) ──
-# A pupil's attainment is read through the scale their year group uses (KS3 letters, GCSE 1-9, ...),
-# declared in the key, and stored AS THE RAW TOKEN. The dashboard derives the rank (1..n, 1=best) and
-# the axis labels from that scale, so a GCSE grade shows as a GCSE grade and a KS3 letter as a letter.
-# Cross-scale longitudinal lines use the key's transitions at chart time, not a storage-time rewrite.
-_SCALE_DEFS   = (KEY or {}).get('scales', {}).get('definitions', {})
-_ATTAIN_BY_YG = {int(k): v for k, v in (KEY or {}).get('scales', {}).get('attainmentByYearGroup', {}).items()}
-# Built-in reference ladder + transition maps. National-ish TEMPLATES so a fresh school charts across
-# key stages with no setup; the school's key overrides per-scale on first login (KS3 schemes vary).
-# Reference is best-first (E best). Transitions pin each qualification grade onto a reference band.
-_BUILTIN_REF = ['E', 'S', 'C', 'M', 'W', 'D', 'B']
-_BUILTIN_TRANSITIONS = {
-    'gcse91': {'9':'E','8':'S','7':'C','6':'C','5':'M','4':'W','3':'D','2':'D','1':'B'},
-    'alevel': {'A*':'E','A':'S','B':'C','C':'W','D':'D','E':'B'},
-}
-# referenceScale may be a DEFINITION-ID string (e.g. "ks3" -> definitions['ks3']), a best-first token
-# list, {'order':[...]}, or {'levels':[...]}. _REF_ID is that definition id when it's a string, which
-# is also how a year group that sits ON the reference is recognised (attainmentByYearGroup -> _REF_ID).
-_REF_SCALE_CFG = (KEY or {}).get('scales', {}).get('referenceScale')
-_REF_ID = _REF_SCALE_CFG if isinstance(_REF_SCALE_CFG, str) else None
-# A school can define its OWN KS3 ability ladder (how many bands, their codes, descriptors and colours)
-# from the Admin "Ability Scale" panel. It saves to uploads/raw/_ability_scale.json (the key itself
-# isn't browser-writable); staging carries it across, and here it REPLACES the reference definition the
-# key shipped, so rank resolution, raw KS3 validation and the dashboard axis all read the same bands.
-# Absent the file, the key's own referenceScale definition stands.
-def _read_ability_scale():
-    p = os.path.join(UP, '_ability_scale.json')
-    if not os.path.exists(p):
-        return None
-    try:
-        with open(p, encoding='utf-8') as fh:
-            m = json.load(fh)
-    except Exception:
-        return None
-    raw_levels = m.get('levels') if isinstance(m, dict) else (m if isinstance(m, list) else None)
-    out = []
-    for l in (raw_levels or []):
-        if not isinstance(l, dict):
-            continue
-        codes = l.get('raw') or l.get('csv') or ([l.get('code')] if l.get('code') else [])
-        if not isinstance(codes, list):
-            codes = [codes]
-        codes = [str(x).strip() for x in codes if str(x).strip()]
-        if codes:
-            out.append({'raw': codes, 'label': l.get('label'), 'colour': l.get('colour') or l.get('color')})
-    return {'levels': out} if out else None
-_ABILITY_SCALE = _read_ability_scale()
-if _ABILITY_SCALE and _REF_ID:
-    _SCALE_DEFS[_REF_ID] = {'levels': _ABILITY_SCALE['levels']}     # raw validation + ranks read this
-_REF_LADDER_CFG = _ABILITY_SCALE if (_ABILITY_SCALE and not _REF_ID) else _REF_SCALE_CFG
-_TRANSITIONS  = dict(_BUILTIN_TRANSITIONS); _TRANSITIONS.update((KEY or {}).get('transitions', {}) or {})
-# ── OPTION 2: resolve each grade to a RANK on the reference ladder AT IMPORT, using the grade's year
-# group to pick the right scale. A KS3 'E' (top) and an A-Level 'E' (bottom) are the SAME STRING but
-# resolve through different scales, so they never collide. Rank (1 = best) is stored beside the raw
-# grade; the dashboard plots the rank for a continuous cross-key-stage line.
-def _level_tokens(levels):
-    """[{raw|csv|code: [...]}, ...] -> best-first synonym groups [[tok,...], ...]."""
-    out = []
-    for l in (levels or []):
-        raws = l.get('raw') or l.get('csv') or ([l.get('code')] if l.get('code') else [])
-        if not isinstance(raws, list):
-            raws = [raws]
-        raws = [str(x) for x in raws if x not in (None, '')]
-        if raws:
-            out.append(raws)
-    return out
-def _resolve_ref_groups(cfg):
-    """Reference ladder (best-first synonym groups) from referenceScale: a definition-id string, a
-    token list, {'order':[...]}, or {'levels':[...]}. Falls back to the built-in B-E ladder if the
-    school's key has nothing readable, so the axis is never silently blank."""
-    groups = []
-    if isinstance(cfg, str):
-        groups = _level_tokens((_SCALE_DEFS.get(cfg) or {}).get('levels'))
-    elif isinstance(cfg, list):
-        groups = [[str(t)] for t in cfg]
-    elif isinstance(cfg, dict):
-        if isinstance(cfg.get('levels'), list):
-            groups = _level_tokens(cfg['levels'])
-        elif isinstance(cfg.get('order'), list):
-            groups = [[str(t)] for t in cfg['order']]
-    return groups or [[t] for t in _BUILTIN_REF]
-_REF_GROUPS = _resolve_ref_groups(_REF_LADDER_CFG)
-_REF_ORDER  = [g[0] for g in _REF_GROUPS]
-_REF_RANK   = {}
-for _ri, _rg in enumerate(_REF_GROUPS):
-    for _rt in _rg:
-        _REF_RANK[str(_rt)] = _ri + 1
-        _REF_RANK[str(_rt).upper()] = _ri + 1
-# Descriptor + colour per band, so the dashboard axis can show "Excellent" in the school's colours
-# rather than the bare code. Falls back to the code itself when the source carries no label.
-def _ref_levels_list(cfg):
-    if isinstance(cfg, str):
-        return (_SCALE_DEFS.get(cfg) or {}).get('levels') or []
-    if isinstance(cfg, dict) and isinstance(cfg.get('levels'), list):
-        return cfg['levels']
-    return []
-_REF_LABELS, _REF_COLOURS = {}, {}
-for _lv in _ref_levels_list(_REF_LADDER_CFG):
-    _rw = _lv.get('raw') or _lv.get('csv') or ([_lv.get('code')] if _lv.get('code') else [])
-    if not isinstance(_rw, list):
-        _rw = [_rw]
-    _rw = [str(x) for x in _rw if x not in (None, '')]
-    if not _rw:
-        continue
-    _tok = _rw[0]
-    _lb = _lv.get('label')
-    _REF_LABELS[_tok] = str(_lb) if _lb not in (None, '') else _tok
-    _cl = _lv.get('colour') or _lv.get('color')
-    if _cl:
-        _REF_COLOURS[_tok] = str(_cl)
-def map_attainment_rank(canon, year_group):
-    """Validated attainment token -> RANK on the reference ladder (1 = best), using the YEAR GROUP to
-    pick the scale. A grade whose scale IS the reference ranks directly; any other scale maps through
-    the key's transition (keyed '{scale}:{reference}', else '{scale}') onto a reference band first.
-    No reference assignment -> None, flagged for the Admin to calibrate."""
-    if not _REF_RANK or canon is None:
-        return None
-    s = str(canon)
-    scale_id = _ATTAIN_BY_YG.get(year_group) or _default_scale_for_yg(year_group)
-    if scale_id is None or scale_id == _REF_ID:             # the scale IS the reference (e.g. KS3)
-        return _REF_RANK.get(s) or _REF_RANK.get(s.upper())
-    tmap = None                                             # other scale -> reference via transition
-    for _k in (((scale_id + ':' + _REF_ID) if _REF_ID else None), scale_id):
-        if _k and _k in _TRANSITIONS:
-            tmap = _TRANSITIONS[_k]; break
-    if not tmap:
-        return None
-    refband = tmap.get(s) or tmap.get(s.upper())
-    if refband is None:
-        return None
-    return _REF_RANK.get(str(refband)) or _REF_RANK.get(str(refband).upper())
-def _scale_token_map(scale_id):
-    out = {}
-    for lvl in _SCALE_DEFS.get(scale_id, {}).get('levels', []):
-        for t in lvl.get('raw', []):
-            out[str(t)] = str(t); out[str(t).upper()] = str(t)
-    return out
-_SCALE_TOKENS = {sid: _scale_token_map(sid) for sid in _SCALE_DEFS}
 
-# Built-in national attainment scales. These are universal standards, identical for every school,
-# so they live in code only as TEMPLATES — a school's key (attainmentByYearGroup + definitions)
-# always overrides, and picking a preset in Admin copies the definition into that school's key.
-# Nothing school-specific is encoded here; this is just the engine knowing what "GCSE grade 7"
-# means, the same way it knows September is month 9.
-_BUILTIN_SCALES = {
-    'gcse91': [str(n) for n in range(9, 0, -1)],          # 9 (best) .. 1
-    'alevel': ['A*', 'A', 'B', 'C', 'D', 'E'],            # A* (best) .. E
-}
-def _builtin_token_map(levels):
-    out = {}
-    for t in levels:
-        out[str(t)] = str(t); out[str(t).upper()] = str(t)
-    return out
-_BUILTIN_SCALE_TOKENS = {sid: _builtin_token_map(lvls) for sid, lvls in _BUILTIN_SCALES.items()}
-
-def _default_scale_for_yg(yg):
-    """National default qualification scale for a year group, used ONLY when the school's key has
-    not assigned one. KS4 -> GCSE, KS5 -> A-Level. KS3 returns None: those bands are school-specific
-    and must be defined in the key, so they surface as a flag rather than being guessed."""
-    if yg in (10, 11): return 'gcse91'
-    if yg in (12, 13): return 'alevel'
-    return None
-
-# ── OPTION 2 calibration overlay. The Admin "Grade Mapping" panels save a key-stage grade->reference
-# map as _calibration_ks4.json / _calibration_ks5.json into the school's uploads (browsers may write
-# there; the key file itself is not browser-writable). Staging carries those files across next to the
-# raw exports, and here we fold each onto WHATEVER transition key this school's scales actually use
-# (e.g. 'gcse:ks3' when the key sets attainmentByYearGroup={10:'gcse'}), so a saved map takes effect on
-# the next rebuild no matter how the key names its KS4/KS5 scale. We also keep the effective map per
-# key stage so the dashboard panel can show the values currently in force rather than a built-in guess.
-def _ks_scale_ids(ygs):
-    ids = []
-    for yg in ygs:
-        sid = _ATTAIN_BY_YG.get(yg) or _default_scale_for_yg(yg)
-        if sid and sid != _REF_ID and sid not in ids:
-            ids.append(sid)
-    return ids
-def _read_calibration(name):
-    p = os.path.join(UP, name)
-    if not os.path.exists(p):
-        return None
-    try:
-        with open(p, encoding='utf-8') as fh:
-            m = json.load(fh)
-        return m if (isinstance(m, dict) and m) else None
-    except Exception:
-        return None
-_CALIBRATION_EFF = {}
-for _ksname, _ygs in (('ks4', (10, 11)), ('ks5', (12, 13))):
-    _sids = _ks_scale_ids(_ygs)
-    _cal = _read_calibration('_calibration_' + _ksname + '.json')
-    if _cal:                                               # admin just set/changed this map
-        for _sid in _sids:
-            if _REF_ID:
-                _TRANSITIONS[_sid + ':' + _REF_ID] = _cal
-            _TRANSITIONS[_sid] = _cal
-    _eff = _cal
-    if _eff is None:                                       # nothing saved -> show what's in force now
-        for _sid in _sids:
-            _eff = (_TRANSITIONS.get((_sid + ':' + _REF_ID) if _REF_ID else _sid)
-                    or _TRANSITIONS.get(_sid))
-            if _eff:
-                break
-    if _eff:
-        _CALIBRATION_EFF[_ksname] = _eff
-
-def map_attainment_scaled(raw, year_group, flagset):
-    """Validated raw attainment token, read through the scale the year group uses. Stored AS-IS so the
-    dashboard derives rank (1..n, 1=best) and labels from that scale — a GCSE grade stays a GCSE grade,
-    a KS3 letter stays a letter. The school key's assignment wins; absent that, a national default
-    applies for KS4/KS5 so self-evident grades (a "7" is GCSE 7) import without setup. A token not
-    valid for the resolved scale is flagged for the Admin to resolve."""
-    s = _norm_raw(raw)
-    if s is None:
-        return None
-    scale_id = _ATTAIN_BY_YG.get(year_group) or _default_scale_for_yg(year_group)
-    if scale_id is None:
-        flagset.add(s); return None
-    tokens = _SCALE_TOKENS.get(scale_id) or _BUILTIN_SCALE_TOKENS.get(scale_id) or {}
-    canon = tokens.get(s) or tokens.get(s.upper())
-    if canon is None:
-        flagset.add(s); return None              # token not valid for this year group's scale
-    return canon
-
-# ── PARSE REPORTS (grades) -> per pupil × term × subject score lookup ──
-# report_scores[pid][period_label][subject] = [abilityLetter, effort, OTE, abilityRank]
-print("Parsing reports (grades)...")
-report_scores = defaultdict(lambda: defaultdict(dict))
-_rep_subject_set = set()
-class _FlagCount:
-    """Set-like sink that also tallies how many times each value was flagged, so the dashboard can
-    show counts (e.g. 'grade 3 - 2 pupils'). Supports the .add()/.discard() the mappers already call,
-    and stays iterable / len / bool compatible for the existing console reports below."""
-    def __init__(self): self.counts = {}
-    def add(self, s): self.counts[s] = self.counts.get(s, 0) + 1
-    def discard(self, s): self.counts.pop(s, None)
-    def __iter__(self): return iter(self.counts)
-    def __len__(self): return len(self.counts)
-    def __bool__(self): return bool(self.counts)
-_unmapped_ability, _unmapped_effort = _FlagCount(), _FlagCount()
-_unmapped_rank = _FlagCount()   # tokens that validate but have no reference-band assignment (transition gap)
-_rep_rows_used = _rep_no_subject = _rep_no_term = _rep_no_pupil = _rep_empty = 0
-
-if len(reports):
-    _has_subject = 'Subject' in reports.columns
-    if not _has_subject:
-        print("⚠ REPORTS: no 'Subject' column found — scores are per-subject, so nothing "
-              "can be attached. Add/Confirm the subject column name and re-run.")
-    _has_date = 'Date' in reports.columns
-    _has_term = 'Term' in reports.columns
-    for _, row in reports.iterrows():
-        p = pid(row['Name']) if 'Name' in reports.columns and pd.notna(row.get('Name')) else None
-        if not p or p not in registry:
-            _rep_no_pupil += 1
-            continue
-        # Subject (required to key the score)
-        subj = norm_subject(row['Subject']) if _has_subject else None
-        if not subj or pd.isna(subj):
-            _rep_no_subject += 1
-            continue
-        # Term: prefer a parseable Date; else an explicit 'T{n} {yyyy}' Term value.
-        # Key on the collection date itself. get_term() is still used for
-        # attendance; it is only reports that stop being bucketed.
-        term = None
-        if _has_date:
-            term = parse_date_flex(row.get('Date'))
-        if term is None and _has_term:
-            # No date in the export: keep the school's own term label as the
-            # collection's identity rather than inventing a date for it.
-            tv = _norm_raw(row.get('Term'))
-            if tv and re.fullmatch(r'T[123]\s+\d{4}', tv):
-                term = tv
-        if term is None:
-            _rep_no_term += 1
-            continue
-        _ay = collection_ay(term)
-        if _ay is None:
-            _rep_no_term += 1
-            continue
-        _yg = _ay - registry[p]['intake'] + 7
-        ability = map_attainment_scaled(row.get('Ability Value'), _yg, _unmapped_ability)
-        if ability is None and ABILITY_VALUE_MAP:
-            # Legacy: a school configured a flat abilityValueMap instead of per-year scales.
-            _legacy = map_ability(row.get('Ability Value'), set())
-            if _legacy is not None:
-                ability = _legacy
-                _unmapped_ability.discard(_norm_raw(row.get('Ability Value')))
-        effort = map_effort(row.get('Effort Value'), _unmapped_effort)
-        ote = map_ote(row.get('OTA Grade')) if 'OTA Grade' in reports.columns else None
-        if ability is None and effort is None and ote is None:
-            _rep_empty += 1
-            continue
-        # Option 2: resolve the rank now, with the year group, so it's collision-free and the
-        # dashboard just plots it. None if the school hasn't calibrated this grade's reference band.
-        ability_rank = map_attainment_rank(ability, _yg)
-        if ability is not None and ability_rank is None and _REF_RANK:
-            _unmapped_rank.add(f"{_norm_raw(ability)}@Y{_yg}")
-        report_scores[p][term][subj] = [ability, effort, ote, ability_rank]
-        _rep_subject_set.add(subj)
-        _rep_rows_used += 1
-
-# Fold report subjects into the global subject set so they get a compact subject key.
-_all_subject_set.update(_rep_subject_set)
-print(f"Reports: {_rep_rows_used} scores attached "
-      f"({len(report_scores)} pupils, {len(_rep_subject_set)} subjects)")
-if _rep_no_pupil or _rep_no_subject or _rep_no_term or _rep_empty:
-    print(f"  skipped — no/unknown pupil: {_rep_no_pupil}, no subject: {_rep_no_subject}, "
-          f"undated/no term: {_rep_no_term}, all-blank: {_rep_empty}")
-if _unmapped_ability:
-    print(f"⚠ UNMAPPED ABILITY VALUES ({len(_unmapped_ability)}) — add to ABILITY_VALUE_MAP: "
-          f"{sorted(_unmapped_ability)}")
-if _unmapped_effort:
-    print(f"⚠ UNMAPPED EFFORT VALUES ({len(_unmapped_effort)}) — add to EFFORT_VALUE_MAP: "
-          f"{sorted(_unmapped_effort)}")
-if _unmapped_rank:
-    print(f"⚠ UNCALIBRATED GRADE→REFERENCE ({len(_unmapped_rank)}) — these grades validated but have "
-          f"no reference band in the school's transitions, so they won't chart on the shared ladder. "
-          f"Set them in Admin (Grade Mapping): {sorted(_unmapped_rank)}")
-
-# ── COLLECT ALL SUBJECTS ──
-all_subjects = sorted(_all_subject_set)
-print(f"Subjects: {len(all_subjects)}")
-
-# ── BUILD ATTENDANCE DATA ──
-print("Processing attendance...")
-
-# Filter to real marks (exclude Y-codes for absence counting)
-real_att = att_all[~att_all['Mark'].isin(NOT_COUNTED_CODES)]
-
-# School weeks (Monday dates) — count actual lessons per week
-week_lessons = {}
-for date_str in sorted(real_att['DateISO'].unique()):
-    mon = get_monday(date_str)
-    # Count unique periods on this date with real marks (>=10 marks means slot existed)
-    day_marks = real_att[real_att['DateISO'] == date_str]
-    real_periods = 0
-    for per in range(1, 6):
-        per_marks = day_marks[day_marks['Per'] == per]
-        if len(per_marks) >= 10:  # <10 marks = slot didn't really exist
-            real_periods += 1
-    week_lessons[mon] = week_lessons.get(mon, 0) + real_periods
-
-# Per-pupil absence dates
-# Per-pupil attendance roll-ups. ONE groupby pass (was four), Term computed once up front, and no
-# per-row iteration — produces the same structures as before but far cheaper on large attendance
-# files (validated equal to the original loops). real_att is left untouched for any later use.
-_ra = real_att.copy()
-_ra['Term'] = _ra['DateISO'].map(get_term)              # lru_cached -> one cheap pass, not 2× per pupil
-_ra['_isAbsent'] = _ra['Mark'].isin(ALL_ABSENT_CODES)
-_ra['_isPresent'] = _ra['Mark'].isin(PRESENT_CODES)
-
-attendance = {}
-attendance_marks = {}
-att_abs_subj = {}
-att_by_period_subj = {}
-att_by_period = {}
-for pupil, group in _ra.groupby('pid'):
-    absent_rows = group[group['_isAbsent']]
-    a_dates = absent_rows['DateISO'].tolist()
-    a_marks = absent_rows['Mark'].tolist()
-    a_subj  = absent_rows['Subject'].tolist()
-    a_per   = absent_rows['Per'].tolist()
-    attendance[pupil] = sorted(set(a_dates))
-    # marks per date (row order preserved) for auth/unauth classification
-    marks_by_date = {}
-    for d, mk in zip(a_dates, a_marks):
-        if d not in marks_by_date:
-            marks_by_date[d] = []
-        marks_by_date[d].append(mk)
-    attendance_marks[pupil] = marks_by_date
-    # per-subject absences WITH MARK CODES (row order preserved)
-    att_abs_subj[pupil] = [[a_dates[i], a_subj[i], int(a_per[i]), a_marks[i]]
-                           for i in range(len(a_dates))]
-    # per-period attendance %, term-level and per-subject (year-aware terms via get_term)
-    periods_subj = {}
-    periods = {}
-    for term, tgroup in group.groupby('Term'):
-        if not term: continue
-        subj_att = {}
-        for subj, sgroup in tgroup.groupby('Subject'):
-            total = len(sgroup)
-            present = int(sgroup['_isPresent'].sum())
-            subj_att[subj] = round(present / total * 100) if total > 0 else 100
-        periods_subj[term] = subj_att
-        total = len(tgroup)
-        present = int(tgroup['_isPresent'].sum())
-        periods[term] = round(present / total * 100) if total > 0 else 100
-    att_by_period_subj[pupil] = periods_subj
-    att_by_period[pupil] = periods
-
-print(f"Attendance records: {len(attendance)} pupils")
-
-# ── ENRICHMENT: slotDenominators ──
-print("Computing per-year slot denominators...")
-slot_denominators = {}            # ay_str -> 5x5 grid
-valid_slot_dates = {}             # ay_str -> {(di, per): [DateISO, ...]} scheduled dates (>=10 marks)
-for ay, ay_grp in real_att.groupby('AY'):
-    ay_str = str(int(ay))
-    grid = [[0]*N_PER for _ in range(N_DAY)]
-    vmap = {}
-    for dow_name in DAY_NAMES:
-        di = DAY_MAP[dow_name]
-        day_data = ay_grp[ay_grp['Day'] == dow_name]
-        for per in range(1, 6):
-            per_data = day_data[day_data['Per'] == per]
-            dates_with_slot = per_data.groupby('DateISO').size()
-            valid = dates_with_slot[dates_with_slot >= 10].index.tolist()
-            grid[di][per-1] = len(valid)
-            vmap[(di, per)] = sorted(valid)
-    slot_denominators[ay_str] = grid
-    valid_slot_dates[ay_str] = vmap
-print(f"Slot denominators: {len(slot_denominators)} year(s)")
-
-# ── ENRICHMENT: schoolDayCounts (per AY) ──
-school_day_counts = {}            # ay_str -> {Mon: n, ...}
-for ay, ay_grp in real_att.groupby('AY'):
-    ay_str = str(int(ay))
-    school_day_counts[ay_str] = {
-        dow_name: ay_grp[ay_grp['Day'] == dow_name]['DateISO'].nunique()
-        for dow_name in DAY_NAMES
-    }
-print(f"School day counts: {len(school_day_counts)} year(s)")
-
-# ── ENRICHMENT: slotTeachers (per AY) ──
-print("Computing per-year slot teachers...")
-slot_teachers = {}                # ay_str -> px -> 5x5 grid of [[teacher, count], ...]
-st_src = att_all[att_all['Per'].between(1, N_PER) & att_all['Teacher'].notna()]
-for ay, ay_grp in st_src.groupby('AY'):
-    ay_str = str(int(ay))
-    slot_teachers[ay_str] = {}
-    for px, grp in ay_grp.groupby('pid'):
-        days = [[[] for _ in range(N_PER)] for _ in range(N_DAY)]
-        for (dow_name, per), subgrp in grp.groupby(['Day', 'Per']):
-            di = DAY_MAP.get(dow_name)
-            if di is None or per < 1 or per > 5:
-                continue
-            tc = subgrp.groupby('Teacher').size().to_dict()
-            days[di][per-1] = sorted([[int(t), c] for t, c in tc.items()], key=lambda x: -x[1])
-        slot_teachers[ay_str][px] = days
-print(f"Slot teachers: {sum(len(v) for v in slot_teachers.values())} pupil-years")
-
-# ── ENRICHMENT: splitSlotMeta (exact per-era teacher + denominator for changed slots) ──
-# A split cell ([primary, per, secondary, changeover]) is a slot whose subject changed
-# mid-year. These pupils/slots are exactly the edge cases most likely to be examined in
-# depth, so we bake the prior/current teacher and prior/current scheduled-lesson count from
-# the dated attendance itself — the dashboard then renders them from fact, not inference.
-#   splitSlotMeta[ay_str][px]["di,pi"] = [priorTeacherId, curTeacherId, priorDenom, curDenom]
-# Denominators partition the SAME cohort valid-date set used by slotDenominators, so
-# priorDenom + curDenom always reconciles to slotDenominators[di][per-1].
-print("Computing split-slot per-era metadata...")
-INV_DAY = {di: name for name, di in DAY_MAP.items()}
-_split_src = att_all[att_all['Per'].between(1, N_PER)
-                     & att_all['Day'].isin(DAY_MAP)
-                     & att_all['Teacher'].notna()].copy()
-_split_src['Teacher'] = _split_src['Teacher'].astype(int)
-_split_gb = {}
-for (ay_v, pid_v, day_v, per_v), grp in _split_src.groupby(['AY', 'pid', 'Day', 'Per']):
-    _split_gb[(int(ay_v), pid_v, day_v, int(per_v))] = grp
-split_slot_meta = {}
-_split_count = 0
-for ay_str, pupils in tt_out.items():
-    ay_int = int(ay_str)
-    vmap = valid_slot_dates.get(ay_str, {})
-    for px, grid in pupils.items():
-        cell_meta = {}
-        for di in range(N_DAY):
-            for p in range(N_PER):
-                c = grid[di][p]
-                if not c or len(c) != 4:
-                    continue
-                per = p + 1
-                changeover = c[3]
-                vdates = vmap.get((di, per), [])
-                prior_den = sum(1 for dt in vdates if dt < changeover)
-                cur_den = sum(1 for dt in vdates if dt >= changeover)
-                pt = ct = None
-                sub = _split_gb.get((ay_int, px, INV_DAY[di], per))
-                if sub is not None:
-                    prior_rows = sub[sub['DateISO'] < changeover]
-                    cur_rows = sub[sub['DateISO'] >= changeover]
-                    if len(prior_rows):
-                        pt = int(prior_rows.groupby('Teacher').size().idxmax())
-                    if len(cur_rows):
-                        ct = int(cur_rows.groupby('Teacher').size().idxmax())
-                cell_meta[f"{di},{p}"] = [pt, ct, prior_den, cur_den]
-                _split_count += 1
-        if cell_meta:
-            split_slot_meta.setdefault(ay_str, {})[px] = cell_meta
-print(f"Split-slot metadata: {_split_count} changed slots across "
-      f"{sum(len(v) for v in split_slot_meta.values())} pupil-years")
-
-# ── ENRICHMENT: suppressedAbsences + duplicate registrations (one pass) ──
-print("Detecting mixed present+absent slots and duplicate registrations...")
-suppressed_absences = {}
-dup_pupils = 0
-dup_slots = 0
-for px, grp in att_all[att_all['Per'].between(1, N_PER)].groupby('pid'):
-    slot_marks = grp.groupby(['DateISO', 'Per'])['Mark'].apply(list)
-    px_suppressed = []
-    n_dup = 0
-    for (d, per), marks in slot_marks.items():
-        if len(marks) > 1:
-            n_dup += 1
-        if any(m in PRESENT_CODES for m in marks) and any(m in ALL_ABSENT_CODES for m in marks):
-            px_suppressed.append(f"{d}|{per}")
-    if px_suppressed:
-        suppressed_absences[px] = px_suppressed
-    if n_dup:
-        dup_pupils += 1
-        dup_slots += n_dup
-
-supp_count = sum(len(v) for v in suppressed_absences.values())
-print(f"Suppressed absences: {len(suppressed_absences)} pupils, {supp_count} slots")
-print(f"Duplicate registrations: {dup_pupils} pupils, {dup_slots} duplicate slots")
-
-# ── BUILD SANCTIONS ──
-print("Processing sanctions...")
-sanctions = []
-for df_codes in codes_list:
-    df_codes['pid'] = df_codes['Name'].apply(pid)
-    df_codes['DateISO'] = df_codes['Date'].apply(parse_date_flex)
-    per_col = 'Period' if 'Period' in df_codes.columns else 'Lesson - Period'
-    inc_col = 'Incident' if 'Incident' in df_codes.columns else 'Incident'
-    for _, row in df_codes.iterrows():
-        p = row['pid']
-        if p not in registry: continue
-        date_iso = row.get('DateISO')
-        if not date_iso: continue
-        subj = row.get('Subject')
-        subj = None if pd.isna(subj) else norm_subject(subj)
-        period_num = None
-        period_desc = row.get(per_col)
-        if pd.notna(period_desc):
-            parts = str(period_desc).split(':')
-            if len(parts) == 2:
-                try: period_num = int(parts[1])
-                except ValueError: pass
-        incident = row.get(inc_col, '')
-        if pd.isna(incident): incident = ''
-        # Recognised wordings keep their head-start category; anything we don't recognise is left as
-        # 'Category Needed' (a sentinel, never a real category) so the Admin panel surfaces it for
-        # classification rather than silently filing it as a real "Other".
-        category = INCIDENT_CATEGORIES.get(incident, 'Category Needed')
-        sanctions.append([int(p), 0, date_iso, subj, period_num, incident, category])
-
-# Process detentions
-for df_dets in dets_list:
-    df_dets['pid'] = df_dets['Name'].apply(pid)
-    date_col = 'Detention Date' if 'Detention Date' in df_dets.columns else 'Date'
-    for _, row in df_dets.iterrows():
-        p = row['pid']
-        if p not in registry: continue
-        date_iso = parse_date_flex(row.get(date_col))
-        if not date_iso: continue
-        det_type = row.get('Detention Type', '')
-        if pd.isna(det_type): det_type = 'Detention'
-        sanctions.append([int(p), 2, date_iso, None, None, str(det_type), 'Detention'])
-
-sanctions.sort(key=lambda x: (x[2], x[0]))
-print(f"Sanctions: {len(sanctions)} ({sum(1 for s in sanctions if s[1]==0)} codes, {sum(1 for s in sanctions if s[1]==2)} detentions)")
-
-# Flag unmapped incidents
-unmapped = set(s[5] for s in sanctions if s[1] == 0) - set(INCIDENT_CATEGORIES.keys())
-unmapped.discard('')
-if unmapped:
-    print(f"⚠ UNMAPPED INCIDENT TYPES ({len(unmapped)}):")
-    for i in sorted(unmapped): print(f"  - {i}")
-
-# ── BUILD HOUSE POINTS (positive behaviour) ──
-# Keep only HP_TYPES. Day+period come from 'Lesson - Period'; the SUBJECT is derived from
-# the per-year timetable for that slot (the file's 'Lesson - Subject'/'Lesson - Class' are
-# ignored on purpose — they were found inconsistent with the derived timetable).
-print("Processing house points...")
-
-def _hp_day_period(raw):
-    """'Mon:3' -> ('Mon',3); 'Monday AM' -> ('Mon',None); blanks -> (None,None)."""
-    s = str(raw).strip()
-    if not s or s.lower() == 'nan':
-        return None, None
-    if ':' in s:
-        d, _, p = s.partition(':')
-        day3 = d.strip()[:3].title()
-        try:
-            return day3, int(p.strip())
-        except ValueError:
-            return day3, None
-    return s[:3].title(), None
-
-house_points = []
-_hp_unknown_types = set()
-for df_hp in hp_dfs:
-    for _, row in df_hp.iterrows():
-        # ⚠️ str(NaN) is the STRING "nan", which is truthy — so the default below never
-        # fired for a file with no Achievement Type column, and every such row was
-        # counted as an unknown type and dropped. TWS's Year 11 house point exports
-        # carry only Name and Event Date, so ALL of them were discarded: every house
-        # point half the school has ever earned, silently, with the only trace being
-        # 'nan' appearing in the "ignored achievement types" list.
-        _raw = row.get('Achievement Type', '')
-        atype = '' if _raw is None or (isinstance(_raw, float) and _raw != _raw) else str(_raw).strip()
-        if atype.lower() in ('nan', 'none', 'nat'):
-            atype = ''
-        if not atype:
-            atype = HP_TYPES[0] if HP_TYPES else 'House Point'   # a plain HP export (no type column) = a standard house point
-        if atype not in HP_TYPES:
-            _hp_unknown_types.add(atype)
-            continue
-        p = pid(row['Name'])
-        if p not in registry:
-            continue
-        date_iso = parse_date_flex(row.get('Event/Date') or row.get('Event Date') or row.get('Date'))
-        if not date_iso:
-            continue
-        day3, period = _hp_day_period(row.get('Lesson - Period'))
-        # Subject derived from the pupil's timetable for that AY/slot (None if unavailable).
-        subj = None
-        if period and day3 in DAY_MAP:
-            grid = tt_out.get(str(acad_year(date_iso)), {}).get(p)
-            if grid:
-                cell = grid[DAY_MAP[day3]][period - 1]
-                if cell:
-                    subj = cell[0]
-        house_points.append([int(p), HP_TYPES.index(atype), date_iso, subj, period])
-
-house_points.sort(key=lambda x: (x[2], x[0]))
-print(f"House points: {len(house_points)} "
-      f"({sum(1 for h in house_points if h[1]==0)} HP, {sum(1 for h in house_points if h[1]==1)} +on-call)")
-if _hp_unknown_types:
-    print(f"  (ignored achievement types: {sorted(_hp_unknown_types)})")
-
-# ── BUILD PROGRESS ──
-print("Building progress structure...")
-INTAKES = sorted({info['intake'] for info in registry.values()})
-# Lowest year group on the roll. 7 at a secondary, 0 at an all-through school,
-# and it follows the data rather than being declared anywhere.
-MIN_YG = min((CAY - ink + 7) for ink in INTAKES) if INTAKES else 7
-print(f"Active intakes (from registry): {INTAKES}")
-
-# Dynamic period list: union of each cohort's full grid (intake .. CAY, capped Y11)
-# plus any term actually produced from real attendance dates (safety net).
-period_set = set()
-for intake in INTAKES:
-    period_set.update(get_periods(intake, CAY, MIN_YG))
-for _pid, _periods in att_by_period.items():
-    period_set.update(k for k in _periods.keys() if k)
-periods_list = sorted(period_set, key=term_sort_key)
-period_labels = [period_label(p) for p in periods_list]
-print(f"Periods ({len(periods_list)}): {periods_list}")
-
-# Report collections: every date a report was actually collected on, in order.
-# Derived from the data rather than generated from a calendar, so a school
-# running two a term or eight a year is represented as it is.
-collections_list = sorted({d for _scores in report_scores.values() for d in _scores},
-                          key=collection_sort_date)
-collection_labels = [collection_label(c) for c in collections_list]
-_dated = sum(1 for c in collections_list if is_dated(c))
-print(f"Report collections ({len(collections_list)}): {collections_list}")
-print(f"  {_dated} carry a real date, {len(collections_list) - _dated} are term labels only")
-
-progress = {}
-for intake in INTAKES:
-    ik = f"I{intake}"
-    progress[ik] = {}
-    intake_pupils = [p for p, info in registry.items() if info['intake'] == intake]
-    for period in [c for c in collections_list if collection_in_cohort(c, intake, CAY)]:
-        # Resolve the flags as they stood at the collection, not as they stand
-        # today. With no dated data this is the same answer as before.
-        _asOf = period if is_dated(period) else collection_sort_date(period)
-        rows = []
-        for p in intake_pupils:
-            rows.append([int(p), registry[p]['id'], registry[p]['reg'],
-                         dict(report_scores.get(p, {}).get(period, {})),
-                         send_at(p, _asOf), ehcp_at(p, _asOf), fsm_at(p, _asOf)])
-        progress[ik][period] = rows
-
-# ── BUILD ENROLMENTS ──
-print("Building enrolments...")
-# Teacher roster + index (built here; the compress section reuses it). cls.tc stores the index.
-_teacher_ids = sorted({int(t) for t in att_all['Teacher'].dropna().unique()})
-teacher_index = ['T' + str(t) for t in _teacher_ids] or ['Unknown']
-_teacher_pos = {tid: i for i, tid in enumerate(_teacher_ids)}
-
-# A CLASS is a real teaching group: pupils sharing SUBJECT + TEACHER + timetable SLOTS in the
-# CURRENT year. Derived from CAY attendance: for each (subject, teacher, day, period) take the
-# on-roll roster, then merge a class's repeated weekly periods (same teacher, overlapping roster)
-# into one class. Each pupil is assigned to the class where they have the most sessions (robust to
-# cover lessons / stray marks). Class numbers run per (cohort, subject). Team-taught or blocked
-# subjects (PE, etc.) legitimately yield large rosters — expected, not an error.
-CAY_ROSTER_MIN = 5        # ignore tiny slot rosters (<5 pupils) — stray marks, not a class
-MERGE_JACCARD  = 0.5      # same-teacher slot rosters merge into one class at this roster overlap
-
-_cay = att_all[(att_all['AY'] == CAY) & att_all['Per'].between(1, N_PER) & att_all['Teacher'].notna()].copy()
-_cay['Teacher'] = _cay['Teacher'].astype(int)
-_sess = _cay.groupby(['Subject', 'pid', 'Teacher', 'Day', 'Per']).size().reset_index(name='n')
-
-_slot_roster = defaultdict(set)        # (subject, teacher, day, per) -> {pids on roll}
-_sess_by = {}                          # (subject, pid, teacher, day, per) -> session count
-for r in _sess.itertuples(index=False):
-    _slot_roster[(r.Subject, r.Teacher, r.Day, r.Per)].add(r.pid)
-    _sess_by[(r.Subject, r.pid, r.Teacher, r.Day, r.Per)] = r.n
-
-def _jacc(a, b):
-    u = len(a | b)
-    return (len(a & b) / u) if u else 0.0
-
-# Seed clusters from the largest slots first, then a consolidation pass for order-independence.
-subj_classes = defaultdict(list)       # subject -> [ {teacher, roster:set, slots:set(day,per)} ]
-for (subj, tch, day, per), roster in sorted(_slot_roster.items(), key=lambda kv: -len(kv[1])):
-    if len(roster) < CAY_ROSTER_MIN:
-        continue
-    for cl in subj_classes[subj]:
-        if cl['teacher'] == tch and _jacc(cl['roster'], roster) >= MERGE_JACCARD:
-            cl['roster'] |= roster
-            cl['slots'].add((day, per))
-            break
-    else:
-        subj_classes[subj].append({'teacher': tch, 'roster': set(roster), 'slots': {(day, per)}})
-for clusters in subj_classes.values():
-    again = True
-    while again:
-        again = False
-        for i in range(len(clusters)):
-            for j in range(i + 1, len(clusters)):
-                if clusters[i]['teacher'] == clusters[j]['teacher'] and \
-                   _jacc(clusters[i]['roster'], clusters[j]['roster']) >= MERGE_JACCARD:
-                    clusters[i]['roster'] |= clusters[j]['roster']
-                    clusters[i]['slots']  |= clusters[j]['slots']
-                    del clusters[j]; again = True; break
-            if again:
-                break
-
-# Assign each (pupil, subject) to the class where they have the most sessions.
-class_assign = defaultdict(dict)       # pid -> {subject: (cluster_index, teacher_id)}
-for subj, clusters in subj_classes.items():
-    pid_best = {}
-    for ci, cl in enumerate(clusters):
-        tch = cl['teacher']
-        for q in cl['roster']:
-            s = sum(_sess_by.get((subj, q, tch, d, p), 0) for (d, p) in cl['slots'])
-            prev = pid_best.get(q)
-            if prev is None or s > prev[0] or (s == prev[0] and ci < prev[1]):
-                pid_best[q] = (s, ci, tch)
-    for q, (s, ci, tch) in pid_best.items():
-        class_assign[q][subj] = (ci, tch)
-
-# Number classes per (intake, subject): clusters are cohort-pure (one teacher can't teach two
-# cohorts in one slot). Order by descending size then teacher id for a stable 1..N numbering.
-# Only clusters that actually keep pupils are numbered: slot clustering can detect candidate
-# classes that, once every pupil is assigned to their primary class above, end up with zero
-# pupils. Numbering those phantoms would consume numbers and leave gaps in the displayed
-# classes (e.g. Class 3/9/10 missing). Count assigned pupils per cluster and skip the empties
-# so the numbering is contiguous 1..N and reflects the sizes shown in the dashboard.
-_assigned_count = defaultdict(int)     # (subject, cluster_index) -> assigned pupil count
-for _p, _subs in class_assign.items():
-    for _subj, (_ci, _tch) in _subs.items():
-        _assigned_count[(_subj, _ci)] += 1
-
-class_number = {}                      # (subject, cluster_index) -> class_num
-_by_is = defaultdict(list)
-for subj, clusters in subj_classes.items():
-    for ci, cl in enumerate(clusters):
-        n_assigned = _assigned_count[(subj, ci)]
-        if n_assigned == 0:
-            continue                   # phantom cluster: detected, but no pupil calls it home
-        any_pid = next(iter(cl['roster']))
-        intk = registry[any_pid]['intake'] if any_pid in registry else None
-        if intk is not None:
-            _by_is[(intk, subj)].append((ci, n_assigned, cl['teacher']))
-for (intk, subj), lst in _by_is.items():
-    lst.sort(key=lambda t: (-t[1], t[2]))
-    for num, (ci, _sz, _tch) in enumerate(lst, start=1):
-        class_number[(subj, ci)] = num
-
-enrolments = {}
-for intake in INTAKES:
-    ik = f"I{intake}"
-    recs = []
-    intake_pupils = [p for p, info in registry.items() if info['intake'] == intake]
-    for p in intake_pupils:
-        recs.append({'t': 'tg', 'x': int(p), 'v': registry[p]['reg'],
-                     'f': f'{CAY}-09-01', 'u': None})
-        for subj in sorted(class_assign.get(p, {})):
-            ci, tch = class_assign[p][subj]
-            cnum = class_number.get((subj, ci))
-            if cnum is None:
-                continue
-            recs.append({'t': 'subj', 'x': int(p), 's': subj,
-                         'f': f'{CAY}-09-01', 'u': None})
-            recs.append({'t': 'cls', 'x': int(p), 's': subj, 'c': cnum,
-                         'tc': _teacher_pos[tch],      # index into teacherIndex
-                         'f': f'{CAY}-09-01', 'u': None})
-    enrolments[ik] = recs
-print(f"Enrolments: {sum(len(v) for v in enrolments.values())} records")
-print(f"Classes (subject+teacher+slot): {len(class_number)} across {len(_by_is)} cohort-subjects")
-
-# ── COMPRESS & OUTPUT ──
-print("Compressing and writing data.json...")
-
-sk = {s: f"s{i}" for i, s in enumerate(all_subjects)}
-pk = {p: f"p{i}" for i, p in enumerate(periods_list)}
-ABILITY_MAP = _KEY_ABILITY_MAP if _KEY_ABILITY_MAP else {'B': 'Below', 'D': 'Developing', 'W': 'Working', 'M': 'Meeting',
-               'C': 'Confident', 'S': 'Skilful', 'E': 'Excellent'}
-
-# Date index
-all_date_set = set()
-for s in sanctions: all_date_set.add(s[2])
-for h in house_points: all_date_set.add(h[2])
-for p_id, dates in attendance.items():
-    for d in dates: all_date_set.add(d)
-for p_id, recs in att_abs_subj.items():
-    for r in recs: all_date_set.add(r[0])
-all_date_set.add(f'{CAY}-09-01')
-all_dates_sorted = sorted(all_date_set)
-date_idx = {d: i for i, d in enumerate(all_dates_sorted)}
-
-# Compress progress
-c_prog = {}
-for ik, periods in progress.items():
-    c_prog[ik] = {}
-    for per, rows in periods.items():
-        c_prog[ik][pk.get(per, per)] = [
-            [r[0], r[2], {sk.get(s, s): v for s, v in r[3].items()}, r[4], r[5], r[6]]
-            for r in rows
-        ]
-
-# Compress enrolments
-c_enr = {}
-for ik, recs in enrolments.items():
-    c_enr[ik] = []
-    for r in recs:
-        if r['t'] == 'cls':
-            c_enr[ik].append([0, r['x'], sk.get(r['s'], r['s']), r['c'], r['tc'],
-                              date_idx.get(r['f'], 0),
-                              None if r['u'] is None else date_idx.get(r['u'], 0)])
-        elif r['t'] == 'subj':
-            c_enr[ik].append([1, r['x'], sk.get(r['s'], r['s']), date_idx.get(r['f'], 0)])
-        elif r['t'] == 'tg':
-            c_enr[ik].append([2, r['x'], r['v'], date_idx.get(r['f'], 0),
-                              None if r['u'] is None else date_idx.get(r['u'], 0)])
-
-# Teacher roster (anon IDs) — built once in the enrolments section above; ready to merge a
-# real teacher-name mapping file later (cls.tc stores the index into this list).
-print(f"Teachers: {len(_teacher_ids)} anon IDs")
-
-# Compress sanctions
-c_sanc = []
-sanction_details = []
-for s in sanctions:
-    subj_key = sk.get(s[3], s[3]) if s[3] else None
-    c_sanc.append([s[0], s[1], date_idx.get(s[2], 0), subj_key, s[4]])
-    sanction_details.append([s[5], s[6]])
-
-# Compress house points (mirror of sanctions: [px, type, dateIdx, subjKey, period])
-c_hp = []
-hp_details = []
-for h in house_points:
-    subj_key = sk.get(h[3], h[3]) if h[3] else None
-    c_hp.append([h[0], h[1], date_idx.get(h[2], 0), subj_key, h[4]])
-    hp_details.append([HP_TYPES[h[1]]])
-
-# Compress attendance
-c_att = {}
-for p_id, dates in attendance.items():
-    c_att[p_id] = [date_idx[d] for d in dates if d in date_idx]
-
-# Compress attendanceMarks
-c_att_marks = {}
-for p_id, marks_by_date in attendance_marks.items():
-    c_att_marks[p_id] = {d: marks for d, marks in marks_by_date.items()}
-
-# Compress attByPeriod / attByPeriodSubj
-c_abp = {}
-for p_id, periods in att_by_period.items():
-    c_abp[p_id] = {pk.get(per, per): v for per, v in periods.items()}
-
-c_abps = {}
-for p_id, periods in att_by_period_subj.items():
-    c_abps[p_id] = {}
-    for per, subjs in periods.items():
-        c_abps[p_id][pk.get(per, per)] = {sk.get(s, s): v for s, v in subjs.items()}
-
-# Compress attAbsSubj (includes mark codes)
-c_aas = {}
-for p_id, recs in att_abs_subj.items():
-    c_aas[p_id] = {}
-    for r in recs:
-        di = date_idx.get(r[0])
-        if di is not None:
-            if di not in c_aas[p_id]:
-                c_aas[p_id][di] = []
-            c_aas[p_id][di].append([sk.get(r[1], r[1]), r[2], r[3]])  # [subjKey, period, mark]
-
-# Compress timetables (nested per AY: ay_str -> px -> grid)
-def _compress_grid(grid):
-    c_grid = []
-    for day in grid:
-        c_day = []
-        for cell in day:
-            if cell is None:
-                c_day.append(None)
-            elif len(cell) == 2:
-                c_day.append([sk.get(cell[0], cell[0]), cell[1]])
-            elif len(cell) == 4:
-                c_day.append([sk.get(cell[0], cell[0]), cell[1],
-                              sk.get(cell[2], cell[2]), cell[3]])
+def _parse_grades(attain_paths, effort_paths, pid_intake=None, fallback_term=None, term_map=None):
+    pid_intake = pid_intake or {}
+    term_map = term_map or {}
+    stats = {'rows': 0, 'unresolved_term': 0, 'unresolved_labels': set()}
+    def pidnum(n):
+        m = re.match(r'(\d+)', str(n));  return str(int(m.group(1))) if m else None
+    def term_of(resultset, pidn):
+        # Resolve the SEASON (T1/T2/T3), then the academic YEAR, from the Resultset label.
+        s = str(resultset or '').strip(); low = s.lower(); norm = _norm_term(s)
+        season = None; ay = None
+        # 1) Per-school override wins (covers bespoke wordings the school has mapped in Admin).
+        if norm and norm in term_map:
+            season = term_map[norm]
+        # 2) Built-in season words (Autumn/Spring/Summer + Michaelmas/Lent/Hilary/Trinity/Fall).
+        if season is None:
+            for w, t in _SEASON_WORDS:
+                if w in low:
+                    season = t; break
+        # 3) Explicit "T1".."T3" / "Term 1".."Term 3".
+        if season is None:
+            tm = re.search(r'\bt\s*([1-3])\b', low) or re.search(r'term\s*([1-3])', low)
+            if tm:
+                season = 'T' + tm.group(1)
+        # 4) A date label: month → season, year → AY (UK Sept–Aug). Only if nothing above matched.
+        if season is None:
+            d = _parse_term_date(s)
+            if d:
+                mo, yr = d
+                # ⚠️ TERM seasons, not the academic year boundary. The DfE academic
+                # year starts 1 August (see AY_START_MONTH in import_engine), but term
+                # ONE starts in September — August sits in the academic year without
+                # being in T1. Do not align this to August.
+                if mo >= 9:   season, ay = 'T1', yr
+                elif mo <= 4: season, ay = 'T2', yr - 1
+                else:         season, ay = 'T3', yr - 1
+        if season is None:
+            if s:
+                stats['unresolved_labels'].add(s)
+            return fallback_term
+        # AY (unless a date already fixed it): prefer year-group + pupil intake, else a calendar year.
+        if ay is None:
+            ygm = re.search(r'year\s*(\d{1,2})\b', low) or re.search(r'\byr?\s*(\d{1,2})\b', low)
+            yg = int(ygm.group(1)) if ygm else None
+            intake = pid_intake.get(pidn) if pidn else None
+            if yg is not None and 7 <= yg <= 13 and intake is not None:
+                ay = intake + (yg - 7)
             else:
-                c_day.append(None)
-        c_grid.append(c_day)
-    return c_grid
-
-c_tt = {}
-for ay_str, pupils in tt_out.items():
-    c_tt[ay_str] = {p_id: _compress_grid(grid) for p_id, grid in pupils.items()}
-
-# Attendance code config
-att_code_config = {
-    'present': sorted(PRESENT_CODES),
-    'authorised_absent': sorted(AUTH_ABSENT_CODES),
-    'unauthorised_absent': sorted(UNAUTH_ABSENT_CODES),
-    'not_counted': sorted(NOT_COUNTED_CODES),
-}
-
-# Incident code config
-incident_config = {}
-for s in sanctions:
-    if s[1] == 0 and s[5]:
-        incident_config[s[5]] = s[6]
-
-def _read_unresolved_terms():
-    """Distinct grade Resultset labels that staging couldn't place (written by stage_inputs.py).
-    Surfaced to the dashboard's Admin 'unknown term' mapper. An empty/missing file clears the list."""
-    try:
-        p = os.path.join(UP, 'unresolved_terms.json')
-        if os.path.exists(p):
-            with open(p, encoding='utf-8') as f:
-                v = json.load(f)
-            if isinstance(v, list):
-                return [str(x) for x in v if str(x).strip()]
-    except Exception:
-        pass
-    return []
-_UNRESOLVED_TERMS = _read_unresolved_terms()
-
-output = {
-    "config": {
-        "subjects": all_subjects,
-        "ability_map": ABILITY_MAP,
-        "reference_scale": _REF_ORDER,
-        "reference_labels": {_t: _REF_LABELS.get(_t, _t) for _t in _REF_ORDER},
-        "reference_colours": {_t: _REF_COLOURS[_t] for _t in _REF_ORDER if _t in _REF_COLOURS},
-        "transitions": _TRANSITIONS,
-        "calibration": _CALIBRATION_EFF,
-        "periods": periods_list,
-        # Timetable shape, derived from the data rather than assumed (see DERIVE
-        # TIMETABLE SHAPE). The browser must read these instead of counting to 5:
-        # every grid in this file is len(ttDays) x ttPeriods.
-        "ttDays": DAY_NAMES,
-        "ttPeriods": N_PER,
-        # ── SELF-DESCRIBING ROW SHAPE ──
-        # progress rows are POSITIONAL arrays, and the row length has changed between
-        # engine versions (7 elements when the pupil id was kept, 6 since it was
-        # dropped). Two readers in index.html ended up assuming different lengths, so
-        # the Pupil tab and the SLT tab reported different SEN status for the SAME
-        # pupil — and because an empty scores object is TRUTHY in JavaScript, the
-        # misaligned reader silently flagged every pupil as SEND rather than failing.
-        # Declaring the column order here means a reader resolves positions by NAME
-        # and a future change to the row cannot silently break anything.
-        "progressCols": ["px", "reg", "scores", "send", "ehcp", "fsm"],
-        # DfE academic week anchor. The browser needs this to label a week the same
-        # way the national figures do — a school's first teaching day is NOT week 1
-        # (TWS starts on DfE week 5). Week n begins dfeWeek1 + 7*(n-1) days.
-        "dfeWeek1": dfe_week1_monday(CAY).strftime('%Y-%m-%d'),
-        "period_labels": period_labels,
-        # Dated spells, so a historic view can ask "was this pupil SEND then"
-        # rather than "are they SEND now". senStatus below stays as the current
-        # snapshot for everything that only needs today.
-        "senSpells": sen_spells,
-        "fsmSpells": fsm_spells,
-        # Reports live on their own dated axis; periods above stay term-based
-        # because attendance per term is a real aggregation.
-        "collections": collections_list,
-        "collection_labels": collection_labels,
-        "intakes": sorted(INTAKES, reverse=True),
-        "current_acad_year": CAY,
-        "real_data": True,
-        "att_codes": att_code_config,
-        "sen_codes": SEN_CODES,
-        "incident_codes": incident_config,
-        "unresolved_terms": _UNRESOLVED_TERMS,
-        # Grade values the rebuild couldn't place, surfaced in Admin so they stop dropping silently.
-        # {rawValue: count} of report grades that matched no ability/effort band; and
-        # {"TOKEN@Y{yg}": count} of grades that validated but have no reference-band calibration.
-        "unmapped_ability": dict(_unmapped_ability.counts),
-        "unmapped_effort": dict(_unmapped_effort.counts),
-        "uncalibrated_grades": dict(_unmapped_rank.counts),
-        "house_point_weights": HOUSE_POINT_WEIGHTS,
-        "house_point_types": HP_TYPES,
-    },
-    "subjectKeys": sk,
-    "periodKeys": pk,
-    "dateIndex": all_dates_sorted,
-    "teacherIndex": teacher_index,
-    "registry": registry,
-    "enrolments": c_enr,
-    "progress": c_prog,
-    "attendance": c_att,
-    "attendanceMarks": c_att_marks,
-    "attByPeriod": c_abp,
-    "attByPeriodSubj": c_abps,
-    "attAbsSubj": c_aas,
-    "sanctions": c_sanc,
-    "sanctionDetails": sanction_details,
-    "housePoints": c_hp,
-    "housePointDetails": hp_details,
-    "senStatus": {p: s for p, s in sen_map.items()},
-    "weekLessons": week_lessons,
-    "timetables": c_tt,
-    "slotDenominators": slot_denominators,
-    "schoolDayCounts": school_day_counts,
-    "slotTeachers": slot_teachers,
-    "splitSlotMeta": split_slot_meta,
-    "suppressedAbsences": suppressed_absences,
-}
-
-out_path = '/home/claude/data_real.json'
-with open(out_path, 'w') as f:
-    json.dump(output, f, separators=(',', ':'))
-
-size_mb = os.path.getsize(out_path) / 1024 / 1024
-print(f"\n{'='*50}")
-print(f"data_real.json: {size_mb:.1f} MB")
-print(f"Pupils: {len(registry)}")
-print(f"Sanctions: {len(c_sanc)} ({sum(1 for s in c_sanc if s[1]==0)} codes, {sum(1 for s in c_sanc if s[1]==2)} detentions)")
-print(f"Attendance: {sum(len(v) for v in c_att.values())} absence date entries")
-print(f"AttAbsSubj: {sum(sum(len(v2) for v2 in v.values()) for v in c_aas.values())} absence period records")
-print(f"Timetables: {sum(len(v) for v in c_tt.values())} pupil-years across {len(c_tt)} AY(s): {sorted(c_tt.keys())}")
-print(f"Report scores: {_rep_rows_used} attached across {len(report_scores)} pupils")
-print(f"Suppressed absences: {supp_count} slots across {len(suppressed_absences)} pupils")
-print(f"Duplicate registrations: {dup_slots} slots across {dup_pupils} pupils")
-if unknown_marks:
-    print(f"⚠ Unknown marks defaulted to unauth absent: {unknown_marks}")
-if unmapped:
-    print(f"⚠ Unmapped incident types: {len(unmapped)}")
-print(f"{'='*50}")
-print("Done!")
-
-# ── PHASE 1: emit flags.json for the Admin panel (reuses the trackers above) ──
-def _flat(x):
-    out = set()
-    if isinstance(x, dict):
-        for v in x.values():
-            out |= set(v) if isinstance(v, (set, list, tuple)) else {v}
-    elif isinstance(x, (set, list, tuple, _FlagCount)):
-        out |= set(x)
-    elif x is not None:
-        out.add(x)
-    return out
-_g = globals()
-_flag_sources = {
-    "unknown_subject":         _flat(_g.get("_subject_variants")),
-    "unknown_attendance_code": _flat(_g.get("unknown_marks")),
-    "unmapped_incident":       _flat(_g.get("unmapped")),
-    "unmapped_ability_value":  _flat(_g.get("_unmapped_ability")),
-    "unmapped_effort_value":   _flat(_g.get("_unmapped_effort")),
-    "uncalibrated_grade":      _flat(_g.get("_unmapped_rank")),
-}
-_flags_path = os.environ.get("FLAGS_PATH", "/home/claude/flags.json")
-_emitted = dump_flags(_flags_path, _flag_sources)
-print("\nFlags for Admin panel -> " + _flags_path + ": "
-      + (", ".join(f"{f['type']}={len(f['values'])}" for f in _emitted) if _emitted else "none"))
+                ym = re.search(r'(20\d{2})', s)
+                if ym:
+                    cal = int(ym.group(1)); ay = cal if season == 'T1' else cal - 1
+        if ay is None:
+            if s:
+                stats['unresolved_labels'].add(s)
+            return fallback_term
+        return f"{season} {ay}"
+    def parse(paths, rx, valcol):
+        rows = []
+        for p in paths:
+            for _, r in _read(p).iterrows():
+                bd = str(r.get('Basic details', '')).strip()
+                m = re.match(rx, bd)
+                if not m:
+                    continue
+                pidn = pidnum(r.get('Name'))
+                tm = term_of(r.get('Resultset'), pidn)
+                if tm is None:
+                    stats['unresolved_term'] += 1
+                rows.append({'pid': pidn, 'Name': r.get('Name'),
+                             'Subject': m.group(1).strip(), valcol: r.get('Result'),
+                             'Term': tm})
+        return pd.DataFrame(rows, columns=['pid', 'Name', 'Subject', valcol, 'Term'])
+    # Both metrics can live in ONE file (a single grades export) or in separate attainment/
+    # effort files — so parse each metric from the union of all grade files.
+    all_paths = list(dict.fromkeys(list(attain_paths) + list(effort_paths)))
+    ot = parse(all_paths, r'(?:On track for|Predicted|Target)\s+(.*)$', 'Ability Value')
+    ef = parse(all_paths, r'(.*)\s+Effort$', 'Effort Value')
+    if ot.empty and ef.empty:
+        return pd.DataFrame(columns=['Name', 'Subject', 'Term', 'Ability Value', 'Effort Value']), stats
+    m = pd.merge(ot[['pid', 'Name', 'Subject', 'Term', 'Ability Value']],
+                 ef[['pid', 'Subject', 'Term', 'Effort Value']],
+                 on=['pid', 'Subject', 'Term'], how='outer')
+    nm = dict(zip(ef['pid'], ef['Name'])) if not ef.empty else {}
+    m['Name'] = m.apply(lambda r: r['Name'] if isinstance(r['Name'], str) else nm.get(r['pid'], r['pid']), axis=1)
+    stats['rows'] = len(m)
+    return m[['Name', 'Subject', 'Term', 'Ability Value', 'Effort Value']], stats
 
 
-# ── SCOPED OUTPUTS ────────────────────────────────────────────────────────────
-# One data.json per role scope, written alongside the school-wide file:
-#
-#   {school}/data.json                  SLT and platform owner  (unchanged)
-#   {school}/year/{n}/data.json         year leader
-#   {school}/tutor/{form}/data.json     form tutor
-#
-# The storage policy is what enforces who reads which; this only decides what
-# each file contains. A pupil absent from a file cannot be reached from the
-# browser at all, which is the whole point — hiding tabs never was a boundary.
-#
-# Append this to import_engine.py after the json.dump of the school-wide file.
-# It reads `output` and `registry` from memory and adds nothing to the main pass.
-
-import statistics
-from datetime import date as _date
-# os, json, timedelta and defaultdict are already imported at the top of this file.
-
-SCOPED_OUT_DIR = os.environ.get('SCOPED_OUT_DIR', '/home/claude/scoped')
-
-# Keys whose top level is the pupil id.
-_PUPIL_KEYED = ['registry', 'attendance', 'attendanceMarks', 'attByPeriod',
-                'attByPeriodSubj', 'attAbsSubj', 'senStatus', 'suppressedAbsences']
-
-# Flat arrays with a parallel detail array. The two are joined by position, so a
-# filter that touches one and not the other silently reattributes every row.
-_PAIRED = [('sanctions', 'sanctionDetails', 0),
-           ('housePoints', 'housePointDetails', 0)]
-
-# Everything else is school-level and carries no pupil identity, so it is shared
-# verbatim: config, subjectKeys, periodKeys, dateIndex, teacherIndex,
-# weekLessons, slotDenominators, schoolDayCounts, slotTeachers, splitSlotMeta.
-
-
-def _slice_output(full, keep_px):
-    """Return a copy of `full` containing only the pupils in keep_px."""
-    keep_i = {int(p) for p in keep_px}
-    keep_s = {str(p) for p in keep_px}
-    out = {}
-
-    for key, val in full.items():
-        if key in _PUPIL_KEYED:
-            out[key] = {p: v for p, v in val.items() if str(p) in keep_s}
-
-        elif key == 'timetables':                      # AY -> px -> grid
-            out[key] = {ay: {p: g for p, g in per.items() if str(p) in keep_s}
-                        for ay, per in val.items()}
-
-        elif key == 'progress':                        # intake -> period -> rows[px at 0]
-            out[key] = {ik: {pk: [r for r in rows if int(r[0]) in keep_i]
-                             for pk, rows in per.items()}
-                        for ik, per in val.items()}
-
-        elif key == 'enrolments':                      # intake -> rows[px at 1]
-            out[key] = {ik: [r for r in rows if int(r[1]) in keep_i]
-                        for ik, rows in val.items()}
-
-        elif key in ('sanctions', 'sanctionDetails', 'housePoints', 'housePointDetails'):
-            continue                                   # handled below, in lockstep
-
-        else:
-            out[key] = val                             # school-level, shared as is
-
-    for arr, det, ix in _PAIRED:
-        rows, details = full.get(arr) or [], full.get(det) or []
-        idx = [i for i, r in enumerate(rows) if int(r[ix]) in keep_i]
-        out[arr] = [rows[i] for i in idx]
-        out[det] = [details[i] for i in idx] if len(details) == len(rows) else details
-        if len(details) != len(rows):
-            print(f"  ⚠ {arr}/{det} lengths differ ({len(rows)} vs {len(details)}); "
-                  f"details left unfiltered — check the build")
-
-    return out
-
-
-# ── Peer statistics ───────────────────────────────────────────────────────────
-# A tutor's file holds only their own form, so the Form Tutor comparison charts
-# have nothing to compare against. Rather than widen the file to the whole year
-# — which would defeat the scoping — every file carries a small precomputed
-# block of per-form figures with no pupil-level data in it.
-#
-# The definitions mirror the client exactly: attendance is absent periods over
-# school days x mean periods per day, positives and sanctions are per-pupil
-# counts in the current academic year, and the Winsorised mean clamps the top
-# and bottom tenth.
-
-# Attendance has a ceiling at 100 and a long tail below, so a Winsorised mean
-# is almost entirely a one-sided operation that lifts the worst attenders: on
-# this school's data the top clamp removes 0.02 points and the bottom adds 1.49.
-# The low tail is the finding, so it is counted rather than trimmed. Bands
-# rather than a single threshold, so the cut can move without a rebuild.
-def _att_values(vals):
-    """Per-pupil attendance percentages, sorted, one decimal place.
-
-    This REPLACES _att_bands(), which pre-counted pupils into u85/u90/u95/o95.
-    Two problems with that:
-
-      * it decided the threshold at BUILD time, so the browser could not offer
-        a different one without a rebuild — unlike every other threshold, which
-        lives in the Admin panel and applies immediately;
-      * it discarded the values, so nothing could be recomputed. The only
-        consumer (_below90 in the "Pupils below 90%" chart) had to add u85 and
-        u90 back together, which is the giveaway — the banding was partly
-        undone at the point of use. u95 and o95 were never read at all.
-
-    A sorted list lets the browser count against ANY cutoff, exactly. Rounding
-    to 1dp rather than integers matters: 89.6 rounded to 90 would be counted as
-    meeting a 90% threshold when it does not.
-
-    Size: a form is ~25 pupils, so this is ~25 short numbers where the bands
-    were 4 — a few hundred bytes per group, against a 11MB file.
-    """
-    return sorted(round(v, 1) for v in vals if v is not None)
-
-
-def _winsor_mean(vals, p=0.10):
-    v = sorted(x for x in vals if x is not None)
-    if not v:
-        return None
-    k = int(len(v) * p)
-    if k < 1:
-        return sum(v) / len(v)
-    lo, hi = v[k], v[-1 - k]
-    return sum(min(max(x, lo), hi) for x in v) / len(v)
-
-
-def _ay_of(iso):
-    # DfE basis: 1 August, matching dfe_week1_monday() above. A September test would
-    # file 15 August 2025 in AY2024 while the week numbering called it week 2 of
-    # AY2025 — the two must agree.
-    y, m = int(iso[:4]), int(iso[5:7])
-    return str(y if m >= AY_START_MONTH else y - 1)
-
-
-def _month_row(pxs, m, sched_m, abs_m, pos_m, neg_m):
-    """One month's figures for a set of pupils, mean and Winsorised."""
-    a = [100 - (abs_m[p][m] / sched_m * 100) for p in pxs]
-    pv = [pos_m[p][m] for p in pxs]
-    nv = [neg_m[p][m] for p in pxs]
-    return {
-        'att':  round(statistics.fmean(a), 3),
-        'attW': round(_winsor_mean(a), 3),
-        'pos':  round(statistics.fmean(pv), 3),
-        'posW': round(_winsor_mean(pv), 3),
-        'neg':  round(statistics.fmean(nv), 3),
-        'negW': round(_winsor_mean(nv), 3),
-    }
-
-
-def _build_peer_stats(full):
-    cfg = full['config']
-    cay = str(cfg['current_acad_year'])
-    week_lessons = full.get('weekLessons') or {}
-    date_index = full['dateIndex']
-    reg = full['registry']
-
-    # School days in the current AY, and the mean periods per day, exactly as
-    # _hmSchoolDays()/_hmPerPerDay() derive them in the browser.
-    ay_start = f'{cay}-0{AY_START_MONTH}-01'
-    today = _date.today().isoformat()
-    school_days = []
-    for wk in sorted(week_lessons):
-        if wk < ay_start:
+def stage(upload_dir, out_dir, grade_term=None, current_acad_year=None, verbose=True):
+    os.makedirs(out_dir, exist_ok=True)
+    buckets = {}
+    for fn in sorted(os.listdir(upload_dir)):
+        if not fn.lower().endswith(('.csv', '.xlsx')):
+            # Admin grade-mapping calibration + custom ability ladder (JSON) ride along verbatim — the
+            # engine folds them in. The CSV/XLSX-only path below would otherwise drop them.
+            if re.match(r'_calibration_ks[45]\.json$', fn) or fn == '_ability_scale.json':
+                shutil.copyfile(os.path.join(upload_dir, fn), os.path.join(out_dir, fn))
             continue
-        d0 = _date.fromisoformat(wk)
-        for off in range(N_DAY):   # was range(5) — assumed Mon..Fri
-            iso = (d0 + timedelta(days=off)).isoformat()
-            if iso <= today:
-                school_days.append(iso)
-    school_days.sort()
-    if not school_days:
-        return None
-    vals = list(week_lessons.values())
-    per_day = (sum(vals) / len(vals)) / 5 if vals else 5
+        role, yg = detect(fn)
+        if role:
+            buckets.setdefault((role, yg), []).append(os.path.join(upload_dir, fn))
+    def files(role, yg):
+        return buckets.get((role, yg), [])
+    log = (lambda *a: print(*a)) if verbose else (lambda *a: None)
+    summary = {}
 
-    # Absent periods per pupil, deduplicated by date+period and net of
-    # suppressed slots, matching countAbsPeriods().
-    supp = {str(k): set(v) for k, v in (full.get('suppressedAbsences') or {}).items()}
-    skr = {v: k for k, v in full['subjectKeys'].items()}
-    first, last = school_days[0], school_days[-1]
+    # Category-generic staging: every file of a category is pooled regardless of which cohort
+    # or year group it belongs to. The engine reads these by glob and assigns each pupil's
+    # cohort from the roster (by admission number), so NO year group is hardcoded here — a
+    # Year 7 cohort's files flow through exactly like a Year 11 cohort's.
+    def of_role(*roles):
+        return [p for (r, _yg), ps in buckets.items() if r in roles for p in ps]
 
-    absent = defaultdict(int)
-    for px, by_date in (full.get('attAbsSubj') or {}).items():
-        seen, s = set(), supp.get(str(px), set())
-        for dk, lessons in by_date.items():
-            iso = date_index[int(dk)] if int(dk) < len(date_index) else None
-            if not iso or iso < first or iso > last:
-                continue
-            for lesson in lessons:
-                k = f'{iso}|{lesson[1]}'
-                if k in s or k in seen:
-                    continue
-                seen.add(k)
-                absent[str(px)] += 1
+    att_paths = of_role('attendance')
+    if att_paths:
+        att = pd.concat([_att_norm(_read(p)) for p in att_paths], ignore_index=True)
+        att.to_csv(os.path.join(out_dir, 'attend_updated.csv'), index=False)   # engine globs *attend_updated.csv
+        summary['attendance'] = len(att)
 
-    # Current-year counts, plus a month bucket for the trend lines.
-    pos, neg = defaultdict(int), defaultdict(int)
-    pos_m = defaultdict(lambda: defaultdict(int))
-    neg_m = defaultdict(lambda: defaultdict(int))
-    for arr, tot, mon in (('housePoints', pos, pos_m), ('sanctions', neg, neg_m)):
-        for r in (full.get(arr) or []):
-            iso = date_index[r[2]] if isinstance(r[2], int) else r[2]
-            if _ay_of(iso) != cay:
-                continue
-            tot[str(r[0])] += 1
-            mon[str(r[0])][iso[:7]] += 1
+    beh_parts = [_beh_norm(_read(p), False) for p in of_role('behave_current')] + \
+                [_beh_norm(_read(p), True)  for p in of_role('behave_historic')]
+    if beh_parts:
+        beh = pd.concat(beh_parts, ignore_index=True)
+        beh.to_csv(os.path.join(out_dir, 'Behave_all.csv'), index=False)        # engine globs Behave*.csv
+        summary['behaviour'] = len(beh)
 
-    # Absent periods per pupil per month, for the attendance trend.
-    months = sorted({d[:7] for d in school_days})
-    days_in_month = {m: [d for d in school_days if d.startswith(m)] for m in months}
-    abs_m = defaultdict(lambda: defaultdict(int))
-    for px, by_date in (full.get('attAbsSubj') or {}).items():
-        seen, s = set(), supp.get(str(px), set())
-        for dk, lessons in by_date.items():
-            iso = date_index[int(dk)] if int(dk) < len(date_index) else None
-            if not iso or iso < first or iso > last:
-                continue
-            for lesson in lessons:
-                k = f'{iso}|{lesson[1]}'
-                if k in s or k in seen:
-                    continue
-                seen.add(k)
-                abs_m[str(px)][iso[:7]] += 1
+    det_paths = of_role('detention')
+    if det_paths:
+        det = pd.concat([_read(p) for p in det_paths], ignore_index=True)[['Name', 'Detention Date', 'Detention Type']]
+        det.to_csv(os.path.join(out_dir, 'Detention_all.csv'), index=False)      # engine globs Detention*.csv
+        summary['detentions'] = len(det)
 
-    forms = defaultdict(list)
-    for px, r in reg.items():
-        if r.get('reg'):
-            forms[r['reg']].append(str(px))
+    # FSM — one combined file covers every cohort (engine reads FSM.csv once against the full registry)
+    fsm_paths = [p for (role, _), ps in buckets.items() if role == 'fsm' for p in ps]
+    if fsm_paths:
+        fsm = pd.concat([_read(p) for p in fsm_paths], ignore_index=True)
+        fsm.to_csv(os.path.join(out_dir, 'FSM.csv'), index=False)
+        summary['fsm'] = len(fsm)
 
-    scheduled = len(school_days) * per_day
-    by_form = {}
-    for form, pxs in forms.items():
-        att = [100 - (absent[p] / scheduled * 100) for p in pxs] if scheduled else []
-        pv = [pos[p] for p in pxs]
-        nv = [neg[p] for p in pxs]
-        month_rows = {}
-        for m in months:
-            sched_m = len(days_in_month[m]) * per_day
-            if not sched_m:
-                continue
-            month_rows[m] = _month_row(pxs, m, sched_m, abs_m, pos_m, neg_m)
-        rnd = lambda x: None if x is None else round(x, 3)
-        by_form[form] = {
-            'year':   reg[pxs[0]].get('year'),
-            'n':      len(pxs),
-            'attVals': _att_values(att),
-            'att':    rnd(statistics.fmean(att) if att else None),
-            'attW':   rnd(_winsor_mean(att)),
-            'pos':    rnd(statistics.fmean(pv) if pv else None),
-            'posW':   rnd(_winsor_mean(pv)),
-            'neg':    rnd(statistics.fmean(nv) if nv else None),
-            'negW':   rnd(_winsor_mean(nv)),
-            'months': month_rows,
-        }
+    # SEN status — one whole-school snapshot. Pool every SEN file, normalise the status column
+    # (exports use either 'SEN Status Code' or 'SEN Status'), and write the engine's SEN.csv.
+    sen_all = of_role('sen')
+    if sen_all:
+        parts = []
+        for p in sen_all:
+            s = _read(p)
+            s['SEN Status'] = s.get('SEN Status Code', s.get('SEN Status'))
+            parts.append(s[[c for c in ['Name', 'SEN Status'] if c in s.columns]])
+        sen = pd.concat(parts, ignore_index=True).dropna(subset=['Name'])
+        sen.to_csv(os.path.join(out_dir, 'SEN.csv'), index=False)
+        summary['sen'] = len(sen)
 
-    # The whole year group as one series, so a form can be read against its own
-    # year rather than the median of the other forms. Winsorised across every
-    # pupil in the year, not an average of form averages, which would weight a
-    # form of 25 the same as one of 33.
-    year_px = defaultdict(list)
-    for form, pxs in forms.items():
-        yr = reg[pxs[0]].get('year')
-        if yr:
-            year_px[yr].extend(pxs)
+    # ROSTER — the authoritative pupil->cohort map. Derived from the SEN-with-Gender exports
+    # (they carry the current year group + gender for the whole cohort), anchored to the
+    # confirmed current academic year. This is what makes the engine cohort-generic: add a
+    # cohort's SEN export and its pupils appear in the roster, no code change.
+    sen_paths = [p for (role, _), ps in buckets.items() if role == 'sen' for p in ps]
+    if sen_paths and current_acad_year:
+        try:
+            from derive_roster import derive_roster, write_roster_csv
+            roster, rsum, anomalies = derive_roster(sen_paths, int(current_acad_year))
+            write_roster_csv(roster, os.path.join(out_dir, 'Roster.csv'))
+            summary['roster'] = rsum.get('pupils', len(roster))
+            if anomalies:
+                log(f"  roster anomalies (for Admin review): {len(anomalies)}")
+        except Exception as e:
+            log(f"  roster: skipped ({e})")
+    elif sen_paths:
+        log("  roster: skipped — current academic year not supplied")
 
-    year_rows = {}
-    for yr, pxs in year_px.items():
-        att = [100 - (absent[p] / scheduled * 100) for p in pxs] if scheduled else []
-        pv, nv = [pos[p] for p in pxs], [neg[p] for p in pxs]
-        mrows = {}
-        for m in months:
-            sched_m = len(days_in_month[m]) * per_day
-            if sched_m:
-                mrows[m] = _month_row(pxs, m, sched_m, abs_m, pos_m, neg_m)
-        rnd = lambda x: None if x is None else round(x, 3)
-        year_rows[yr] = {
-            'n': len(pxs),
-            'attVals': _att_values(att),
-            'att': rnd(statistics.fmean(att) if att else None), 'attW': rnd(_winsor_mean(att)),
-            'pos': rnd(statistics.fmean(pv)),                   'posW': rnd(_winsor_mean(pv)),
-            'neg': rnd(statistics.fmean(nv)),                   'negW': rnd(_winsor_mean(nv)),
-            'months': mrows,
-        }
+    hp_paths = of_role('housepoints')
+    if hp_paths:
+        hp = pd.concat([_read(p) for p in hp_paths], ignore_index=True).rename(columns={'Forename': 'Name'})
+        if 'Event Date' in hp.columns:
+            hp['Date'] = hp['Event Date']; hp['Event/Date'] = hp['Event Date']
+        hp.to_csv(os.path.join(out_dir, 'House_Points.csv'), index=False)        # engine reads House_Points.csv
+        summary['housepoints'] = len(hp)
 
-    return {'builtAt': today, 'months': months,
-            'byForm': by_form, 'byYear': year_rows}
+    # GRADES — combine every attainment + effort file into one Reports.csv (engine keys by pupil number)
+    attain = [p for (role, _), ps in buckets.items() if role == 'grade_attain' for p in ps]
+    effort = [p for (role, _), ps in buckets.items() if role == 'grade_effort' for p in ps]
+    if attain or effort:
+        # Pupil -> intake, read from the roster we just derived, so each grade's term can be
+        # resolved from its Resultset year group (see _parse_grades). No roster -> no map; rows
+        # whose term can't be resolved are left blank for the engine to flag.
+        pid_intake = {}
+        _rpath = os.path.join(out_dir, 'Roster.csv')
+        if os.path.exists(_rpath):
+            try:
+                _rdf = pd.read_csv(_rpath, dtype=str)
+                for _, _rr in _rdf.iterrows():
+                    _m = re.match(r'(\d+)', str(_rr.get('pid', '')))
+                    if _m and pd.notna(_rr.get('Intake')) and str(_rr.get('Intake')).strip():
+                        pid_intake[str(int(_m.group(1)))] = int(float(_rr['Intake']))
+            except Exception as e:
+                log(f"  grades: roster intake map unavailable ({e})")
+        # Per-school term-label overrides (Admin-mapped). Built-ins handle the standard wordings;
+        # this catches anything bespoke a school uses.
+        term_map = _load_term_map(upload_dir)
+        rep, gsum = _parse_grades(attain, effort, pid_intake, fallback_term=grade_term, term_map=term_map)
+        rep.to_csv(os.path.join(out_dir, 'Reports.csv'), index=False)
+        summary['report_rows'] = len(rep)
+        # Surface any term labels we couldn't place, so the engine can pass them to the Admin
+        # "unknown term" mapper. Distinct, sorted; an empty list clears a previously-flagged set.
+        _unres = sorted(gsum.get('unresolved_labels') or [])
+        try:
+            with open(os.path.join(out_dir, 'unresolved_terms.json'), 'w', encoding='utf-8') as _uf:
+                json.dump(_unres, _uf)
+        except Exception as e:
+            log(f"  grades: could not write unresolved-terms list ({e})")
+        if gsum.get('unresolved_term'):
+            log(f"  grades: {gsum['unresolved_term']} rows with unresolvable term "
+                f"({len(_unres)} distinct label(s) for Admin to map)")
+
+    for k, v in summary.items():
+        log(f"  {k}: {v}")
+    return summary
 
 
-# ── Cohort statistics ─────────────────────────────────────────────────────────
-# Two comparisons the year-group aggregates above cannot answer:
-#   current  — my year against the other year groups in the school right now
-#   historic — my year against the same year group in previous cohorts
-#
-# Both are aggregates only: counts and means per cohort, no pupil-level data, so
-# a scoped file can carry them without widening what an account can see. Months
-# are indexed from September rather than dated, so October in 2023 lines up with
-# October in 2025.
-_AY_MONTHS = ['Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug']
-
-def _build_cohort_stats(full):
-    cfg = full['config']
-    date_index = full['dateIndex']
-    reg = full['registry']
-    week_lessons = full.get('weekLessons') or {}
-    if not week_lessons:
-        return None
-    # Local, so this block stands on its own if lifted out of the engine.
-    _ay = lambda iso: int(iso[:4]) if int(iso[5:7]) >= AY_START_MONTH else int(iso[:4]) - 1
-
-    vals = list(week_lessons.values())
-    per_day = (sum(vals) / len(vals)) / 5 if vals else 5
-    today = _date.today().isoformat()
-
-    # School days per academic year, and per month-of-year within it.
-    days_by_ay = defaultdict(list)
-    for wk in sorted(week_lessons):
-        d0 = _date.fromisoformat(wk)
-        for off in range(N_DAY):   # was range(5) — assumed Mon..Fri
-            iso = (d0 + timedelta(days=off)).isoformat()
-            if iso <= today:
-                days_by_ay[_ay(iso)].append(iso)
-
-    supp = {str(k): set(v) for k, v in (full.get('suppressedAbsences') or {}).items()}
-
-    # Absent periods per pupil per academic year, and per month index.
-    abs_ay = defaultdict(lambda: defaultdict(int))
-    abs_m  = defaultdict(lambda: defaultdict(int))
-    for px, by_date in (full.get('attAbsSubj') or {}).items():
-        seen, sp = set(), supp.get(str(px), set())
-        for dk, lessons in by_date.items():
-            iso = date_index[int(dk)] if int(dk) < len(date_index) else None
-            if not iso:
-                continue
-            ay = _ay(iso)
-            mi = (int(iso[5:7]) - 9) % 12
-            for lesson in lessons:
-                k = f'{iso}|{lesson[1]}'
-                if k in sp or k in seen:
-                    continue
-                seen.add(k)
-                abs_ay[str(px)][ay] += 1
-                abs_m[str(px)][(ay, mi)] += 1
-
-    def _counts(arr):
-        tot = defaultdict(lambda: defaultdict(int))
-        mon = defaultdict(lambda: defaultdict(int))
-        for r in (full.get(arr) or []):
-            iso = date_index[r[2]] if isinstance(r[2], int) else r[2]
-            ay = _ay(iso)
-            tot[str(r[0])][ay] += 1
-            mon[str(r[0])][(ay, (int(iso[5:7]) - 9) % 12)] += 1
-        return tot, mon
-    pos_ay, pos_m = _counts('housePoints')
-    neg_ay, neg_m = _counts('sanctions')
-
-    by_intake = defaultdict(list)
-    for px, r in reg.items():
-        if r.get('intake'):
-            by_intake[int(r['intake'])].append(str(px))
-
-    rnd = lambda x: None if x is None else round(x, 3)
-    out = {}
-    for intake, pxs in by_intake.items():
-        for ay, days in days_by_ay.items():
-            yg = ay - intake + 7
-            if not (0 <= yg <= 13) or not days:      # 0 = Reception
-                continue
-            scheduled = len(days) * per_day
-            att = [100 - (abs_ay[p][ay] / scheduled * 100) for p in pxs]
-            pv  = [pos_ay[p][ay] for p in pxs]
-            nv  = [neg_ay[p][ay] for p in pxs]
-            if not any(pv) and not any(nv) and not any(abs_ay[p][ay] for p in pxs):
-                continue                       # cohort has no data that year
-
-            months = []
-            for mi in range(12):
-                dm = [d for d in days if (int(d[5:7]) - 9) % 12 == mi]
-                if not dm:
-                    continue
-                sm = len(dm) * per_day
-                months.append({
-                    'm':    _AY_MONTHS[mi],
-                    'att':  round(statistics.fmean([100 - (abs_m[p][(ay, mi)] / sm * 100) for p in pxs]), 3),
-                    'attW': round(_winsor_mean([100 - (abs_m[p][(ay, mi)] / sm * 100) for p in pxs]), 3),
-                    'pos':  round(statistics.fmean([pos_m[p][(ay, mi)] for p in pxs]), 3),
-                    'neg':  round(statistics.fmean([neg_m[p][(ay, mi)] for p in pxs]), 3),
-                })
-
-            out.setdefault(str(yg), {})[str(ay)] = {
-                'n': len(pxs), 'intake': intake,
-                'attVals': _att_values(att),
-                'att': rnd(statistics.fmean(att)), 'attW': rnd(_winsor_mean(att)),
-                'pos': rnd(statistics.fmean(pv)),  'posW': rnd(_winsor_mean(pv)),
-                'neg': rnd(statistics.fmean(nv)),  'negW': rnd(_winsor_mean(nv)),
-                'months': months,
-            }
-    return out or None
-
-
-# ── Write the scoped files ────────────────────────────────────────────────────
-def write_scoped_outputs(full, out_dir=SCOPED_OUT_DIR):
-    reg = full['registry']
-
-    peer = _build_peer_stats(full)
-    if peer:
-        cohorts = _build_cohort_stats(full)
-        if cohorts:
-            peer = dict(peer, byCohort=cohorts)
-        full = dict(full, peerStats=peer)
-        # The workflow pushes the engine's own output as the school-wide file,
-        # so enrich that in place rather than writing a second copy the CI
-        # would ignore.
-        main_path = globals().get('out_path', '/home/claude/data_real.json')
-        with open(main_path, 'w') as f:
-            json.dump(full, f, separators=(',', ':'))
-        print(f"peerStats added to {main_path} ({len(peer['byForm'])} forms)")
-
-    by_form, by_year = defaultdict(set), defaultdict(set)
-    for px, r in reg.items():
-        if r.get('reg'):
-            by_form[r['reg']].add(px)
-        yr = ''.join(ch for ch in str(r.get('year') or '') if ch.isdigit())
-        if yr:
-            by_year[yr].add(px)
-
-    written = []
-
-    def _write(rel, data):
-        path = os.path.join(out_dir, rel)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w') as f:
-            json.dump(data, f, separators=(',', ':'))
-        mb = os.path.getsize(path) / 1024 / 1024
-        written.append((rel, len(data['registry']), mb))
-        return mb
-
-    # data.json is not written here: the engine's own output above is the
-    # school-wide file, and this directory carries only the scoped trees.
-    for yr, pxs in sorted(by_year.items()):
-        _write(f'year/{yr}/data.json', _slice_output(full, pxs))
-    for form, pxs in sorted(by_form.items()):
-        _write(f'tutor/{form}/data.json', _slice_output(full, pxs))
-
-    print(f"\n{'='*58}")
-    print(f"Scoped files -> {out_dir}")
-    print(f"{'path':<34}{'pupils':>8}{'MB':>8}")
-    for rel, n, mb in written:
-        print(f"{rel:<34}{n:>8}{mb:>8.2f}")
-    print(f"{'-'*58}")
-    print(f"{len(written)} files, {sum(m for _, _, m in written):.1f} MB total")
-    print(f"{'='*58}")
-    return written
-
-
-write_scoped_outputs(output)
+if __name__ == '__main__':
+    up = sys.argv[1] if len(sys.argv) > 1 else '/mnt/user-data/uploads'
+    out = sys.argv[2] if len(sys.argv) > 2 else '/home/claude/import_input'
+    cay = int(sys.argv[3]) if len(sys.argv) > 3 else None
+    print(f"Staging raw uploads from {up} -> {out}" + (f" (academic year start {cay})" if cay else ""))
+    stage(up, out, current_acad_year=cay)
+    print("Done.")
