@@ -7390,8 +7390,21 @@ function _hmYears(){
 function _hmRender(outId,fn){
   const el=document.getElementById(outId);
   if(!el)return;
-  try{ el.innerHTML=fn(); }
-  catch(e){ el.innerHTML='<div style="color:var(--red);padding:1rem">Could not build this view: '+e.message+'</div>'; }
+  try{
+    el.innerHTML=fn();
+    // ⚠️ FLUSH THE CHART QUEUE HERE, not only inside _hmInfographics.
+    // _hmChart() defers chart construction until the canvas is in the DOM, and the
+    // only flushes were the three inside _hmInfographics — so any panel that queued a
+    // chart outside that block rendered its canvas and nothing else, silently. The
+    // SLT tab's week-by-week attendance chart was the first to hit it.
+    // setTimeout(0) so the canvas has been laid out before Chart.js measures it.
+    setTimeout(_hmFlushCharts, 0);
+  }
+  catch(e){
+    el.innerHTML='<div style="color:var(--red);padding:1rem">Could not build this view: '+e.message+'</div>';
+    try{ console.error('[hm render]',outId,e); }catch(_){}
+    _HM_CQ=[];            // drop anything queued by the half-built view
+  }
 }
 function rHmTutor(){
   _HM_SCOPE=_hmFill('hm-scope-tutor',_hmForms())||'all';
