@@ -9426,7 +9426,173 @@ function _hmSLT(){
     }
   })();
 
-  h+=_hmSection('Effort','nothing here yet');
+  // ══════════════════════════════════════════════════════════════════════════
+  //  EFFORT
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⚠️⚠️ EFFORT RUNS THE OPPOSITE WAY TO ABILITY. 1 IS BEST.
+  // _builtinEffortLevels() says so: "ascending -> 1 = best (common UK convention)".
+  // Ability rank is best-LAST (7 is top on TWS's reference scale). So every comparison
+  // between the two has to invert one of them, and every colour and every "improved /
+  // declined" test in this section is the reverse of the Ability section above.
+  // This is the single easiest thing to get wrong here, which is why it is stated at
+  // the top and repeated at each place it matters.
+  h+=_hmSection('Effort','1 is best \u2014 the reverse of the ability scale');
+
+  (function(){
+    const perE={};
+    Object.values(DD.progress||{}).forEach(ay=>{
+      Object.entries(ay||{}).forEach(([pk,rows])=>{
+        (rows||[]).forEach(r=>{
+          const sc=progCol(r,'scores')||{};
+          Object.entries(sc).forEach(([sk,c])=>{
+            const ef=(c&&c[1]!=null)?Number(c[1]):null;
+            if(ef==null||isNaN(ef)||!efValid(c[1]))return;
+            ((perE[pk]=perE[pk]||{})[r[0]]=perE[pk][r[0]]||[]).push({s:sk,e:ef});
+          });
+        });
+      });
+    });
+    const colls=Object.keys(perE).sort((a,b)=>PER.indexOf(a)-PER.indexOf(b));
+    if(!colls.length){
+      // Worth saying rather than leaving blank: at Green Abbey NO effort aspect carried
+      // any results at all, so an empty section here is a real possibility, not a fault.
+      h+=_hmPanel('Effort','No effort grades in this data. Some schools do not record '
+        +'effort at all, and some record it against aspects that carry no results \u2014 '
+        +'an empty section here is not necessarily a fault.','');
+      return;
+    }
+    const lastK=colls[colls.length-1], firstK=colls[0];
+    const lbl=k=>{ const i=PER.indexOf(k); return (i>=0&&CLBL[i])?CLBL[i]:k; };
+    const meanE=o=>(o&&o.length)?o.reduce((a,b)=>a+b.e,0)/o.length:null;
+    const LV=(EFFORT&&EFFORT.levels)?EFFORT.levels:[];
+    const nLv=LV.length||4;
+
+    // ── 1. SPREAD ──
+    const res=Object.values(perE[lastK]||{}).flat();
+    const pupils=Object.keys(perE[lastK]||{}).length;
+    const cnt={}; res.forEach(x=>cnt[x.e]=(cnt[x.e]||0)+1);
+    const mxE=Math.max(...Object.values(cnt))||1;
+    h+=_hmPanel('Effort grades awarded, '+lbl(lastK),
+      res.length.toLocaleString()+' grades across '+pupils+' pupils. Results, not pupils \u2014 a pupil '
+      +'appears once per subject. <strong>1 is the best grade</strong>, so the top row is the good one.',
+      LV.map((lv,i)=>{
+        const v=Number(lv.csv&&lv.csv[0]!=null?lv.csv[0]:i+1);
+        const n=cnt[v]||0;
+        return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+          +'<span style="width:150px;color:var(--tx2)">'
+            +'<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+(lv.colour||'var(--mu)')
+            +';margin-right:.35rem;vertical-align:middle"></span>'+(lv.label||v)+'</span>'
+          +'<span style="width:56px;text-align:right;font-weight:600">'+n+'</span>'
+          +'<span style="flex:1;min-width:120px"><div style="max-width:260px">'+_hmBar(100*n/mxE,'ok')+'</div></span>'
+          +'<span style="width:48px;text-align:right;color:var(--tx2)">'+Math.round(100*n/(res.length||1))+'%</span></div>';
+      }).join(''));
+
+    // ── 2. MOVEMENT ── (inverted: a FALL in the number is an IMPROVEMENT)
+    if(colls.length>1){
+      let up=0,down=0,same=0,both=0;
+      Object.keys(perE[lastK]||{}).forEach(p=>{
+        const a=meanE(perE[firstK]&&perE[firstK][p]), b=meanE(perE[lastK][p]);
+        if(a==null||b==null)return;
+        both++;
+        const d=b-a;                       // NEGATIVE = moved towards 1 = BETTER
+        if(d<-0.25)up++; else if(d>0.25)down++; else same++;
+      });
+      if(both){
+        h+=_hmPanel('Movement, '+lbl(firstK)+' to '+lbl(lastK),
+          'Change in a pupil\u2019s mean effort grade across their own subjects, for the '+both
+          +' pupils graded in both. A move of less than a quarter of a grade counts as unchanged. '
+          +'⚠️ <strong>Effort improves as the number falls</strong>, so \u201cimproved\u201d here means a '
+          +'lower mean \u2014 the reverse of the Ability section.',
+          '<div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.72rem">'
+          +[['Improved',up,'var(--green)'],['Unchanged',same,'var(--tx2)'],['Declined',down,'var(--red)']]
+            .map(c=>'<div style="flex:1;min-width:130px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.45rem .6rem">'
+              +'<div style="font-size:.66rem;color:var(--tx2)">'+c[0]+'</div>'
+              +'<div style="font-size:1.15rem;font-weight:600;color:'+c[2]+'">'+c[1]
+              +' <span style="font-size:.66rem;font-weight:500;color:var(--tx2)">'
+              +Math.round(100*c[1]/both)+'%</span></div></div>').join('')
+          +'</div>');
+      }
+    }
+
+    // ── 3. EFFORT AGAINST ATTAINMENT ──
+    // The quadrant view heads of department ask for. Four counts, not a scatter: with
+    // 236 pupils across 20 subjects a scatter is an unreadable cloud, and the question
+    // is "how many are in each quadrant", not "where is this dot".
+    const abOfP={};
+    Object.values(DD.progress||{}).forEach(ay=>Object.entries(ay||{}).forEach(([pk,rows])=>{
+      if(pk!==lastK)return;
+      (rows||[]).forEach(r=>{
+        const sc=progCol(r,'scores')||{};
+        let sum=0,n=0;
+        Object.values(sc).forEach(c=>{ const rk=abRk(c); if(rk){sum+=rk;n++;} });
+        if(n)abOfP[r[0]]=sum/n;
+      });
+    }));
+    const pairs=[];
+    Object.entries(perE[lastK]||{}).forEach(([p,o])=>{
+      const e=meanE(o), a=abOfP[p];
+      if(e!=null&&a!=null)pairs.push({p:p,e:e,a:a});
+    });
+    if(pairs.length>=20){
+      const medE=pairs.map(x=>x.e).sort((a,b)=>a-b)[Math.floor(pairs.length/2)];
+      const medA=pairs.map(x=>x.a).sort((a,b)=>a-b)[Math.floor(pairs.length/2)];
+      // effort: LOWER is better, so "high effort" is e <= median
+      const q={hiEhiA:0,hiEloA:0,loEhiA:0,loEloA:0};
+      pairs.forEach(x=>{
+        const hiE=x.e<=medE, hiA=x.a>=medA;
+        if(hiE&&hiA)q.hiEhiA++; else if(hiE&&!hiA)q.hiEloA++;
+        else if(!hiE&&hiA)q.loEhiA++; else q.loEloA++;
+      });
+      const cell=(t,n,note,tone)=>'<div style="flex:1;min-width:150px;background:var(--sf);border:1px solid var(--bd);'
+        +'border-radius:8px;padding:.5rem .6rem">'
+        +'<div style="font-size:.66rem;color:var(--tx2)">'+t+'</div>'
+        +'<div style="font-size:1.25rem;font-weight:600;color:'+tone+'">'+n
+        +' <span style="font-size:.66rem;font-weight:500;color:var(--tx2)">'+Math.round(100*n/pairs.length)+'%</span></div>'
+        +'<div style="font-size:.64rem;color:var(--tx2);margin-top:.15rem">'+note+'</div></div>';
+      h+=_hmPanel('Effort against attainment, '+lbl(lastK),
+        'Each pupil\u2019s mean effort and mean ability rank, split at the median of each \u2014 '
+        +pairs.length+' pupils with both. Medians, not fixed thresholds, so the split follows '
+        +'this cohort rather than an assumption. <strong>Counts, not a scatter</strong>: with '
+        +pairs.length+' pupils across '+Object.keys(DD.subjectKeys||{}).length
+        +' subjects a scatter is a cloud, and the question is how many sit in each quadrant.',
+        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.5rem">'
+        +cell('Higher effort, higher attainment',q.hiEhiA,'working and achieving','var(--green)')
+        +cell('Higher effort, lower attainment',q.hiEloA,'trying \u2014 needs support, not pressure','var(--orange)')
+        +'</div><div style="display:flex;gap:.6rem;flex-wrap:wrap">'
+        +cell('Lower effort, higher attainment',q.loEhiA,'coasting \u2014 capable of more','var(--orange)')
+        +cell('Lower effort, lower attainment',q.loEloA,'the group most at risk','var(--red)')
+        +'</div>');
+    }
+
+    // ── 4. BY SUBJECT ── (inverted: a LOWER mean is better)
+    const subj={};
+    Object.values(perE[lastK]||{}).forEach(o=>o.forEach(x=>(subj[x.s]=subj[x.s]||[]).push(x.e)));
+    const SKR2=DD.subjectKeys?Object.fromEntries(Object.entries(DD.subjectKeys).map(([k,v])=>[v,k])):{};
+    const rows=Object.entries(subj).filter(e=>e[1].length>=8)
+      .map(([sk,v])=>({s:SKR2[sk]||sk,n:v.length,m:v.reduce((a,b)=>a+b,0)/v.length}))
+      .sort((a,b)=>b.m-a.m);               // worst (highest number) first
+    if(rows.length){
+      const schoolMean=res.length?res.reduce((a,b)=>a+b.e,0)/res.length:0;
+      const mxR=Math.max(...rows.map(r=>r.m))||1;
+      h+=_hmPanel('Mean effort grade by subject, '+lbl(lastK),
+        'Against the school mean of <strong>'+schoolMean.toFixed(2)+'</strong>. '
+        +'⚠️ <strong>Lower is better</strong>, so this list is worst first and a positive '
+        +'difference is bad \u2014 the reverse of the subject table in Ability. '
+        +'Subjects with fewer than 8 grades are omitted.',
+        rows.map(r=>{
+          const off=r.m-schoolMean;        // POSITIVE = worse
+          return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.28rem;font-size:.72rem">'
+            +'<span style="width:150px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.s+'</span>'
+            +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+r.n+'</span>'
+            +'<span style="flex:1;min-width:120px"><div style="max-width:240px">'
+              +_hmBar(100*r.m/mxR,off>0.3?'bad':off>0.1?'warn':'ok')+'</div></span>'
+            +'<span style="width:44px;text-align:right;font-variant-numeric:tabular-nums">'+r.m.toFixed(2)+'</span>'
+            +'<span style="width:52px;text-align:right;color:'+(off>0?'var(--red)':'var(--green)')+'">'
+              +(off>=0?'+':'')+off.toFixed(2)+'</span></div>';
+        }).join(''));
+    }
+  })();
+
 
   // ══════════════════════════════════════════════════════════════════════════
   //  GAPS — the cross-domain comparison
