@@ -9278,7 +9278,154 @@ function _hmSLT(){
 
   })();
 
-  h+=_hmSection('Ability','nothing here yet');
+  // ══════════════════════════════════════════════════════════════════════════
+  //  ABILITY
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⚠️ EVERYTHING HERE AGGREGATES ON abilityRank, NEVER ON RAW GRADES.
+  // Subjects sit on different scales — a "6" in one and a "B" in another are not the
+  // same thing and averaging them is meaningless. abRk() resolves each result onto the
+  // school's reference scale, which is the only axis on which they are comparable.
+  // There is deliberately NO per-pupil composite score across subjects: a pupil taking
+  // Further Maths and one taking BTEC Sport have no comparable position to average.
+  // Distribution, not composite.
+  h+=_hmSection('Ability','ranked on the school\u2019s reference scale, never on raw grades');
+
+  (function(){
+    const REF=_refLevels();
+    const bands=REF?REF.length:7;
+
+    // pupil -> { subject -> rank } for the LATEST collection that has data, plus the
+    // first, so movement can be read without inventing a trend from three points.
+    const perColl={};                       // collection key -> { px -> [ranks] }
+    Object.values(DD.progress||{}).forEach(ay=>{
+      Object.entries(ay||{}).forEach(([pk,rows])=>{
+        (rows||[]).forEach(r=>{
+          const sc=progCol(r,'scores')||{};
+          Object.entries(sc).forEach(([sk,c])=>{
+            const rk=abRk(c); if(!rk)return;
+            ((perColl[pk]=perColl[pk]||{})[r[0]]=perColl[pk][r[0]]||[]).push({s:sk,r:rk});
+          });
+        });
+      });
+    });
+    const colls=Object.keys(perColl).sort((a,b)=>(PER.indexOf(a)-PER.indexOf(b)));
+    if(!colls.length){
+      h+=_hmPanel('Ability','No graded results in this data. Nothing to show yet.','');
+      return;
+    }
+    const lastK=colls[colls.length-1], firstK=colls[0];
+    const lbl=k=>{ const i=PER.indexOf(k); return (i>=0&&CLBL[i])?CLBL[i]:k; };
+    const meanRk=o=>{ if(!o||!o.length)return null; return o.reduce((a,b)=>a+b.r,0)/o.length; };
+
+    // ── 1. COVERAGE, FIRST ──
+    // Without this every figure below describes part of the school while appearing to
+    // describe all of it. At TWS the reports are Year 10 only — 236 of 478.
+    const covered=Object.keys(perColl[lastK]||{});
+    const byYear={}, allYear={};
+    all.forEach(p=>{ const y=(DD.registry[String(p)]||{}).year||'\u2014'; allYear[y]=(allYear[y]||0)+1; });
+    covered.forEach(p=>{ const y=(DD.registry[String(p)]||{}).year||'\u2014'; byYear[y]=(byYear[y]||0)+1; });
+    const yrs=Object.keys(allYear).sort();
+    h+=_hmPanel('Coverage',
+      '<strong>'+covered.length+' of '+all.length+' pupils</strong> have a graded result in '
+      +lbl(lastK)+'. Every figure in this section describes those pupils only.',
+      yrs.map(y=>{
+        const n=byYear[y]||0, t=allYear[y];
+        return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+          +'<span style="width:150px;color:var(--tx2)">'+y+'</span>'
+          +'<span style="width:74px;text-align:right;color:'+(n?'var(--tx)':'var(--red)')+'">'+n+' of '+t+'</span>'
+          +'<span style="flex:1;min-width:120px"><div style="max-width:260px">'
+            +_hmBar(100*n/(t||1),n===0?'bad':n<t*0.8?'warn':'ok')+'</div></span>'
+          +'<span style="width:48px;text-align:right;color:var(--tx2)">'+Math.round(100*n/(t||1))+'%</span></div>';
+      }).join(''));
+
+    // ── 2. SPREAD ACROSS THE REFERENCE SCALE ──
+    // Same argument as attendance: a mean hides whether the school is bunched or split.
+    const dist=new Array(bands+1).fill(0);
+    let nRes=0;
+    Object.values(perColl[lastK]||{}).forEach(o=>o.forEach(x=>{
+      const b=Math.round(x.r); if(b>=1&&b<=bands){dist[b]++;nRes++;}
+    }));
+    if(nRes){
+      const mxD=Math.max(...dist)||1;
+      h+=_hmPanel('Where results sit on the reference scale',
+        'All '+nRes.toLocaleString()+' graded results in '+lbl(lastK)+', by reference band. '
+        +'Results, not pupils \u2014 a pupil appears once per subject. '
+        +'⚠️ Ranked on the reference scale, so subjects on different grading scales are comparable; '
+        +'the raw grades are not.',
+        (REF||[]).map((lv,i)=>{
+          const b=i+1, n=dist[b]||0;
+          return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+            +'<span style="width:150px;color:var(--tx2)" title="'+lv.label+'">'
+              +'<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+lv.colour
+              +';margin-right:.35rem;vertical-align:middle"></span>'+lv.label+'</span>'
+            +'<span style="width:56px;text-align:right;font-weight:600">'+n+'</span>'
+            +'<span style="flex:1;min-width:120px"><div style="max-width:260px">'+_hmBar(100*n/mxD,'ok')+'</div></span>'
+            +'<span style="width:48px;text-align:right;color:var(--tx2)">'+Math.round(100*n/nRes)+'%</span></div>';
+        }).join(''));
+    }
+
+    // ── 3. MOVEMENT, FIRST COLLECTION TO LATEST ──
+    // Three collections does not support a trend line. Counts of direction do.
+    if(colls.length>1){
+      let up=0,down=0,same=0,both=0;
+      Object.keys(perColl[lastK]||{}).forEach(p=>{
+        const a=meanRk(perColl[firstK]&&perColl[firstK][p]), b=meanRk(perColl[lastK][p]);
+        if(a==null||b==null)return;
+        both++;
+        const d=b-a;
+        if(d>0.25)up++; else if(d<-0.25)down++; else same++;
+      });
+      if(both){
+        h+=_hmPanel('Movement, '+lbl(firstK)+' to '+lbl(lastK),
+          'Change in a pupil\u2019s mean rank across their own subjects, for the '+both
+          +' pupils with results in both collections. A move of less than a quarter of a band '
+          +'counts as unchanged. <strong>Not a trend</strong> \u2014 '+colls.length
+          +' collections is too few for that; these are counts of direction.',
+          '<div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.72rem">'
+          +[['Improved',up,'var(--green)'],['Unchanged',same,'var(--tx2)'],['Declined',down,'var(--red)']]
+            .map(c=>'<div style="flex:1;min-width:130px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.45rem .6rem">'
+              +'<div style="font-size:.66rem;color:var(--tx2)">'+c[0]+'</div>'
+              +'<div style="font-size:1.15rem;font-weight:600;color:'+c[2]+'">'+c[1]
+              +' <span style="font-size:.66rem;font-weight:500;color:var(--tx2)">'
+              +Math.round(100*c[1]/both)+'%</span></div></div>').join('')
+          +'</div>');
+      }
+    }
+
+    // ── 4. BY SUBJECT ──
+    // The one heads of department ask for. Mean rank per subject against the school's
+    // own mean, so it reads as "relative to us" rather than an absolute judgement.
+    const subj={};
+    Object.values(perColl[lastK]||{}).forEach(o=>o.forEach(x=>{
+      (subj[x.s]=subj[x.s]||[]).push(x.r);
+    }));
+    const SKR=DD.subjectKeys?Object.fromEntries(Object.entries(DD.subjectKeys).map(([k,v])=>[v,k])):{};
+    const rows=Object.entries(subj)
+      .filter(e=>e[1].length>=8)                      // a subject of 3 pupils is noise
+      .map(([sk,v])=>({s:SKR[sk]||sk,n:v.length,m:v.reduce((a,b)=>a+b,0)/v.length}))
+      .sort((a,b)=>a.m-b.m);
+    if(rows.length){
+      const schoolMean=nRes?Object.values(subj).flat().reduce((a,b)=>a+b,0)/Object.values(subj).flat().length:0;
+      const mxS=Math.max(...rows.map(r=>r.m))||1;
+      h+=_hmPanel('Mean rank by subject, '+lbl(lastK),
+        'Against the school mean of <strong>'+schoolMean.toFixed(1)+'</strong>. Lowest first. '
+        +'Subjects with fewer than 8 results are omitted \u2014 a handful of pupils moves a mean. '
+        +'⚠️ This compares subjects on the REFERENCE scale, which flattens how hard each '
+        +'qualification is; read it as \u201crelative to this school\u201d, not as difficulty.',
+        rows.map(r=>{
+          const off=r.m-schoolMean;
+          return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.28rem;font-size:.72rem">'
+            +'<span style="width:150px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.s+'</span>'
+            +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+r.n+'</span>'
+            +'<span style="flex:1;min-width:120px"><div style="max-width:240px">'
+              +_hmBar(100*r.m/mxS,off<-0.5?'bad':off<-0.15?'warn':'ok')+'</div></span>'
+            +'<span style="width:44px;text-align:right;font-variant-numeric:tabular-nums">'+r.m.toFixed(1)+'</span>'
+            +'<span style="width:52px;text-align:right;color:'+(off<0?'var(--red)':'var(--green)')+'">'
+              +(off>=0?'+':'')+off.toFixed(1)+'</span></div>';
+        }).join(''));
+    }
+  })();
+
   h+=_hmSection('Effort','nothing here yet');
 
   // ══════════════════════════════════════════════════════════════════════════
