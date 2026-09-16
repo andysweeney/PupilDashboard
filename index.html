@@ -9566,7 +9566,22 @@ function _hmSLT(){
     if(!base.length){ h+=_hmPanel('Gaps','No comparison group (pupils with no FSM, SEN or EHCP), so no gap can be shown.',''); return; }
 
     // ── the three measures, each as "x vs the comparison group" ──
+    // ── MEDIAN LEADS, MEAN ALONGSIDE ──
+    // Sanctions are heavily skewed at group level: the EHCP-only group has a MEDIAN of 0
+    // and a MEAN of 14.5, because two pupils on 70 and 105 carry the average while most
+    // of the group receives nothing. Mean and median answer different questions —
+    // "how much volume does this group attract per head" versus "what does a typical
+    // pupil in this group experience" — and for EHCP they disagree in DIRECTION: worse
+    // than baseline on the mean, better on the median. Both are true. A panel showing
+    // only one is misleading whichever it picks.
+    // Winsorised was considered and rejected HERE (it is still right for the whole-school
+    // panels): trimming 10% of a 15-pupil group removes one value at each end, so it
+    // barely differs from the mean while being the hardest of the three to explain.
     const meanOf=(list,f)=>{ const v=list.map(f).filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
+    const medOf=(list,f)=>{ const v=list.map(f).filter(x=>x!=null).sort((a,b)=>a-b);
+      if(!v.length)return null;
+      const m=v.length>>1;
+      return v.length%2?v[m]:(v[m-1]+v[m])/2; };
 
     // attendance: percentage points, higher is better
     const attOf=p=>pctOf(p);
@@ -9596,12 +9611,21 @@ function _hmSLT(){
 
     const cols=[];
     MEAS.forEach(m=>{
-      const baseVal=meanOf(base,m.f);
-      const rows=[{k:'__all',label:'All pupils',n:all.length,v:meanOf(all,m.f)}]
-        .concat(order.filter(k=>grp[k].length).map(k=>({k:k,label:labels[k],n:grp[k].length,v:meanOf(grp[k],m.f)})))
-        .map(r=>Object.assign(r,{gap:(r.v==null||baseVal==null)?null:r.v-baseVal}));
-      const covered=rows.reduce((a,r)=>a+(r.v!=null?r.n:0),0);
-      cols.push({m:m,base:baseVal,rows:rows,covered:covered});
+      const baseMed=medOf(base,m.f), baseMean=meanOf(base,m.f);
+      const mk=(k,label,list)=>{
+        const med=medOf(list,m.f), mn=meanOf(list,m.f);
+        return {k:k,label:label,n:list.length,med:med,mean:mn,
+                gap:(med==null||baseMed==null)?null:med-baseMed,
+                gapMean:(mn==null||baseMean==null)?null:mn-baseMean};
+      };
+      const rows=[mk('__all','All pupils',all)]
+        .concat(order.filter(k=>grp[k].length).map(k=>mk(k,labels[k],grp[k])));
+      // the finding worth flagging: median and mean pointing OPPOSITE ways means a few
+      // pupils are carrying the group's average, not that the group as a whole differs
+      rows.forEach(r=>{ r.split=(r.gap!=null&&r.gapMean!=null&&r.k!=='neither'
+        &&Math.sign(r.gap)!==Math.sign(r.gapMean)&&(r.gap!==0||r.gapMean!==0)); });
+      cols.push({m:m,base:baseMed,baseMean:baseMean,rows:rows,
+                 covered:rows.reduce((a,r)=>a+(r.med!=null?r.n:0),0)});
     });
 
     // shared row order and a per-measure scale, since the units differ
@@ -9614,8 +9638,13 @@ function _hmSLT(){
       if(r.gap==null)return '<span style="color:var(--mu)">\u2014</span>';
       if(r.k==='neither')return '<span style="color:var(--mu)">baseline</span>';
       const worse=(c.m.better==='high')?(r.gap<0):(r.gap>0);
+      const mn=r.gapMean==null?'':((r.gapMean>0?'+':'')+r.gapMean.toFixed(1));
       return '<span style="color:'+(worse?'var(--red)':'var(--green)')+'">'
-        +(r.gap>0?'+':'')+r.gap.toFixed(1)+c.m.unit+'</span>';
+          +(r.gap>0?'+':'')+r.gap.toFixed(1)+c.m.unit+'</span>'
+        +(mn?'<div style="font-size:.6rem;font-weight:400;color:'
+          +(r.split?'var(--orange)':'var(--mu)')+'" title="mean gap'
+          +(r.split?' \u2014 points the OPPOSITE way to the median, so a few pupils are carrying this group\u2019s average':'')
+          +'">'+(r.split?'\u26a0\ufe0f ':'')+'mean '+mn+'</div>':'');
     };
     const cellBar=(r,c,mx)=>{
       if(r.gap==null)return '';
@@ -9629,6 +9658,7 @@ function _hmSLT(){
           +(r.gap<0?('right:50%;width:'+pct/2+'%'):('left:50%;width:'+pct/2+'%'))+'"></span></span>';
     };
     const mxOf=c=>Math.max(...c.rows.map(r=>r.gap).filter(v=>v!=null).map(Math.abs))||1;
+    const anySplit=cols.some(c=>c.rows.some(r=>r.split));
     const order2=[{k:'__all',label:'All pupils',n:all.length}]
       .concat(order.filter(k=>grp[k].length).map(k=>({k:k,label:labels[k],n:grp[k].length})));
 
@@ -9638,7 +9668,8 @@ function _hmSLT(){
         +'<th style="text-align:right;font-weight:500;color:var(--tx2);padding:0 .5rem .2rem 0"></th>'
         +cols.map(c=>'<th colspan="2" style="text-align:left;font-weight:600;padding:0 .5rem .1rem;'
           +'border-left:1px solid var(--bd)">'+c.m.title
-          +'<div style="font-weight:400;font-size:.62rem;color:var(--tx2)">'+c.m.note+'</div></th>').join('')
+          +'<div style="font-weight:400;font-size:.62rem;color:var(--tx2)">median vs baseline \u00b7 '
+          +c.m.note+'</div></th>').join('')
       +'</tr>'
       +order2.map((o,i)=>'<tr'+(i===0?' style="font-weight:600"':'')+'>'
         +'<td style="padding:.18rem .4rem .18rem 0;white-space:nowrap;color:var(--tx2)">'+o.label+'</td>'
@@ -9668,7 +9699,13 @@ function _hmSLT(){
       +'<strong>Read across the row.</strong> A gap alone does not say what to do about it: '
       +'attainment low <em>and</em> attendance low points at attendance as the lever; attainment low '
       +'with attendance level and sanctions high points at the sanction system rather than the pupils. '
-      +'Units differ by column, so compare within a column, not between.',
+      +'Units differ by column, so compare within a column, not between. '
+      +'<strong>The headline figure is the MEDIAN gap</strong> \u2014 what a typical pupil in the '
+      +'group experiences. The mean sits under it in small type, because the two answer different '
+      +'questions and on skewed data they disagree: the EHCP group has a median of 0 sanctions and '
+      +'a mean of 14.5, since most receive none and two pupils carry the average.'
+      +(anySplit?' \u26a0\ufe0f An amber mean points the OPPOSITE way to the median \u2014 that group\u2019s '
+        +'average is being carried by a few pupils rather than describing the group.':''),
       tbl);
 
     // ── EFFORT AGAINST ATTAINMENT, BY GROUP ──
