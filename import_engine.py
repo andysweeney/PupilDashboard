@@ -1635,7 +1635,16 @@ house_points = []
 _hp_unknown_types = set()
 for df_hp in hp_dfs:
     for _, row in df_hp.iterrows():
-        atype = str(row.get('Achievement Type', '')).strip()
+        # ⚠️ str(NaN) is the STRING "nan", which is truthy — so the default below never
+        # fired for a file with no Achievement Type column, and every such row was
+        # counted as an unknown type and dropped. TWS's Year 11 house point exports
+        # carry only Name and Event Date, so ALL of them were discarded: every house
+        # point half the school has ever earned, silently, with the only trace being
+        # 'nan' appearing in the "ignored achievement types" list.
+        _raw = row.get('Achievement Type', '')
+        atype = '' if _raw is None or (isinstance(_raw, float) and _raw != _raw) else str(_raw).strip()
+        if atype.lower() in ('nan', 'none', 'nat'):
+            atype = ''
         if not atype:
             atype = HP_TYPES[0] if HP_TYPES else 'House Point'   # a plain HP export (no type column) = a standard house point
         if atype not in HP_TYPES:
@@ -1992,6 +2001,16 @@ output = {
         # every grid in this file is len(ttDays) x ttPeriods.
         "ttDays": DAY_NAMES,
         "ttPeriods": N_PER,
+        # ── SELF-DESCRIBING ROW SHAPE ──
+        # progress rows are POSITIONAL arrays, and the row length has changed between
+        # engine versions (7 elements when the pupil id was kept, 6 since it was
+        # dropped). Two readers in index.html ended up assuming different lengths, so
+        # the Pupil tab and the SLT tab reported different SEN status for the SAME
+        # pupil — and because an empty scores object is TRUTHY in JavaScript, the
+        # misaligned reader silently flagged every pupil as SEND rather than failing.
+        # Declaring the column order here means a reader resolves positions by NAME
+        # and a future change to the row cannot silently break anything.
+        "progressCols": ["px", "reg", "scores", "send", "ehcp", "fsm"],
         # DfE academic week anchor. The browser needs this to label a week the same
         # way the national figures do — a school's first teaching day is NOT week 1
         # (TWS starts on DfE week 5). Week n begins dfeWeek1 + 7*(n-1) days.
