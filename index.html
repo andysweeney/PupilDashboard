@@ -8589,20 +8589,11 @@ function _hmSLT(){
   const conBy={};
   order.forEach(k=>{ conBy[k]=conRate(grp[k])||0; });
 
-  // The five groups above are mutually exclusive, so FSM is split between 'fsm' and
-  // 'both' and nothing shows FSM AS A WHOLE. The FSM gap card at the top of this tab
-  // uses all FSM pupils, so without this row the card and the panel disagree.
-  // These two rows OVERLAP the ones above and are shown separately for that reason.
-  const anyFsm=[...grp.fsm,...grp.both];
-  const anySen=[...grp.sen,...grp.ehcp,...grp.both];
-  const summary=[
-    ['Any FSM',anyFsm,'includes FSM pupils who are also SEN'],
-    ['Any SEN or EHCP',anySen,'includes SEN pupils who are also FSM'],
-    ['No FSM, SEN or EHCP',grp.neither,'the comparison group']
-  ].filter(r=>r[1].length);
-
-  const allRates=[...Object.values(conBy),...summary.map(r=>conRate(r[1])||0)];
-  const mxC=Math.max(...allRates)||1;
+  // Overlapping "Any FSM" / "Any SEN" summary rows were removed: being a weighted
+  // blend of the exclusive groups they can only ever sit between the extremes, so
+  // they flattened the striking figure (FSM-with-need) and cost two sentences
+  // explaining that rows overlapped. The exclusive breakdown carries more.
+  const mxC=Math.max(...Object.values(conBy))||1;
   const bar=(name,rate,n,note)=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
       +'<span style="width:150px;color:var(--tx2)"'+(note?' title="'+note+'"':'')+'>'+name+'</span>'
       +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+n+'</span>'
@@ -8611,14 +8602,61 @@ function _hmSLT(){
 
   h+=_hmPanel('Pupils triggering a concern, by group',
     'Using the school\u2019s own Concerns thresholds rather than a raw count. '
-    +'The first three rows overlap \u2014 an FSM pupil with SEN is counted in both. '
-    +'<strong>Groups are \u201cever\u201d, not \u201cnow\u201d</strong>: a pupil flagged FSM, SEN or EHCP '
-    +'at any point in the data counts here, even if the flag has since lapsed. The Pupil '
-    +'tab shows current status, so the two can differ.',
-    summary.map(r=>bar(r[0],conRate(r[1]),r[1].length,r[2])).join('')
-    +'<div style="height:.45rem;border-top:1px solid var(--bd);margin:.45rem 0 .4rem"></div>'
-    +'<div style="font-size:.66rem;color:var(--tx2);margin-bottom:.35rem">Broken down, no pupil counted twice</div>'
-    +order.filter(k=>grp[k].length).map(k=>bar(labels[k],conBy[k],grp[k].length,'')).join(''));
+    +'No pupil is counted twice. <strong>Groups are \u201cever\u201d, not \u201cnow\u201d</strong>: a '
+    +'pupil flagged FSM, SEN or EHCP at any point in the data counts here, even if the '
+    +'flag has since lapsed. The Pupil tab shows current status, so the two can differ.',
+    order.filter(k=>grp[k].length).map(k=>bar(labels[k],conBy[k],grp[k].length,'')).join(''));
+
+  // ── WHICH concerns are firing ──
+  // 64% of pupils with no flags at all trigger something, which is the thresholds
+  // catching most of the school rather than identifying a group. This breaks the
+  // total down by type so a threshold can be moved and the effect seen, rather than
+  // tuning blind. Counts PUPILS and INSTANCES separately: subj-avoid fires per
+  // subject and sanc-conc per teacher, so one pupil can raise several of the same.
+  const mix={}, sevMix={};
+  let anyLive=0;
+  all.forEach(p=>{
+    const live=_hmItems(p).live;
+    if(live.length)anyLive++;
+    const seen=new Set();
+    live.forEach(it=>{
+      const k=it.label||it.type||'(unlabelled)';
+      if(!mix[k])mix[k]={pupils:0,items:0};
+      mix[k].items++;
+      if(!seen.has(k)){mix[k].pupils++;seen.add(k);}
+      const sv=(it.severity||'').indexOf('red')>=0?'red':'amber';
+      if(!sevMix[k])sevMix[k]={red:0,amber:0};
+      sevMix[k][sv]++;
+    });
+  });
+  const mixRows=Object.entries(mix).sort((a,b)=>b[1].pupils-a[1].pupils);
+  if(mixRows.length){
+    const mxM=Math.max(...mixRows.map(r=>r[1].pupils))||1;
+    const mixBody='<table style="width:100%;border-collapse:collapse;font-size:.72rem">'
+      +'<tr style="color:var(--tx2);text-align:left">'
+      +'<th style="font-weight:500;padding:.2rem 0">Concern</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Pupils</th>'
+      +'<th style="font-weight:500;padding-left:.4rem">Share of the roll</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">% roll</th>'
+      +'<th style="font-weight:500;text-align:right">Instances</th>'
+      +'<th style="font-weight:500;text-align:right;padding-left:.5rem">Red</th></tr>'
+      +mixRows.map(([k,v])=>{
+        const pct=100*v.pupils/(all.length||1);
+        return '<tr><td style="padding:.25rem 0;white-space:nowrap">'+k+'</td>'
+          +'<td style="text-align:right;color:var(--tx2);padding:0 .5rem;width:48px">'+v.pupils+'</td>'
+          +'<td style="padding-left:.4rem"><div style="max-width:220px">'
+            +_hmBar(100*v.pupils/mxM,pct>50?'bad':pct>25?'warn':'ok')+'</div></td>'
+          +'<td style="text-align:right;width:48px">'+Math.round(pct)+'%</td>'
+          +'<td style="text-align:right;color:var(--tx2);width:62px">'+v.items+'</td>'
+          +'<td style="text-align:right;width:48px;color:'+((sevMix[k]||{}).red?'var(--red)':'var(--tx2)')+'">'
+            +((sevMix[k]||{}).red||0)+'</td></tr>';
+      }).join('')+'</table>';
+    h+=_hmPanel('Which concerns are firing',
+      Math.round(100*anyLive/(all.length||1))+'% of pupils ('+anyLive+' of '+all.length+') have at least one live concern. '
+      +'A type on more than about a quarter of the roll is probably set too sensitively \u2014 '
+      +'thresholds are in Admin \u2192 Concern thresholds. Instances exceed pupils where a concern '
+      +'fires per subject or per teacher. Dismissed items are excluded.',mixBody);
+  }
   h+=_hmPanel('Sanctions per pupil by group',
     'Unprepared means equipment, uniform or homework — the incidents a school can design out. '
     +'Groups are “ever”, not “now” — see above.',body);
