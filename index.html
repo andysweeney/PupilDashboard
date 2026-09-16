@@ -8540,8 +8540,12 @@ function _hmSLT(){
   // pupil -> group key, for anything that walks the sanction list rather than the roll
   const gOf={};
   Object.keys(grp).forEach(k=>grp[k].forEach(p=>{gOf[p]=k;}));
-  const tot={},un={};
+  const tot={},un={},hpt={};
   SAN.forEach((r,i)=>{ if(_hmDate(r)<ayStart)return; tot[r[0]]=(tot[r[0]]||0)+1; if(_hmIsUnprep(i))un[r[0]]=(un[r[0]]||0)+1; });
+  // House points on the same footing as sanctions. Every behaviour figure on this tab
+  // was negative while the school issues several times more positives than sanctions —
+  // 128,391 against 27,510 in the file. Same window, same per-pupil basis.
+  (DD.housePoints||[]).forEach(r=>{ if(_hmDate(r)<ayStart)return; hpt[r[0]]=(hpt[r[0]]||0)+1; });
   const sum=(list,m)=>list.reduce((a,p)=>a+(m[p]||0),0);
   const base=grp.neither.length?sum(grp.neither,tot)/grp.neither.length:0;
 
@@ -8588,10 +8592,7 @@ function _hmSLT(){
     // figure as the whole behaviour picture. The school issues several times more
     // positives than sanctions and the ratio is the number worth leading with.
     +(function(){
-        const ay0=ayStart;
-        const hpTot={};
-        (DD.housePoints||[]).forEach(r=>{const dt=_hmDate(r); if(dt>=ay0)hpTot[r[0]]=(hpTot[r[0]]||0)+1;});
-        const totalHP=all.reduce((a,p)=>a+(hpTot[p]||0),0);
+        const totalHP=all.reduce((a,p)=>a+(hpt[p]||0),0);
         const perS=totalSanc/(all.length||1), perH=totalHP/(all.length||1);
         const ratio=perS?perH/perS:0;
         return _hmCard('Positives per sanction',ratio?ratio.toFixed(1)+':1':'\u2014',
@@ -8648,28 +8649,40 @@ function _hmSLT(){
       +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Mean</th>'
       +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Winsorised</th>'
       +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Median</th>'
-      +'<th style="font-weight:500;text-align:right;padding-left:.5rem">% below mean</th></tr>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">% below mean</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem;border-left:1px solid var(--bd)">HP mean</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">HP Wins.</th>'
+      +'<th style="font-weight:500;text-align:right">Ratio</th></tr>'
       +mwRows.map(([lbl,list])=>{
         const vals=list.map(p=>tot[p]||0).sort((a,b)=>a-b);
         const m=vals.reduce((a,b)=>a+b,0)/vals.length;
         const w=_hmWinsorMean(vals)||0;
         const med=vals[Math.floor(vals.length/2)];
         const below=vals.filter(x=>x<m).length, pctB=100*below/vals.length;
+        const hv=list.map(p=>hpt[p]||0).sort((a,b)=>a-b);
+        const hm=hv.reduce((a,b)=>a+b,0)/hv.length, hw=_hmWinsorMean(hv)||0;
+        const ratio=m?hm/m:0;
         return '<tr><td style="padding:.25rem 0;white-space:nowrap">'+lbl+'</td>'
           +'<td style="text-align:right;color:var(--tx2);padding:0 .5rem;width:52px">'+list.length+'</td>'
           +'<td style="text-align:right;padding:0 .5rem;width:56px;font-weight:600">'+m.toFixed(1)+'</td>'
           +'<td style="text-align:right;padding:0 .5rem;width:74px">'+w.toFixed(1)+'</td>'
           +'<td style="text-align:right;padding:0 .5rem;width:56px;color:var(--tx2)">'+med+'</td>'
-          +'<td style="text-align:right;width:88px;color:'+(pctB>=75?'var(--red)':pctB>=65?'var(--orange)':'var(--tx2)')+'">'
-            +Math.round(pctB)+'%</td></tr>';
+          +'<td style="text-align:right;padding:0 .5rem;width:78px;color:'+(pctB>=75?'var(--red)':pctB>=65?'var(--orange)':'var(--tx2)')+'">'
+            +Math.round(pctB)+'%</td>'
+          +'<td style="text-align:right;padding:0 .5rem;width:56px;font-weight:600;border-left:1px solid var(--bd)">'+hm.toFixed(1)+'</td>'
+          +'<td style="text-align:right;padding:0 .5rem;width:74px">'+hw.toFixed(1)+'</td>'
+          +'<td style="text-align:right;width:56px;font-weight:600;color:'+(ratio<1?'var(--red)':ratio<2?'var(--orange)':'var(--green)')+'">'
+            +(ratio?ratio.toFixed(1)+':1':'\u2014')+'</td></tr>';
       }).join('')+'</table>';
-    h+=_hmPanel('Sanctions per pupil \u2014 mean, Winsorised mean and median',
+    h+=_hmPanel('Sanctions and house points per pupil',
       'The Winsorised mean pulls the top and bottom 10% in to the 10th and 90th percentile, '
       +'so a few very high-sanction pupils cannot carry the figure. '
       +'<strong>\u201c% below mean\u201d is the one to read</strong>: in an even spread it sits near '
       +'half, and the further above that it climbs the more the average is describing a small '
-      +'number of children rather than the group. Same groups as below \u2014 no pupil counted '
-      +'twice, and \u201cever\u201d rather than \u201cnow\u201d.',mwBody);
+      +'number of children rather than the group. <strong>Ratio is house points per '
+      +'sanction</strong> \u2014 below 1:1 a group receives more sanctions than positives. '
+      +'Same groups as below \u2014 no pupil counted twice, and \u201cever\u201d rather than '
+      +'\u201cnow\u201d.',mwBody);
   }
 
   h+=_hmPanel('Sanctions per pupil by group',
@@ -8695,8 +8708,12 @@ function _hmSLT(){
   // question for the school. The distinction is the difference between "this is what
   // the behaviour looks like" and "this map needs finishing".
   const UNCAT='__uncat', DET='__det';
+  // '__all' is a pseudo-group so the whole school appears as a reference row. It is
+  // NOT one of the exclusive groups — every incident is counted in it AND in its own
+  // group, which is why it sits above a rule rather than in the list.
+  const ALL='__all';
   const catTot={}, uncatSeen={};
-  order.forEach(k=>{ catTot[k]={}; });
+  order.concat([ALL]).forEach(k=>{ catTot[k]={}; });
   SAN.forEach((r,i)=>{
     const dt=_hmDate(r); if(dt<ayStart)return;
     const g=gOf[r[0]]; if(!g)return;
@@ -8720,38 +8737,46 @@ function _hmSLT(){
     else if(cat&&INC_BY_ID[cat]){ key=incCatKey(cat); }
     else { key=UNCAT; const t=det[0]||'(no code)'; uncatSeen[t]=(uncatSeen[t]||0)+1; }
     catTot[g][key]=(catTot[g][key]||0)+1;
+    catTot[ALL][key]=(catTot[ALL][key]||0)+1;
   });
   // "issued" in the label: a school may also have a CATEGORY called Detention for
   // codes about missed detentions, and two identically-named slices would be unreadable.
   const DET_CAT={id:'Detention issued',key:DET,color:PAL.plum||PAL.slate};
   const UNCAT_CAT={id:'Uncategorised',key:UNCAT,color:'var(--mu)'};
-  const catsUsed=INC_CATS.filter(c=>order.some(k=>catTot[k]&&catTot[k][c.key]))
-    .concat(order.some(k=>catTot[k][DET])?[DET_CAT]:[])
-    .concat(order.some(k=>catTot[k][UNCAT])?[UNCAT_CAT]:[]);
+  const catsUsed=INC_CATS.filter(c=>catTot[ALL]&&catTot[ALL][c.key])
+    .concat(catTot[ALL][DET]?[DET_CAT]:[])
+    .concat(catTot[ALL][UNCAT]?[UNCAT_CAT]:[]);
   // incCatTotal() only sums the eight known keys, so it would omit the uncategorised
   // slice and every bar would add to more than 100%. Sum whatever is actually there.
   const catSum=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
   const stackRows=order.filter(k=>grp[k].length>=5&&catSum(catTot[k]));
+  const allN=all.length;
   if(stackRows.length&&catsUsed.length){
     const legend='<div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.45rem;font-size:.66rem;color:var(--tx2)">'
       +catsUsed.map(c=>'<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
         +c.color+';margin-right:.25rem;vertical-align:middle"></span>'+c.id+'</span>').join('')+'</div>';
-    const cb=legend+stackRows.map(k=>{
-      const t=catSum(catTot[k])||1;
+    const mkRow=(label,n,ct)=>{
+      const t=catSum(ct)||1;
       const segs=catsUsed.map(c=>{
-        const n=catTot[k][c.key]||0; if(!n)return '';
-        const pct=100*n/t;
-        return '<span title="'+c.id+': '+n+' ('+Math.round(pct)+'%)" style="display:block;float:left;height:13px;'
+        const v=ct[c.key]||0; if(!v)return '';
+        const pct=100*v/t;
+        return '<span title="'+c.id+': '+v+' ('+Math.round(pct)+'%)" style="display:block;float:left;height:13px;'
           +'width:'+pct+'%;background:'+c.color+'"></span>';
       }).join('');
       return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.32rem;font-size:.72rem">'
-        +'<span style="width:150px;color:var(--tx2);white-space:nowrap">'+labels[k]+'</span>'
-        +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+grp[k].length+'</span>'
+        +'<span style="width:150px;color:var(--tx2);white-space:nowrap">'+label+'</span>'
+        +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+n+'</span>'
         +'<span style="flex:1;min-width:120px"><span style="display:block;overflow:hidden;border-radius:3px;background:var(--bd)">'
           +segs+'<span style="display:block;clear:both"></span></span></span>'
-        +'<span style="width:54px;text-align:right;color:var(--tx2)">'+t+'</span></div>';
+        +'<span style="width:54px;text-align:right;color:var(--tx2)">'+catSum(ct)+'</span></div>';
+    };
+    const cb=legend
+      +mkRow('All pupils',allN,catTot[ALL])
+      +'<div style="border-top:1px solid var(--bd);margin:.45rem 0 .4rem"></div>'
+      +stackRows.map(k=>{
+      return mkRow(labels[k],grp[k].length,catTot[k]);
     }).join('');
-    const catSumAll=order.reduce((a,k)=>a+(catTot[k][UNCAT]||0),0);
+    const catSumAll=catTot[ALL][UNCAT]||0;
     h+=_hmPanel('Sanction types by group',
       'The school\u2019s own incident categories, as a share of each group\u2019s sanctions since '
       +'September. Composition rather than a rate \u2014 a single pupil moves a mean, not a share. '
