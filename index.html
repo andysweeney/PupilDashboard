@@ -9018,40 +9018,50 @@ function _hmSLT(){
   // visible gap, because nobody checks a number that looks right.
   h+=_hmSection('Attendance','lesson-based \u2014 session figures arrive with the API');
 
-  (function(){
-    const sd=_hmSchoolDays();
-    if(!sd.length){ h+=_hmPanel('Attendance','No attendance data for this academic year.',''); return; }
-    const sched=sd.length*_hmPerPerDay();
-    // ── ONE PASS PER PUPIL, NOT FIVE ──
-    // pctOf() is needed for the distribution, twice for year-on-year and twice for the
-    // rolling window. Calling countAbsPeriods() each time rescans that pupil's whole
-    // absence list to filter by date — five full scans per pupil, about half of all the
-    // work this tab does. Build a sorted per-pupil list of absence DATES once, then a
-    // window is a binary-search slice. Same dedupe and suppression rules, so the
-    // figures are unchanged; the cost drops from O(5 x records) to O(records + log n).
-    const _absDates={};
-    Object.keys(DD.attAbsSubj||{}).forEach(px=>{
-      const supp=getSuppressed(px), seen=new Set(), ds=[];
-      (DD.attAbsSubj[px]||[]).forEach(r=>{
-        const key=r[0]+'|'+r[2];
-        if(supp.has(key)||seen.has(key))return;
-        seen.add(key); ds.push(r[0]);
-      });
-      ds.sort();
-      _absDates[px]=ds;
+  // ── SHARED ATTENDANCE INDEX ──
+  // Built once at _hmSLT scope, not inside the Attendance section: the Gaps section
+  // needs the same per-pupil percentages, and a second copy would both duplicate the
+  // index and drift from it. Hoisted after a ReferenceError — pctOf was defined inside
+  // the Attendance IIFE and invisible to everything else.
+  const sd=_hmSchoolDays();
+  const sched=sd.length*_hmPerPerDay();
+  // ── ONE PASS PER PUPIL, NOT FIVE ──
+  // pctOf() is needed for the distribution, twice for year-on-year and twice for the
+  // rolling window. Calling countAbsPeriods() each time rescans that pupil's whole
+  // absence list to filter by date — five full scans per pupil, about half of all the
+  // work this tab does. Build a sorted per-pupil list of absence DATES once, then a
+  // window is a binary-search slice. Same dedupe and suppression rules, so the
+  // figures are unchanged; the cost drops from O(5 x records) to O(records + log n).
+  const _absDates={};
+  Object.keys(DD.attAbsSubj||{}).forEach(px=>{
+    const supp=getSuppressed(px), seen=new Set(), ds=[];
+    (DD.attAbsSubj[px]||[]).forEach(r=>{
+      const key=r[0]+'|'+r[2];
+      if(supp.has(key)||seen.has(key))return;
+      seen.add(key); ds.push(r[0]);
     });
-    const _lowerBound=(arr,v)=>{ let lo=0,hi=arr.length; while(lo<hi){const m=(lo+hi)>>1; if(arr[m]<v)lo=m+1; else hi=m;} return lo; };
-    const _absIn=(px,a,b)=>{
-      const ds=_absDates[String(px)]; if(!ds||!ds.length)return 0;
-      return _lowerBound(ds,b+'\uffff')-_lowerBound(ds,a);
-    };
-    const pctOf=(px,a,b)=>{
-      const from=a||sd[0], to=b||sd[sd.length-1];
-      const days=sd.filter(d=>d>=from&&d<=to);
-      if(!days.length)return null;
-      const n=days.length*_hmPerPerDay();
-      return n>0?100-(_absIn(px,days[0],days[days.length-1])/n*100):null;
-    };
+    ds.sort();
+    _absDates[px]=ds;
+  });
+  const _lowerBound=(arr,v)=>{ let lo=0,hi=arr.length; while(lo<hi){const m=(lo+hi)>>1; if(arr[m]<v)lo=m+1; else hi=m;} return lo; };
+  const _absIn=(px,a,b)=>{
+    const ds=_absDates[String(px)]; if(!ds||!ds.length)return 0;
+    return _lowerBound(ds,b+'\uffff')-_lowerBound(ds,a);
+  };
+
+  // Shared by the Attendance section AND the Gaps section — declared here, not inside
+  // either, so there is one definition and one index behind it.
+  const pctOf=(px,a,b)=>{
+    if(!sd.length)return null;
+    const from=a||sd[0], to=b||sd[sd.length-1];
+    const days=sd.filter(d=>d>=from&&d<=to);
+    if(!days.length)return null;
+    const n=days.length*_hmPerPerDay();
+    return n>0?100-(_absIn(px,days[0],days[days.length-1])/n*100):null;
+  };
+
+  (function(){
+    if(!sd.length){ h+=_hmPanel('Attendance','No attendance data for this academic year.',''); return; }
     const cur=all.map(p=>pctOf(p)).filter(v=>v!=null);
 
     // ── 1. DISTRIBUTION ──
