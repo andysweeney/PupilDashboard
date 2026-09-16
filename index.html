@@ -9069,6 +9069,106 @@ function _hmSLT(){
     const recent=sd.slice(-W), prior=sd.slice(-2*W,-W);
     const roll=(recent.length>=W&&prior.length>=W)?shift(prior,recent):null;
 
+    // ── 3. WEEK BY WEEK, ACADEMIC YEARS OVERLAID ──
+    // x-axis is the DfE ACADEMIC WEEK NUMBER, not a calendar date. That is what makes
+    // the years comparable: week 12 is the same point of the school year whichever
+    // year it falls in, so the half terms, Christmas and Easter line up. Plotting
+    // calendar dates instead would offset every year by a few days and the dips would
+    // not coincide.
+    // DfE rule, same as the engine's dfe_week1_monday(): weeks run Mon-Sun anchored on
+    // 1 August. If 1 Aug is Mon-Thu week 1 is the week CONTAINING it; if Fri-Sun most
+    // of that week belongs to July, so week 1 starts the following Monday.
+    const dfeWeek1Mon=y=>{
+      const a=new Date(Date.UTC(y,7,1));                 // 1 August
+      const dow=(a.getUTCDay()+6)%7;                     // 0 = Monday
+      const m=new Date(a); m.setUTCDate(m.getUTCDate()-dow);
+      if(dow>3) m.setUTCDate(m.getUTCDate()+7);
+      return m;
+    };
+    const dfeWeekOf=iso=>{
+      const d=new Date(iso+'T12:00:00Z'), y=d.getUTCFullYear();
+      let ay=y; if(d<dfeWeek1Mon(y)) ay=y-1;
+      return {ay:ay, wk:Math.floor((d-dfeWeek1Mon(ay))/604800000)+1};
+    };
+
+    // One pass per pupil rather than per week: 149 weeks x 478 pupils of
+    // countAbsPeriodsWeek() would rescan each pupil's whole absence list every time.
+    // Same dedupe and suppression rules as countAbsPeriodsWeek.
+    const mondayOf=iso=>{
+      const d=new Date(iso+'T12:00:00'); d.setDate(d.getDate()-((d.getDay()+6)%7));
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    };
+    const absByWeek={};
+    Object.keys(DD.attAbsSubj||{}).forEach(px=>{
+      const supp=getSuppressed(px), seen=new Set();
+      (DD.attAbsSubj[px]||[]).forEach(r=>{
+        const key=r[0]+'|'+r[2];
+        if(supp.has(key)||seen.has(key))return;
+        seen.add(key);
+        const wk=mondayOf(r[0]);
+        absByWeek[wk]=(absByWeek[wk]||0)+1;
+      });
+    });
+
+    // Denominator: pupils with a timetable that year x lessons scheduled that week.
+    const WLK=DD.weekLessons||{}, TTB=DD.timetables||{};
+    const series={};
+    Object.keys(WLK).sort().forEach(wk=>{
+      const lessons=WLK[wk]||0; if(!lessons)return;
+      const {ay,wk:wn}=dfeWeekOf(wk);
+      const n=Object.keys(TTB[String(ay)]||{}).length;
+      if(!n)return;
+      const pct=100-((absByWeek[wk]||0)/(n*lessons)*100);
+      if(pct<0||pct>100)return;                          // a week with partial data
+      (series[ay]=series[ay]||{})[wn]=pct;
+    });
+    const years=Object.keys(series).sort();
+
+    if(years.length){
+      const id='hm-att-weeks';
+      const wkMin=Math.min(...years.flatMap(y=>Object.keys(series[y]).map(Number)));
+      const wkMax=Math.max(...years.flatMap(y=>Object.keys(series[y]).map(Number)));
+      const labels=[]; for(let w=wkMin;w<=wkMax;w++) labels.push(w);
+      const cols=[PAL.sky,PAL.orange,PAL.green,PAL.lilac,PAL.rose,PAL.teal];
+      const toggles=years.map((y,i)=>
+        '<label style="font-size:.7rem;margin-right:.7rem;white-space:nowrap;cursor:pointer">'
+        +'<input type="checkbox" data-attyr="'+y+'" checked style="vertical-align:middle;margin-right:.25rem">'
+        +'<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+cols[i%cols.length]
+        +';margin-right:.25rem;vertical-align:middle"></span>'+y+'/'+String(+y+1).slice(2)+'</label>').join('');
+      h+=_hmPanel('Attendance week by week, academic years overlaid',
+        'Whole school, by <strong>DfE academic week</strong> \u2014 week 1 is anchored on 1 August, so '
+        +'the same week number is the same point of the year and the half terms line up. '
+        +'Untick a year to hide it. \u26a0\ufe0f Lesson-based; a week with incomplete data is omitted '
+        +'rather than drawn as a dip.',
+        '<div style="margin-bottom:.4rem">'+toggles+'</div>'
+        +'<div style="height:240px"><canvas id="c-'+id+'"></canvas></div>');
+      _hmChart(()=>{
+        const el=document.getElementById('c-'+id); if(!el)return;
+        const ds=years.map((y,i)=>({label:y+'/'+String(+y+1).slice(2),
+          data:labels.map(w=>series[y][w]!=null?Math.round(series[y][w]*10)/10:null),
+          borderColor:cols[i%cols.length],backgroundColor:cols[i%cols.length],
+          borderWidth:2,pointRadius:0,pointHoverRadius:4,tension:.3,spanGaps:true}));
+        dc(id);
+        sc2(id,new Chart(el,{type:'line',data:{labels:labels,datasets:ds},options:{
+          responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+          plugins:{legend:{display:false},
+            tooltip:{callbacks:{title:c=>'Academic week '+c[0].label,
+                                label:c=>' '+c.dataset.label+': '+c.parsed.y+'%'}}},
+          scales:{x:{title:{display:true,text:'DfE academic week',color:_HM_TICK,font:{size:9}},
+                     ticks:{color:_HM_TICK,font:{size:8},maxTicksLimit:18},
+                     grid:{color:_HM_GRID},border:{color:_HM_BORDER}},
+                  y:{ticks:{color:_HM_TICK,font:{size:9},callback:v=>v+'%'},
+                     grid:{color:_HM_GRID},border:{color:_HM_BORDER}}}}}));
+        document.querySelectorAll('[data-attyr]').forEach(cb=>{
+          cb.onchange=()=>{
+            const ch=_c[id]; if(!ch)return;
+            const i=years.indexOf(cb.getAttribute('data-attyr'));
+            if(i>=0){ ch.data.datasets[i].hidden=!cb.checked; ch.update(); }
+          };
+        });
+      });
+    }
+
     h+=_hmPanel('Which direction are pupils moving',
       'Where pupils are <em>going</em>, not where they are \u2014 attendance is recoverable '
       +'early and rarely late, so a pupil who has just crossed below '+ATT_LOW+'% is the one '
