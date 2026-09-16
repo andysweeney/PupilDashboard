@@ -8583,24 +8583,22 @@ function _hmSLT(){
   // gap table asks, but through the lens the school has already calibrated.
   // ── MEAN vs WINSORISED MEAN, per group ──
   // The plain mean is dragged by a handful of very high-sanction pupils: with 27,510
-  // sanctions across 478 pupils a single child on 400 moves the school mean by most
-  // of a point. The Winsorised mean pulls the top and bottom 10% in to the 10th and
-  // 90th percentile rather than dropping them, so the denominator is unchanged and
-  // the figure describes the typical pupil. A LARGE GAP BETWEEN THE TWO IS ITSELF
-  // THE FINDING — it means the group's total is concentrated in a few children, and
-  // a mean quoted alone would misdescribe everyone else.
-  // Groups here OVERLAP by design (a pupil can be both FSM and SEN); this is about
-  // the shape of each population, not a partition of the roll.
-  const anyFsm2=[...grp.fsm,...grp.both];
-  const anySen2=[...grp.sen,...grp.ehcp,...grp.both];
-  const anyEhcp2=all.filter(p=>(F[String(p)]||{}).ehcp);
-  const mwRows=[
-    ['All pupils',all],
-    ['Any FSM',anyFsm2],
-    ['Any SEN or EHCP',anySen2],
-    ['EHCP',anyEhcp2],
-    ['No FSM, SEN or EHCP',grp.neither]
-  ].filter(r=>r[1].length);
+  // sanctions across 478 pupils, one child on 400 moves the school mean by most of a
+  // point. The Winsorised mean pulls the top and bottom 10% in to the 10th and 90th
+  // percentile rather than dropping them, so the denominator is unchanged.
+  //
+  // The third signal is "% below mean", and it is the plainest of the three. If 90%
+  // of a group sits below its own average, that average is describing one or two
+  // children rather than the group. A ratio of mean to Winsorised was tried first and
+  // dropped: with a 10% trim, TWO outliers in a group of ten survive the trim and
+  // drag both figures together, so a low ratio does not mean an even spread. The
+  // proportion below the mean has no such blind spot and needs no threshold to read.
+  //
+  // Same five exclusive groups as the panels below — deliberately. Two adjacent
+  // panels using different definitions of "FSM" is how a reader draws a wrong
+  // comparison without noticing.
+  const mwRows=[['All pupils',all]].concat(
+    order.filter(k=>grp[k].length).map(k=>[labels[k],grp[k]]));
   if(mwRows.length>1){
     const mwBody='<table style="width:100%;border-collapse:collapse;font-size:.72rem">'
       +'<tr style="color:var(--tx2);text-align:left">'
@@ -8608,25 +8606,29 @@ function _hmSLT(){
       +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Pupils</th>'
       +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Mean</th>'
       +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Winsorised</th>'
-      +'<th style="font-weight:500;text-align:right;padding-left:.5rem">Skew</th></tr>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Median</th>'
+      +'<th style="font-weight:500;text-align:right;padding-left:.5rem">% below mean</th></tr>'
       +mwRows.map(([lbl,list])=>{
-        const vals=list.map(p=>tot[p]||0);
+        const vals=list.map(p=>tot[p]||0).sort((a,b)=>a-b);
         const m=vals.reduce((a,b)=>a+b,0)/vals.length;
         const w=_hmWinsorMean(vals)||0;
-        const skew=w?m/w:0;
+        const med=vals[Math.floor(vals.length/2)];
+        const below=vals.filter(x=>x<m).length, pctB=100*below/vals.length;
         return '<tr><td style="padding:.25rem 0;white-space:nowrap">'+lbl+'</td>'
           +'<td style="text-align:right;color:var(--tx2);padding:0 .5rem;width:52px">'+list.length+'</td>'
           +'<td style="text-align:right;padding:0 .5rem;width:56px;font-weight:600">'+m.toFixed(1)+'</td>'
           +'<td style="text-align:right;padding:0 .5rem;width:74px">'+w.toFixed(1)+'</td>'
-          +'<td style="text-align:right;width:52px;color:'+(skew>=1.3?'var(--red)':skew>=1.15?'var(--orange)':'var(--tx2)')+'">'
-            +(skew?skew.toFixed(2)+'\u00d7':'\u2014')+'</td></tr>';
+          +'<td style="text-align:right;padding:0 .5rem;width:56px;color:var(--tx2)">'+med+'</td>'
+          +'<td style="text-align:right;width:88px;color:'+(pctB>=75?'var(--red)':pctB>=65?'var(--orange)':'var(--tx2)')+'">'
+            +Math.round(pctB)+'%</td></tr>';
       }).join('')+'</table>';
-    h+=_hmPanel('Sanctions per pupil \u2014 mean and Winsorised mean',
+    h+=_hmPanel('Sanctions per pupil \u2014 mean, Winsorised mean and median',
       'The Winsorised mean pulls the top and bottom 10% in to the 10th and 90th percentile, '
-      +'so a few very high-sanction pupils cannot carry the figure. <strong>Skew is mean \u00f7 '
-      +'Winsorised</strong>: above about 1.3 the group\u2019s total sits in a small number of '
-      +'children and the plain mean describes none of them well. Groups overlap \u2014 a pupil '
-      +'can be both FSM and SEN. \u201cEver\u201d, not \u201cnow\u201d.',mwBody);
+      +'so a few very high-sanction pupils cannot carry the figure. '
+      +'<strong>\u201c% below mean\u201d is the one to read</strong>: in an even spread it sits near '
+      +'half, and the further above that it climbs the more the average is describing a small '
+      +'number of children rather than the group. Same groups as below \u2014 no pupil counted '
+      +'twice, and \u201cever\u201d rather than \u201cnow\u201d.',mwBody);
   }
 
   // Rate of pupils with a live concern, per group.
