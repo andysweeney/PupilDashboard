@@ -8557,7 +8557,9 @@ function _hmSLT(){
   const labels={fsm:'FSM only',ehcp:'EHCP only',sen:'SEN only',
                 both:'FSM and either SEN or EHCP',neither:'None of the above'};
   const order=['fsm','ehcp','sen','both','neither'];
-  const mxU=Math.max(...order.map(k=>grp[k].length?sum(grp[k],un)/grp[k].length:0))||1;
+  // include the whole-school value: the All pupils row is drawn on this same scale
+  const mxU=Math.max(all.length?sum(all,un)/all.length:0,
+    ...order.map(k=>grp[k].length?sum(grp[k],un)/grp[k].length:0))||1;
   const body='<table style="width:100%;font-size:.72rem;border-collapse:collapse">'
     +'<tr style="color:var(--tx2);text-align:left">'
       +'<th style="font-weight:500;padding:.2rem 0">Group</th>'
@@ -8565,6 +8567,21 @@ function _hmSLT(){
       +'<th style="font-weight:500;padding-left:.4rem" colspan="2">Unprepared per pupil</th>'
       +'<th style="font-weight:500;text-align:right">All</th>'
       +'<th style="font-weight:500;text-align:right">vs base</th></tr>'
+    // Whole-school reference row first, then a rule, then the exclusive groups. Every
+    // pupil is in this row AND in their own group, so it sits apart rather than in the
+    // list. Its "vs base" is against the comparison group, like the others, so it reads
+    // as "the school as a whole is Nx the unflagged pupils".
+    +(function(){
+      const n=all.length, u=sum(all,un)/n, t=sum(all,tot)/n, ratio=base?t/base:0;
+      return '<tr><td style="padding:.25rem 0;white-space:nowrap;font-weight:600">All pupils</td>'
+        +'<td style="text-align:right;color:var(--tx2);padding:0 .5rem;width:38px">'+n+'</td>'
+        +'<td style="padding-left:.4rem"><div style="max-width:220px">'
+          +_hmBar(100*u/mxU,'ok')+'</div></td>'
+        +'<td style="text-align:right;color:var(--tx2);width:52px;white-space:nowrap">'+u.toFixed(1)+'</td>'
+        +'<td style="text-align:right;width:48px">'+t.toFixed(0)+'</td>'
+        +'<td style="text-align:right;width:56px;color:var(--tx2)">'+(ratio?ratio.toFixed(1)+'\u00d7':'\u2014')+'</td></tr>'
+        +'<tr><td colspan="6" style="padding:0"><div style="border-top:1px solid var(--bd);margin:.3rem 0"></div></td></tr>';
+    })()
     +order.filter(k=>grp[k].length).map(k=>{
       const n=grp[k].length, u=sum(grp[k],un)/n, t=sum(grp[k],tot)/n;
       const ratio=base?t/base:0;
@@ -8809,7 +8826,9 @@ function _hmSLT(){
   // blend of the exclusive groups they can only ever sit between the extremes, so
   // they flattened the striking figure (FSM-with-need) and cost two sentences
   // explaining that rows overlapped. The exclusive breakdown carries more.
-  const mxC=Math.max(...Object.values(conBy))||1;
+  // include the whole-school rate: the All pupils row is drawn on this same scale
+  const allConRate=conRate(all)||0;
+  const mxC=Math.max(allConRate,...Object.values(conBy))||1;
   const bar=(name,rate,n,note)=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
       +'<span style="width:150px;color:var(--tx2)"'+(note?' title="'+note+'"':'')+'>'+name+'</span>'
       +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+n+'</span>'
@@ -8821,7 +8840,11 @@ function _hmSLT(){
     +'No pupil is counted twice. <strong>Groups are \u201cever\u201d, not \u201cnow\u201d</strong>: a '
     +'pupil flagged FSM, SEN or EHCP at any point in the data counts here, even if the '
     +'flag has since lapsed. The Pupil tab shows current status, so the two can differ.',
-    order.filter(k=>grp[k].length).map(k=>bar(labels[k],conBy[k],grp[k].length,'')).join(''));
+    // Whole-school reference row, above a rule. Every pupil is counted here AND in
+    // their own group, so it sits apart from the exclusive list rather than in it.
+    bar('All pupils',allConRate,all.length,'')
+    +'<div style="border-top:1px solid var(--bd);margin:.3rem 0 .35rem"></div>'
+    +order.filter(k=>grp[k].length).map(k=>bar(labels[k],conBy[k],grp[k].length,'')).join(''));
 
   // ── WHICH concerns are firing ──
   // 64% of pupils with no flags at all trigger something, which is the thresholds
