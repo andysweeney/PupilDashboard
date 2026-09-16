@@ -8917,7 +8917,13 @@ function _hmSLT(){
   // they flattened the striking figure (FSM-with-need) and cost two sentences
   // explaining that rows overlapped. The exclusive breakdown carries more.
   // include the whole-school rate: the All pupils row is drawn on this same scale
-  const allConRate=conRate(all)||0;
+  // The groups already evaluated every pupil, and _hmItems() is the most expensive call
+  // on this tab. Derive the whole-school rate from the group counts instead of a second
+  // pass. The five groups partition the roll, so this is exact, not an approximation.
+  const _liveByGrp={};
+  order.forEach(k=>{ _liveByGrp[k]=Math.round((conBy[k]/100)*grp[k].length); });
+  const allConRate=all.length
+    ? 100*order.reduce((a,k)=>a+_liveByGrp[k],0)/all.length : 0;
   const mxC=Math.max(allConRate,...Object.values(conBy))||1;
   const bar=(name,rate,n,note)=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
       +'<span style="width:150px;color:var(--tx2)"'+(note?' title="'+note+'"':'')+'>'+name+'</span>'
@@ -9016,12 +9022,35 @@ function _hmSLT(){
     const sd=_hmSchoolDays();
     if(!sd.length){ h+=_hmPanel('Attendance','No attendance data for this academic year.',''); return; }
     const sched=sd.length*_hmPerPerDay();
+    // ── ONE PASS PER PUPIL, NOT FIVE ──
+    // pctOf() is needed for the distribution, twice for year-on-year and twice for the
+    // rolling window. Calling countAbsPeriods() each time rescans that pupil's whole
+    // absence list to filter by date — five full scans per pupil, about half of all the
+    // work this tab does. Build a sorted per-pupil list of absence DATES once, then a
+    // window is a binary-search slice. Same dedupe and suppression rules, so the
+    // figures are unchanged; the cost drops from O(5 x records) to O(records + log n).
+    const _absDates={};
+    Object.keys(DD.attAbsSubj||{}).forEach(px=>{
+      const supp=getSuppressed(px), seen=new Set(), ds=[];
+      (DD.attAbsSubj[px]||[]).forEach(r=>{
+        const key=r[0]+'|'+r[2];
+        if(supp.has(key)||seen.has(key))return;
+        seen.add(key); ds.push(r[0]);
+      });
+      ds.sort();
+      _absDates[px]=ds;
+    });
+    const _lowerBound=(arr,v)=>{ let lo=0,hi=arr.length; while(lo<hi){const m=(lo+hi)>>1; if(arr[m]<v)lo=m+1; else hi=m;} return lo; };
+    const _absIn=(px,a,b)=>{
+      const ds=_absDates[String(px)]; if(!ds||!ds.length)return 0;
+      return _lowerBound(ds,b+'\uffff')-_lowerBound(ds,a);
+    };
     const pctOf=(px,a,b)=>{
-      const days=sd.filter(d=>(!a||d>=a)&&(!b||d<=b));
+      const from=a||sd[0], to=b||sd[sd.length-1];
+      const days=sd.filter(d=>d>=from&&d<=to);
       if(!days.length)return null;
       const n=days.length*_hmPerPerDay();
-      const abs=countAbsPeriods(px,days[0],days[days.length-1]).total;
-      return n>0?100-(abs/n*100):null;
+      return n>0?100-(_absIn(px,days[0],days[days.length-1])/n*100):null;
     };
     const cur=all.map(p=>pctOf(p)).filter(v=>v!=null);
 
@@ -9148,16 +9177,10 @@ function _hmSLT(){
       const d=new Date(iso+'T12:00:00'); d.setDate(d.getDate()-((d.getDay()+6)%7));
       return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     };
+    // reuse the deduped date lists built above rather than a second pass
     const absByWeek={};
-    Object.keys(DD.attAbsSubj||{}).forEach(px=>{
-      const supp=getSuppressed(px), seen=new Set();
-      (DD.attAbsSubj[px]||[]).forEach(r=>{
-        const key=r[0]+'|'+r[2];
-        if(supp.has(key)||seen.has(key))return;
-        seen.add(key);
-        const wk=mondayOf(r[0]);
-        absByWeek[wk]=(absByWeek[wk]||0)+1;
-      });
+    Object.keys(_absDates).forEach(px=>{
+      _absDates[px].forEach(dt=>{ const wk=mondayOf(dt); absByWeek[wk]=(absByWeek[wk]||0)+1; });
     });
 
     // Denominator: pupils with a timetable that year x lessons scheduled that week.
@@ -9247,6 +9270,116 @@ function _hmSLT(){
 
   h+=_hmSection('Ability','nothing here yet');
   h+=_hmSection('Effort','nothing here yet');
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  GAPS — the cross-domain comparison
+  // ══════════════════════════════════════════════════════════════════════════
+  // A gap on its own does not say what to do about it. The SAME attainment gap means
+  // three different things depending on the other two:
+  //   attainment gap alone            -> teaching, curriculum, prior attainment
+  //   attainment gap + attendance gap -> they attain less because they are there less;
+  //                                      the lever is attendance, not attainment
+  //   attainment gap + behaviour gap  -> present as often, attaining less, sanctioned
+  //     but attendance level             far more. A question about the sanction
+  //                                      system, and about adult behaviour rather
+  //                                      than pupil behaviour.
+  // So the three belong SIDE BY SIDE, same groups, same order. The value is in reading
+  // ACROSS the row — which is why this is its own section rather than one chart in
+  // each of the three above.
+  h+=_hmSection('Gaps','read across the row, not down a column');
+  (function(){
+    const base=grp.neither;
+    if(!base.length){ h+=_hmPanel('Gaps','No comparison group (pupils with no FSM, SEN or EHCP), so no gap can be shown.',''); return; }
+
+    // ── the three measures, each as "x vs the comparison group" ──
+    const meanOf=(list,f)=>{ const v=list.map(f).filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
+
+    // attendance: percentage points, higher is better
+    const attOf=p=>pctOf(p);
+    // sanctions: per pupil, LOWER is better — inverted when drawn
+    const sanOf=p=>tot[p]||0;
+    // attainment: mean abilityRank across the pupil's subjects, higher is better
+    const _abCache={};
+    const abOf=p=>{
+      if(_abCache[p]!==undefined)return _abCache[p];
+      let sum=0,n=0;
+      Object.values(DD.progress||{}).forEach(ay=>Object.values(ay||{}).forEach(rows=>{
+        const r=(rows||[]).find(x=>x[0]===p); if(!r)return;
+        const sc=progCol(r,'scores')||{};
+        Object.values(sc).forEach(c=>{ const rk=abRk(c); if(rk){sum+=rk;n++;} });
+      }));
+      return _abCache[p]=n?sum/n:null;
+    };
+
+    const MEAS=[
+      {key:'att', title:'Attendance',  unit:'%',  better:'high', f:attOf,
+       note:'percentage points vs the comparison group'},
+      {key:'san', title:'Sanctions',   unit:'',   better:'low',  f:sanOf,
+       note:'per pupil \u2014 a longer bar is worse'},
+      {key:'ab',  title:'Attainment',  unit:'',   better:'high', f:abOf,
+       note:'mean ability rank across a pupil\u2019s subjects'}
+    ];
+
+    const cols=[];
+    MEAS.forEach(m=>{
+      const baseVal=meanOf(base,m.f);
+      const rows=order.filter(k=>grp[k].length).map(k=>{
+        const v=meanOf(grp[k],m.f);
+        return {k:k,label:labels[k],n:grp[k].length,v:v,
+                gap:(v==null||baseVal==null)?null:v-baseVal};
+      });
+      const covered=rows.reduce((a,r)=>a+(r.v!=null?r.n:0),0);
+      cols.push({m:m,base:baseVal,rows:rows,covered:covered});
+    });
+
+    // shared row order and a per-measure scale, since the units differ
+    const box=cols.map(c=>{
+      const vals=c.rows.map(r=>r.v).filter(v=>v!=null);
+      if(!vals.length) return '<div style="flex:1;min-width:190px">'
+        +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">'+c.m.title+'</div>'
+        +'<div style="font-size:.66rem;color:var(--tx2);padding:.4rem .5rem;border:1px dashed var(--bd);border-radius:6px">'
+        +'No data yet.</div></div>';
+      const mx=Math.max(...vals)||1;
+      return '<div style="flex:1;min-width:190px">'
+        +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">'+c.m.title+'</div>'
+        +'<div style="font-size:.64rem;color:var(--tx2);margin-bottom:.35rem">'+c.m.note+'</div>'
+        +c.rows.map(r=>{
+          if(r.v==null) return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.28rem;font-size:.68rem">'
+            +'<span style="flex:1;min-width:60px"><span style="display:block;height:11px;border:1px dashed var(--bd);border-radius:3px"></span></span>'
+            +'<span style="width:52px;text-align:right;color:var(--mu)">\u2014</span></div>';
+          // grey for the comparison group, one hue for the rest: colour carries
+          // "baseline vs the groups we are asking about", not five categories
+          const isBase=r.k==='neither';
+          const worse=(c.m.better==='high')?(r.gap<0):(r.gap>0);
+          const tone=isBase?'var(--mu)':(worse?'var(--red)':'var(--green)');
+          return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.28rem;font-size:.68rem" title="'
+            +r.label+': '+r.v.toFixed(1)+c.m.unit+'">'
+            +'<span style="flex:1;min-width:60px"><span style="display:block;height:11px;border-radius:3px;background:var(--bd)">'
+              +'<span style="display:block;height:11px;border-radius:3px;width:'+(100*r.v/mx)+'%;background:'+tone+'"></span></span></span>'
+            +'<span style="width:52px;text-align:right;font-variant-numeric:tabular-nums">'+r.v.toFixed(1)+c.m.unit+'</span></div>';
+        }).join('')
+        +'<div style="font-size:.62rem;color:var(--tx2);margin-top:.3rem">'
+        +(c.covered<all.length?c.covered+' of '+all.length+' pupils have data':'all pupils')+'</div>'
+        +'</div>';
+    }).join('');
+
+    const labelCol='<div style="min-width:150px">'
+      +'<div style="font-size:.74rem;font-weight:600;margin-bottom:.15rem">&nbsp;</div>'
+      +'<div style="font-size:.64rem;color:var(--tx2);margin-bottom:.35rem">&nbsp;</div>'
+      +order.filter(k=>grp[k].length).map(k=>
+        '<div style="height:11px;margin-bottom:.28rem;font-size:.68rem;color:var(--tx2);white-space:nowrap;line-height:11px">'
+        +labels[k]+' <span style="color:var(--mu)">'+grp[k].length+'</span></div>').join('')
+      +'</div>';
+
+    h+=_hmPanel('The same groups, across all three measures',
+      'A gap on its own does not say what to do about it. Attainment low <em>and</em> attendance low '
+      +'points at attendance as the lever. Attainment low, attendance level, sanctions high points at '
+      +'the sanction system rather than the pupils. <strong>Read across the row.</strong> '
+      +'Grey is the comparison group; red is worse than it, green better. '
+      +'Scales differ by measure, so bar lengths are comparable within a column, not between.',
+      '<div style="display:flex;gap:1rem;flex-wrap:wrap">'+labelCol+box+'</div>');
+  })();
+
 
   return h;
 }
