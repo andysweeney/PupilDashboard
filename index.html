@@ -8684,23 +8684,42 @@ function _hmSLT(){
   // whole composition is visible and the categories are the ones the school named.
   // A stacked bar rather than a rate: composition holds up when a group is small,
   // where a single pupil can move a mean but not a share.
-  const catTot={};
+  // ⚠️ "Other" IS A REAL CATEGORY AND ALSO THE FALLBACK.
+  // incCatKey() returns 'o' for anything it does not recognise, so a code the school
+  // deliberately filed as Other and a code that was never categorised land in the
+  // same slice and cannot be told apart. The engine stamps uncategorised codes
+  // "Category Needed", which is not one of the eight, so it silently becomes Other —
+  // as does any code whose text does not EXACTLY match the Admin map (a trailing
+  // space, a case difference, a code added since the map was last edited).
+  // Split them: a genuine Other is the school's answer, an uncategorised code is a
+  // question for the school. The distinction is the difference between "this is what
+  // the behaviour looks like" and "this map needs finishing".
+  const UNCAT='__uncat';
+  const catTot={}, uncatSeen={};
   order.forEach(k=>{ catTot[k]={}; });
   SAN.forEach((r,i)=>{
     const dt=_hmDate(r); if(dt<ayStart)return;
     const g=gOf[r[0]]; if(!g)return;
-    const cat=(SANC_DET[i]&&SANC_DET[i][1])||'Other';
-    const key=incCatKey(cat);
+    const det=SANC_DET[i]||[];
+    const cat=det[1];
+    let key;
+    if(cat&&INC_BY_ID[cat]){ key=incCatKey(cat); }
+    else { key=UNCAT; const t=det[0]||'(no code)'; uncatSeen[t]=(uncatSeen[t]||0)+1; }
     catTot[g][key]=(catTot[g][key]||0)+1;
   });
-  const catsUsed=INC_CATS.filter(c=>order.some(k=>catTot[k]&&catTot[k][c.key]));
-  const stackRows=order.filter(k=>grp[k].length>=5&&incCatTotal(catTot[k]));
+  const UNCAT_CAT={id:'Uncategorised',key:UNCAT,color:'var(--mu)'};
+  const catsUsed=INC_CATS.filter(c=>order.some(k=>catTot[k]&&catTot[k][c.key]))
+    .concat(order.some(k=>catTot[k][UNCAT])?[UNCAT_CAT]:[]);
+  // incCatTotal() only sums the eight known keys, so it would omit the uncategorised
+  // slice and every bar would add to more than 100%. Sum whatever is actually there.
+  const catSum=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
+  const stackRows=order.filter(k=>grp[k].length>=5&&catSum(catTot[k]));
   if(stackRows.length&&catsUsed.length){
     const legend='<div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.45rem;font-size:.66rem;color:var(--tx2)">'
       +catsUsed.map(c=>'<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
         +c.color+';margin-right:.25rem;vertical-align:middle"></span>'+c.id+'</span>').join('')+'</div>';
     const cb=legend+stackRows.map(k=>{
-      const t=incCatTotal(catTot[k])||1;
+      const t=catSum(catTot[k])||1;
       const segs=catsUsed.map(c=>{
         const n=catTot[k][c.key]||0; if(!n)return '';
         const pct=100*n/t;
@@ -8714,13 +8733,20 @@ function _hmSLT(){
           +segs+'<span style="display:block;clear:both"></span></span></span>'
         +'<span style="width:54px;text-align:right;color:var(--tx2)">'+t+'</span></div>';
     }).join('');
+    const catSumAll=order.reduce((a,k)=>a+(catTot[k][UNCAT]||0),0);
     h+=_hmPanel('Sanction types by group',
       'The school\u2019s own incident categories, as a share of each group\u2019s sanctions since '
       +'September. Composition rather than a rate \u2014 a single pupil moves a mean, not a share. '
       +'The count on the right is the group\u2019s total. Hover a segment for its number. '
       +'Groups are \u201cever\u201d, not \u201cnow\u201d. '
-      +'\u26a0\ufe0f Uncategorised incidents fall into \u201cOther\u201d \u2014 check the unmapped_incident '
-      +'flag in Admin, as a large Other slice means the categories, not the behaviour.',cb);
+      +(Object.keys(uncatSeen).length
+        ? '\u26a0\ufe0f <strong>'+catSumAll+' incidents are uncategorised</strong> and shown separately '
+          +'from \u201cOther\u201d, which is a category the school chose. Most common: '
+          +Object.entries(uncatSeen).sort((a,b)=>b[1]-a[1]).slice(0,4)
+            .map(e=>'\u201c'+e[0]+'\u201d ('+e[1]+')').join(', ')
+          +'. These need a category in Admin \u2192 incident codes.'
+        : 'Every incident is categorised. \u201cOther\u201d here is the school\u2019s own category, '
+          +'not a gap.'),cb);
   }
 
   h+=_hmSection('Concerns');
