@@ -8694,7 +8694,7 @@ function _hmSLT(){
   // Split them: a genuine Other is the school's answer, an uncategorised code is a
   // question for the school. The distinction is the difference between "this is what
   // the behaviour looks like" and "this map needs finishing".
-  const UNCAT='__uncat';
+  const UNCAT='__uncat', DET='__det';
   const catTot={}, uncatSeen={};
   order.forEach(k=>{ catTot[k]={}; });
   SAN.forEach((r,i)=>{
@@ -8703,12 +8703,30 @@ function _hmSLT(){
     const det=SANC_DET[i]||[];
     const cat=det[1];
     let key;
-    if(cat&&INC_BY_ID[cat]){ key=incCatKey(cat); }
+    // ⚠️ DETENTIONS ARE TYPE 2 AND ARE NOT INCIDENT CODES.
+    // The engine writes them with the category 'Detention', which is not one of the
+    // eight INC_CATS, so they fell through to "uncategorised" and the panel told the
+    // school to go and categorise "Year Leader Detention" — which is not an incident
+    // at all, it is the CONSEQUENCE of one. They get their own slice.
+    // Note a detention usually accompanies an incident code for the same event, so
+    // this slice overlaps the others in cause, not in count.
+    // Test the TYPE FLAG only, never the category name. The eight category slots are
+    // renameable per school, so a school that names a slot "Detention" (for codes like
+    // "Detention not attended") would have every code in it swallowed by this slice
+    // and their own category would disappear from the chart.
+    // r[1]===2 is written by the engine for rows that came from a DETENTION FILE and
+    // nothing else, so it is the only safe test.
+    if(r[1]===2){ key=DET; }
+    else if(cat&&INC_BY_ID[cat]){ key=incCatKey(cat); }
     else { key=UNCAT; const t=det[0]||'(no code)'; uncatSeen[t]=(uncatSeen[t]||0)+1; }
     catTot[g][key]=(catTot[g][key]||0)+1;
   });
+  // "issued" in the label: a school may also have a CATEGORY called Detention for
+  // codes about missed detentions, and two identically-named slices would be unreadable.
+  const DET_CAT={id:'Detention issued',key:DET,color:PAL.plum||PAL.slate};
   const UNCAT_CAT={id:'Uncategorised',key:UNCAT,color:'var(--mu)'};
   const catsUsed=INC_CATS.filter(c=>order.some(k=>catTot[k]&&catTot[k][c.key]))
+    .concat(order.some(k=>catTot[k][DET])?[DET_CAT]:[])
     .concat(order.some(k=>catTot[k][UNCAT])?[UNCAT_CAT]:[]);
   // incCatTotal() only sums the eight known keys, so it would omit the uncategorised
   // slice and every bar would add to more than 100%. Sum whatever is actually there.
@@ -8739,6 +8757,8 @@ function _hmSLT(){
       +'September. Composition rather than a rate \u2014 a single pupil moves a mean, not a share. '
       +'The count on the right is the group\u2019s total. Hover a segment for its number. '
       +'Groups are \u201cever\u201d, not \u201cnow\u201d. '
+      +'A detention is the consequence rather than the incident, so that slice usually '
+      +'sits alongside a code for the same event. '
       +(Object.keys(uncatSeen).length
         ? '\u26a0\ufe0f <strong>'+catSumAll+' incidents are uncategorised</strong> and shown separately '
           +'from \u201cOther\u201d, which is a category the school chose. Most common: '
