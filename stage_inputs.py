@@ -129,12 +129,29 @@ def _beh_norm(df, historic):
     # (e.g. 'Name' AND 'Pupil name'), renaming would create two identically-named columns, which
     # makes the later pd.concat fail with "Reindexing only valid with uniquely valued Index objects".
     # In that case keep the existing target column and drop the redundant source.
+    # ⚠️ CHOOSE ON CONTENT, NOT ON PRESENCE.
+    # The old rule was "if the target exists, drop the source" — which assumed the
+    # target is the good column. TWS's Year 11 behaviour exports carry a NINE-column
+    # header over FIVE-column data, so 'Name' exists but is empty on every row while
+    # 'Pupil name' holds the pupil. Dropping the source there discarded EVERY Year 11
+    # behaviour record: three academic years, silently, with no error anywhere.
+    # Keep whichever column actually has values; fall back to the old behaviour only
+    # when both are populated (which is the case the guard was written for).
     for src, tgt in (('Pupil name', 'Name'), ('Teacher Name', 'Teacher')):
-        if src in d.columns:
-            if tgt in d.columns:
-                d = d.drop(columns=[src])
-            else:
-                d = d.rename(columns={src: tgt})
+        if src not in d.columns:
+            continue
+        if tgt not in d.columns:
+            d = d.rename(columns={src: tgt})
+            continue
+        # fillna BEFORE astype: with dtype=str, pandas keeps NaN as a null inside a
+        # string array rather than rendering it as the text "nan", so a
+        # replace({'nan': ''}) test silently counts every empty cell as populated.
+        _filled = lambda c: d[c].fillna('').astype(str).str.strip().ne('').sum()
+        src_n, tgt_n = _filled(src), _filled(tgt)
+        if src_n > tgt_n:
+            d = d.drop(columns=[tgt]).rename(columns={src: tgt})
+        else:
+            d = d.drop(columns=[src])
     # Belt-and-braces: collapse any remaining duplicate labels (keep first) so columns stay unique.
     d = d.loc[:, ~d.columns.duplicated()]
     if 'Teacher' not in d.columns:
