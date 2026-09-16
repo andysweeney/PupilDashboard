@@ -1101,8 +1101,11 @@ function progCol(row,name){
   return row[off[name]];
 }
 if(!_PC&&typeof console!=='undefined')
-  console.warn('data.json has no progressCols — row shape inferred from length. '
-    +'Rebuild with the current engine to remove the guesswork.');
+  // info, not warn: the fallback is correct and this is the expected state until the
+  // next rebuild. A warning here sat among real errors in the console and made a
+  // healthy page look broken, which is how genuine faults get overlooked.
+  console.info('[data] no progressCols in data.json — row shape inferred from length '
+    +'(correct, but explicit is better). Clears on the next rebuild.');
 // Reports sit on their own dated axis. Terms stay for attendance, which is a
 // genuine per-term aggregation; a report is an event on a date, and bucketing
 // two collections into one term used to make the second overwrite the first.
@@ -1615,11 +1618,42 @@ const _USE_REF=!!_refLevels();
 // rebuild. We fetch that pending file here so the editor shows the admin's saved edit (with a "waiting
 // for rebuild" badge) instead of silently reverting to the in-force ladder, which looks like data loss.
 let _PENDING_AB=null;
+// ── OPTIONAL "RIDE-ALONG" FILES ──
+// _ability_scale.json, _term_map.json and _calibration_<ks>.json are optional: a school
+// that has never used the Grading Scales panel simply has none. Fetching one that does
+// not exist returns HTTP 400 from Supabase storage, and although every caller handles
+// that correctly, the BROWSER still logs it as a failed request — so a normal, healthy
+// school produced console errors that looked like faults and masked real ones.
+// One cached listing of the folder instead, then fetch only what is actually there.
+let _RIDE_LIST=null;
+async function _rideAlongFiles(){
+  if(_RIDE_LIST)return _RIDE_LIST;
+  _RIDE_LIST=new Set();
+  if(typeof SB_ON==='undefined'||!SB_ON)return _RIDE_LIST;
+  let sid=null; try{ sid=schoolId(); }catch(e){}
+  if(!sid)return _RIDE_LIST;
+  try{
+    const r=await fetch(SB_URL+'/storage/v1/object/list/'+DATA_BUCKET,
+      {method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken(),
+       'Content-Type':'application/json'},
+       body:JSON.stringify({prefix:sid+'/uploads/raw/',limit:1000})});
+    if(r.ok)(await r.json()||[]).forEach(o=>{ if(o&&o.name)_RIDE_LIST.add(o.name); });
+  }catch(e){}
+  return _RIDE_LIST;
+}
+async function _rideAlongExists(name){ return (await _rideAlongFiles()).has(name); }
+// A save CREATES one of these files, so the cached listing would go stale and the next
+// load would skip a file that now exists. Saves call this. (The guards above are on the
+// READ paths only — guarding a save would stop the file ever being created, which is
+// exactly the bug this comment exists to prevent someone reintroducing.)
+function _rideAlongAdd(name){ if(_RIDE_LIST)_RIDE_LIST.add(name); }
+
 async function _loadPendingAbility(){
   if(!_USE_REF||typeof SB_ON==='undefined'||!SB_ON) return;
   let sid=null; try{ sid=schoolId(); }catch(e){}
   if(!sid) return;
   try{
+    if(!await _rideAlongExists('_ability_scale.json'))return;   // optional file, absent is normal
     const path=sid+'/uploads/raw/_ability_scale.json';
     const r=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+encodeURI(path),
       {headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()},cache:'no-store'});
@@ -1638,6 +1672,7 @@ async function _loadTermMap(){
   let sid=null; try{ sid=schoolId(); }catch(e){}
   if(!sid) return;
   try{
+    if(!await _rideAlongExists('_term_map.json'))return;   // optional file, absent is normal
     const path=sid+'/uploads/raw/_term_map.json';
     const r=await fetch(SB_URL+'/storage/v1/object/authenticated/'+DATA_BUCKET+'/'+encodeURI(path),
       {headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken()},cache:'no-store'});
@@ -1651,6 +1686,7 @@ window._setTermMap=async function(label,season){
     let sid=null; try{ sid=schoolId(); }catch(e){}
     if(typeof SB_ON==='undefined'||!SB_ON||!sid){ alert('Sign in with a school account to save term mappings.'); return; }
     const path=sid+'/uploads/raw/_term_map.json';
+    _rideAlongAdd('_term_map.json');
     const body=new Blob([JSON.stringify(_TERM_MAP,null,2)],{type:'application/json'});
     const w=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
       { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
@@ -2489,6 +2525,7 @@ async function _calSave(ksKey, map){
   const sid=schoolId();
   if(!SB_ON||!sid) throw new Error('Sign in with a school account to save calibration.');
   const path=sid+'/uploads/raw/_calibration_'+ksKey+'.json';
+  _rideAlongAdd('_calibration_'+ksKey+'.json');
   const body=new Blob([JSON.stringify(map,null,2)],{type:'application/json'});
   const w=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
     { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
@@ -14428,6 +14465,7 @@ function rPeer(){
     if(!SB_ON||!sid) throw new Error('Sign in with a school account to save the ability scale.');
     const levels=(rows||[]).map(r=>({csv:(r.csv||[]).slice(),label:r.label,colour:r.colour||undefined,note:r.note||undefined}));
     const path=sid+'/uploads/raw/_ability_scale.json';
+    _rideAlongAdd('_ability_scale.json');
     const body=new Blob([JSON.stringify({levels},null,2)],{type:'application/json'});
     const w=await fetch(SB_URL+'/storage/v1/object/'+DATA_BUCKET+'/'+encodeURI(path),
       { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer '+authToken(), 'x-upsert':'true' }, body });
