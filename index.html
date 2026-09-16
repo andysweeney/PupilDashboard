@@ -8572,7 +8572,8 @@ function _hmSLT(){
   const clean=all.filter(p=>!tot[p]).length;
   let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
     +_hmCard('Sanctions per pupil','' +(totalSanc/(all.length||1)).toFixed(1),
-             'since September')
+             'mean since September \u00b7 Winsorised '
+             +((_hmWinsorMean(all.map(p=>tot[p]||0))||0).toFixed(1)))
     +_hmCard('FSM sanction gap',fsmR?fsmR.toFixed(1)+'\u00d7':'\u2014',
              'more than pupils never FSM, SEN or EHCP',fsmR>=2?'bad':'')
     +_hmCard('Pupils with no sanctions',clean+' of '+all.length,
@@ -8580,6 +8581,54 @@ function _hmSLT(){
     +'</div>';
   // Concern rate by group, on the school's own triggers — the same question the
   // gap table asks, but through the lens the school has already calibrated.
+  // ── MEAN vs WINSORISED MEAN, per group ──
+  // The plain mean is dragged by a handful of very high-sanction pupils: with 27,510
+  // sanctions across 478 pupils a single child on 400 moves the school mean by most
+  // of a point. The Winsorised mean pulls the top and bottom 10% in to the 10th and
+  // 90th percentile rather than dropping them, so the denominator is unchanged and
+  // the figure describes the typical pupil. A LARGE GAP BETWEEN THE TWO IS ITSELF
+  // THE FINDING — it means the group's total is concentrated in a few children, and
+  // a mean quoted alone would misdescribe everyone else.
+  // Groups here OVERLAP by design (a pupil can be both FSM and SEN); this is about
+  // the shape of each population, not a partition of the roll.
+  const anyFsm2=[...grp.fsm,...grp.both];
+  const anySen2=[...grp.sen,...grp.ehcp,...grp.both];
+  const anyEhcp2=all.filter(p=>(F[String(p)]||{}).ehcp);
+  const mwRows=[
+    ['All pupils',all],
+    ['Any FSM',anyFsm2],
+    ['Any SEN or EHCP',anySen2],
+    ['EHCP',anyEhcp2],
+    ['No FSM, SEN or EHCP',grp.neither]
+  ].filter(r=>r[1].length);
+  if(mwRows.length>1){
+    const mwBody='<table style="width:100%;border-collapse:collapse;font-size:.72rem">'
+      +'<tr style="color:var(--tx2);text-align:left">'
+      +'<th style="font-weight:500;padding:.2rem 0">Group</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Pupils</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Mean</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Winsorised</th>'
+      +'<th style="font-weight:500;text-align:right;padding-left:.5rem">Skew</th></tr>'
+      +mwRows.map(([lbl,list])=>{
+        const vals=list.map(p=>tot[p]||0);
+        const m=vals.reduce((a,b)=>a+b,0)/vals.length;
+        const w=_hmWinsorMean(vals)||0;
+        const skew=w?m/w:0;
+        return '<tr><td style="padding:.25rem 0;white-space:nowrap">'+lbl+'</td>'
+          +'<td style="text-align:right;color:var(--tx2);padding:0 .5rem;width:52px">'+list.length+'</td>'
+          +'<td style="text-align:right;padding:0 .5rem;width:56px;font-weight:600">'+m.toFixed(1)+'</td>'
+          +'<td style="text-align:right;padding:0 .5rem;width:74px">'+w.toFixed(1)+'</td>'
+          +'<td style="text-align:right;width:52px;color:'+(skew>=1.3?'var(--red)':skew>=1.15?'var(--orange)':'var(--tx2)')+'">'
+            +(skew?skew.toFixed(2)+'\u00d7':'\u2014')+'</td></tr>';
+      }).join('')+'</table>';
+    h+=_hmPanel('Sanctions per pupil \u2014 mean and Winsorised mean',
+      'The Winsorised mean pulls the top and bottom 10% in to the 10th and 90th percentile, '
+      +'so a few very high-sanction pupils cannot carry the figure. <strong>Skew is mean \u00f7 '
+      +'Winsorised</strong>: above about 1.3 the group\u2019s total sits in a small number of '
+      +'children and the plain mean describes none of them well. Groups overlap \u2014 a pupil '
+      +'can be both FSM and SEN. \u201cEver\u201d, not \u201cnow\u201d.',mwBody);
+  }
+
   // Rate of pupils with a live concern, per group.
   const conRate=list=>{
     if(!list.length)return null;
