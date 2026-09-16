@@ -9161,7 +9161,13 @@ function _hmSLT(){
     });
 
     // Denominator: pupils with a timetable that year x lessons scheduled that week.
-    const WLK=DD.weekLessons||{}, TTB=DD.timetables||{};
+    // ⚠️ USE timetablesByAY, NOT timetables. The loader (see decompGrid) collapses
+    // DD.timetables down to the LATEST academic year only — `DD.timetables =
+    // byAY[latest(...)]` — and keeps the per-year structure in DD.timetablesByAY.
+    // Looking up DD.timetables[ay] therefore found nothing for every year, every week
+    // was skipped, and the panel was never built at all. Silently: no error, no chart,
+    // nothing in the console, because an empty series is a legitimate state.
+    const WLK=DD.weekLessons||{}, TTB=DD.timetablesByAY||{};
     const series={};
     Object.keys(WLK).sort().forEach(wk=>{
       const lessons=WLK[wk]||0; if(!lessons)return;
@@ -9174,7 +9180,13 @@ function _hmSLT(){
     });
     const years=Object.keys(series).sort();
 
-    if(years.length){
+    if(!years.length){
+      // An empty series used to render nothing at all, which is indistinguishable from
+      // a bug — as it was. Say what is missing instead.
+      h+=_hmPanel('Attendance week by week, academic years overlaid',
+        'No week-level attendance could be built. This needs weekLessons and '
+        +'timetablesByAY in data.json \u2014 rebuild if either is missing.','');
+    } else {
       const id='hm-att-weeks';
       const wkMin=Math.min(...years.flatMap(y=>Object.keys(series[y]).map(Number)));
       const wkMax=Math.max(...years.flatMap(y=>Object.keys(series[y]).map(Number)));
