@@ -2080,7 +2080,7 @@ function classTeachers(ink,x,subj,clsNum){
 // are ignored. Terms with no lesson weeks are dropped.
 function getTerms(ay){
   const wl=DD&&DD.weekLessons||{};
-  const ayStart=`${ay}-09-01`,ayEnd=`${ay+1}-07-31`;
+  const ayStart=ayStartISO(ay),ayEnd=ayEndISO(ay);
   const weeks=Object.keys(wl).filter(w=>w>=ayStart&&w<=ayEnd).sort();
   if(!weeks.length) return[];
   // Identify ≥14-day gaps
@@ -3012,7 +3012,7 @@ function makeSummaryCards(pupils, opts){
   opts = opts || {};
   const titleLabel = opts.titleLabel || 'Cohort';
   const ay = opts.ay || (DD.config && DD.config.current_acad_year) || 2025;
-  const ayStart = `${ay}-09-01`;
+  const ayStart = ayStartISO(ay);
   const todayISO = (new Date()).toISOString().slice(0,10);
   const endDate = todayISO < `${ay+1}-07-31` ? todayISO : `${ay+1}-07-31`;
   const pupilPx = new Set(pupils.map(r=>r[0]));
@@ -3114,7 +3114,7 @@ function renderTimetable(x, ay){
   const SAN=DD.sanctions||[];
   const _today=new Date();
   const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
-  const ayStart=`${ay}-09-01`;
+  const ayStart=ayStartISO(ay);
   const ayEnd=(ay===String(CAY))?_todayISO:`${(+ay)+1}-08-31`;
 
   // Pre-build sanction index for this pupil with categories
@@ -3310,7 +3310,7 @@ function renderHPTimetable(x, ay){
   const HP=DD.housePoints||[];
   const _today=new Date();
   const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
-  const ayStart=`${ay}-09-01`;
+  const ayStart=ayStartISO(ay);
   const ayEnd=(ay===String(CAY))?_todayISO:`${(+ay)+1}-08-31`;
 
   // House points for this pupil within the selected AY
@@ -3858,7 +3858,7 @@ function rP(){
   // Filter to current academic year (Sep curAY to today)
   const _today2=new Date();
   const _today2ISO=`${_today2.getFullYear()}-${String(_today2.getMonth()+1).padStart(2,'0')}-${String(_today2.getDate()).padStart(2,'0')}`;
-  const ayStart=`${curAY}-09-01`,ayEnd=_today2ISO;
+  const ayStart=ayStartISO(curAY),ayEnd=_today2ISO;
   const ayAbsCounts=countAbsPeriods(x,ayStart,ayEnd);
   
   // Total lessons this academic year from weekLessons
@@ -4791,14 +4791,14 @@ function rHeatmaps(x,ink,subjFilter){
 
   // ── AY COMPARISON CARD ──
   // How many school days into the current AY?
-  const curAyStart=`${CAY}-09-01`;
+  const curAyStart=ayStartISO(CAY);
   const curAySchoolDays=schoolDays.filter(d=>d>=curAyStart&&d<=todayISO);
   const dayIntoAY=curAySchoolDays.length;
 
   // For each AY, count sanctions (full year + up to same school day point)
   const ayCompRows=[];
   for(let ay=ink;ay<=CAY;ay++){
-    const ayStart=`${ay}-09-01`;
+    const ayStart=ayStartISO(ay);
     const ayEnd=`${ay+1}-07-31`;
     const ayEndCap=ayEnd<todayISO?ayEnd:todayISO;
     const yg=ay-ink+7;
@@ -5036,7 +5036,7 @@ function rCmp(){
       const sendEf=subAvg(rows.filter(r=>r[4]),'ef'),ehcpEf=subAvg(rows.filter(r=>r[5]),'ef'),fsmEf=subAvg(rows.filter(r=>r[6]),'ef');
       // Sanctions for this cohort in this academic year — filtered to relevant subject
       const pupilIdxSet=new Set(rows.map(r=>r[0]));
-      const ayStart=`${ay}-09-01`,ayEnd=`${ay+1}-07-31`;
+      const ayStart=ayStartISO(ay),ayEnd=ayEndISO(ay);
       const coSanc=(DD.sanctions||[]).filter(s=>pupilIdxSet.has(s[0])&&s[2]>=ayStart&&s[2]<=ayEnd&&(isAll||s[3]===sub));
       const nCodes=coSanc.filter(s=>s[1]===0).length;
       const nOnCalls=coSanc.filter(s=>s[1]===1).length;
@@ -5252,7 +5252,7 @@ function rPrg(){
     const sendEf=subAvg(rows.filter(r=>r[4]),'ef'),ehcpEf=subAvg(rows.filter(r=>r[5]),'ef'),fsmEf=subAvg(rows.filter(r=>r[6]),'ef');
 
     const pupilIdxSet=new Set(rows.map(r=>r[0]));
-    const ayStart=`${ay}-09-01`,ayEnd=`${ay+1}-07-31`;
+    const ayStart=ayStartISO(ay),ayEnd=ayEndISO(ay);
     const coSanc=(DD.sanctions||[]).filter(s=>pupilIdxSet.has(s[0])&&s[2]>=ayStart&&s[2]<=ayEnd&&(isAll||s[3]===sub));
     const nCodes=coSanc.filter(s=>s[1]===0).length;
     const nOnCalls=coSanc.filter(s=>s[1]===1).length;
@@ -5881,7 +5881,7 @@ function rSEND(){
   const SAN=DD.sanctions||[];
   const _sToday=new Date();
   const _sTodayISO=`${_sToday.getFullYear()}-${String(_sToday.getMonth()+1).padStart(2,'0')}-${String(_sToday.getDate()).padStart(2,'0')}`;
-  const ayStart=`${CAY}-09-01`;
+  const ayStart=ayStartISO(CAY);
 
   // Collect flagged pupils — flagIdx: 4=SEND, 5=EHCP, 6=FSM
   function collectFlagged(flagIdx,flagName){
@@ -6671,10 +6671,10 @@ function renderAttTable(){
   const _atTodayISO=`${_atToday.getFullYear()}-${String(_atToday.getMonth()+1).padStart(2,'0')}-${String(_atToday.getDate()).padStart(2,'0')}`;
 
   if(selAY==='all'){
-    ayStart=`${ink}-09-01`;ayEnd=_atTodayISO;
+    ayStart=ayStartISO(ink);ayEnd=_atTodayISO;
   }else{
     const ay=parseInt(selAY);
-    ayStart=`${ay}-09-01`;
+    ayStart=ayStartISO(ay);
     const ayEndFull=`${ay+1}-07-31`;
     ayEnd=ayEndFull<_atTodayISO?ayEndFull:_atTodayISO;
   }
@@ -6853,7 +6853,7 @@ function renderPupilNet(){
   const ctx=window._pNetCtx;
   if(!ctx) return;
   const selAY=parseInt(document.getElementById('pnet-ay').value);
-  const ayStart=`${selAY}-09-01`,ayEnd=`${selAY+1}-07-31`;
+  const ayStart=ayStartISO(selAY),ayEnd=ayEndISO(selAY);
   const netToday=new Date();
   const netTodayISO=`${netToday.getFullYear()}-${String(netToday.getMonth()+1).padStart(2,'0')}-${String(netToday.getDate()).padStart(2,'0')}`;
   const ayEndCap=ayEnd<netTodayISO?ayEnd:netTodayISO;
@@ -7040,7 +7040,7 @@ function renderNet(){
   const selAY=parseInt(document.getElementById('net-ay').value);
   const minWEl=document.getElementById('net-min-w');
   const minW=minWEl?parseInt(minWEl.value)||1:1;
-  const ayStart=`${selAY}-09-01`,ayEnd=`${selAY+1}-07-31`;
+  const ayStart=ayStartISO(selAY),ayEnd=ayEndISO(selAY);
   const netToday=new Date();
   const netTodayISO=`${netToday.getFullYear()}-${String(netToday.getMonth()+1).padStart(2,'0')}-${String(netToday.getDate()).padStart(2,'0')}`;
   const ayEndCap=ayEnd<netTodayISO?ayEnd:netTodayISO;
@@ -7487,13 +7487,35 @@ function _hmNote(txt){
 
 // ── academic-year helpers ──
 function _hmAY(){ return String((DD.config && DD.config.current_acad_year) || ''); }
-function _hmAyOf(iso){ const y = +iso.slice(0,4), m = +iso.slice(5,7); return String(m >= 9 ? y : y - 1); }
+// ── ACADEMIC YEAR BOUNDARY ──
+// ⚠️ THE DfE ACADEMIC YEAR RUNS 1 AUGUST TO 31 JULY, not September to August.
+// The engine already anchors DfE WEEK numbering on 1 August (dfe_week1_monday), so
+// without this the two disagree: 15 August 2025 is DfE week 2 of AY2025, but the old
+// rule below filed it in AY2024.
+//
+// ⚠️ IN PRACTICE ALMOST NOTHING MOVES, because schools are closed in August — no
+// attendance, no sanctions, no house points. The correctness matters at the edges:
+// a pupil who joins in late August, an INSET or summer-school record, and any
+// comparison against a DfE return, which is reported on the August basis.
+//
+// ALL 30 academic-year boundary filters in this file now call ayStartISO() /
+// ayEndISO(). FOUR sites deliberately keep September and must not be "fixed":
+//   two `if(t==='T1') ps2=...`  — term ONE genuinely starts in September; T1 is a
+//                                 school term, not the academic year boundary
+//   one  _curTermObj fallback   — same reason
+//   one  _peerMonday(...)       — seeds a WEEK LIST for charts; starting it in August
+//                                 would prepend four empty weeks to every series
+// Everything that ASKS "which academic year is this date in" uses the helpers.
+const AY_START_MONTH = 8;                       // August — the DfE boundary
+function ayStartISO(ay){ return ay + '-0' + AY_START_MONTH + '-01'; }
+function ayEndISO(ay){ return (+ay + 1) + '-07-31'; }
+function _hmAyOf(iso){ const y = +iso.slice(0,4), m = +iso.slice(5,7); return String(m >= AY_START_MONTH ? y : y - 1); }
 
 // School days in the current academic year, from weekLessons, capped at today.
 let _HM_SD = null, _HM_PPD = null;
 function _hmSchoolDays(){
   if(_HM_SD) return _HM_SD;
-  const WLK = DD.weekLessons || {}, ayStart = _hmAY() + '-09-01';
+  const WLK = DD.weekLessons || {}, ayStart = ayStartISO(_hmAY());
   const t = new Date();
   const todayISO = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0');
   const out = [];
@@ -7511,6 +7533,24 @@ function _hmSchoolDays(){
   return (_HM_SD = out);
 }
 function _hmPerPerDay(){ _hmSchoolDays(); return _HM_PPD; }
+
+// School days in an arbitrary window, from weekLessons. _hmSchoolDays() is fixed to the
+// current academic year AND to a five-day week (off < 5), which is the same assumption
+// the timetable grid work removed everywhere else — TT_ND is the real number.
+// Needed for year-on-year and rolling comparisons, neither of which fits inside one AY.
+function _hmDaysBetween(fromISO, toISO){
+  const WLK = DD.weekLessons || {}, out = [];
+  const nd = (typeof TT_ND === 'number' && TT_ND > 0) ? TT_ND : 5;
+  Object.keys(WLK).sort().forEach(wk => {
+    for(let off = 0; off < nd; off++){
+      const d = new Date(wk + 'T12:00:00'); d.setDate(d.getDate() + off);
+      const iso = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      if((!fromISO || iso >= fromISO) && (!toISO || iso <= toISO)) out.push(iso);
+    }
+  });
+  out.sort();
+  return out;
+}
 
 // ── form index: every form in the school, and the forms in one year group ──
 function _hmFormIndex(){
@@ -8521,7 +8561,7 @@ function _hmYearLeader(){
 // ---- SLT: gaps and trends, no individuals ----------------------------------
 function _hmSLT(){
   const SAN=DD.sanctions||[], F=_hmFlags();
-  const end=_hmToday(), ayStart=(end.slice(5)>='09-01'?end.slice(0,4):(+end.slice(0,4)-1))+'-09-01';
+  const end=_hmToday(), ayStart=ayStartISO(_hmAyOf(end));   // DfE basis, 1 August
   const reg=DD.registry||{};
   const all=Object.keys(reg).map(Number);
   // Five mutually exclusive groups. Order matters: FSM-AND-need is tested FIRST so a
@@ -8972,35 +9012,75 @@ function _hmSLT(){
       +'Bands are the DfE\u2019s, and '+ATT_LOW+'% is the persistent-absence line (Admin \u2192 '
       +'Attendance Display). \u26a0\ufe0f Lesson-based, so these will not match a DfE return.',distBody);
 
-    // ── 2. BAND MOVEMENT ──
-    // Where pupils are GOING, not where they are. Attendance is recoverable early and
-    // almost never late, so a pupil who has just crossed below the line matters far
-    // more than one who has been there two years — and nothing else on the dashboard
-    // surfaces that.
-    const mid=sd[Math.floor(sd.length/2)];
+    // ── 2. WHICH DIRECTION ARE PUPILS MOVING ──
+    // First half vs second half does not work: there IS no first half in September, so
+    // the panel would be blank for a term.
+    // Month-on-month is available but weak — attendance is strongly SEASONAL. December
+    // and February are worse everywhere, so every school would show a "decline" each
+    // winter and an "improvement" each summer, and the reader would be looking at the
+    // calendar rather than the school.
+    // Year-on-year to the SAME POINT controls for that by construction and works from
+    // the first week of term. The rolling window below answers a different question —
+    // what is happening right now — and carries the seasonality caveat openly.
     const bandOf=v=>{ if(v==null)return null; for(let i=0;i<BANDS.length;i++) if(BANDS[i][1](v)) return i; return null; };
-    const moved={down:[],up:[],crossed:[]};
-    all.forEach(p=>{
-      const a=pctOf(p,sd[0],mid), b=pctOf(p,mid,sd[sd.length-1]);
-      const ba=bandOf(a), bb=bandOf(b);
-      if(ba==null||bb==null)return;
-      if(bb>ba)moved.down.push(p); else if(bb<ba)moved.up.push(p);
-      if(a>=ATT_LOW&&b<ATT_LOW)moved.crossed.push(p);
-    });
-    const mvBody='<div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.72rem">'
-      +[['Fell a band',moved.down.length,'var(--red)'],
-        ['Rose a band',moved.up.length,'var(--green)'],
-        ['Crossed below '+ATT_LOW+'%',moved.crossed.length,'var(--red)']]
-        .map(c=>'<div style="flex:1;min-width:130px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.45rem .6rem">'
-          +'<div style="font-size:.66rem;color:var(--tx2)">'+c[0]+'</div>'
-          +'<div style="font-size:1.15rem;font-weight:600;color:'+c[2]+'">'+c[1]+'</div></div>').join('')
+    const pctIn=(px,days)=>{
+      if(!days.length)return null;
+      const n=days.length*_hmPerPerDay();
+      const abs=countAbsPeriods(px,days[0],days[days.length-1]).total;
+      return n>0?100-(abs/n*100):null;
+    };
+    const shift=(daysA,daysB)=>{
+      const r={down:0,up:0,crossed:0,n:0};
+      all.forEach(p=>{
+        const a=pctIn(p,daysA), b=pctIn(p,daysB);
+        const ba=bandOf(a), bb=bandOf(b);
+        if(ba==null||bb==null)return;
+        r.n++;
+        if(bb>ba)r.down++; else if(bb<ba)r.up++;
+        if(a>=ATT_LOW&&b<ATT_LOW)r.crossed++;
+      });
+      return r;
+    };
+    const cards=(t,r,note)=>'<div style="margin-bottom:.5rem">'
+      +'<div style="font-size:.72rem;font-weight:600;margin-bottom:.25rem">'+t
+        +'<span style="font-weight:400;color:var(--tx2)"> \u00b7 '+note+'</span></div>'
+      +(r&&r.n
+        ? '<div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.72rem">'
+          +[['Fell a band',r.down,'var(--red)'],['Rose a band',r.up,'var(--green)'],
+            ['Crossed below '+ATT_LOW+'%',r.crossed,'var(--red)']]
+            .map(c=>'<div style="flex:1;min-width:130px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.45rem .6rem">'
+              +'<div style="font-size:.66rem;color:var(--tx2)">'+c[0]+'</div>'
+              +'<div style="font-size:1.15rem;font-weight:600;color:'+c[2]+'">'+c[1]+'</div></div>').join('')
+          +'</div>'
+        : '<div style="font-size:.7rem;color:var(--tx2);padding:.35rem .5rem;border:1px dashed var(--bd);border-radius:6px">'
+          +'Not enough data for this comparison yet.</div>')
       +'</div>';
-    h+=_hmPanel('Movement between bands, first half to second half of the year',
-      'Where pupils are <em>going</em>, not where they are. Attendance is recoverable early '
-      +'and rarely late, so a pupil who has just crossed below '+ATT_LOW+'% is the one to act '
-      +'on \u2014 not one who has been there for two years. '
-      +'\u26a0\ufe0f The two halves are split on school days, so a short second half makes small '
-      +'numbers move more; read the direction, not the size.',mvBody);
+
+    const today=sd[sd.length-1], ay=+_hmAY();
+    // same calendar window one year earlier — a pupil in Y11 now was in Y10 then, which
+    // is the point: it is the same CHILD at the same point in the year.
+    const lastFrom=ayStartISO(String(ay-1));
+    const lastTo=(today.slice(0,4)-1)+today.slice(4);
+    const prevDays=_hmDaysBetween(lastFrom,lastTo);
+    const yoy=prevDays.length>=20?shift(prevDays,sd):null;
+
+    // rolling: equal numbers of SCHOOL DAYS, so half terms and holidays cannot distort it
+    const W=20;
+    const recent=sd.slice(-W), prior=sd.slice(-2*W,-W);
+    const roll=(recent.length>=W&&prior.length>=W)?shift(prior,recent):null;
+
+    h+=_hmPanel('Which direction are pupils moving',
+      'Where pupils are <em>going</em>, not where they are \u2014 attendance is recoverable '
+      +'early and rarely late, so a pupil who has just crossed below '+ATT_LOW+'% is the one '
+      +'to act on. <strong>Year-on-year is the reliable read</strong>: attendance is strongly '
+      +'seasonal, so any within-year comparison partly measures the calendar. The rolling '
+      +'window shows what is happening now and should be read with that in mind.',
+      cards('Against the same point last year',yoy,
+            prevDays.length?prevDays.length+' school days, '+lastFrom.slice(0,7)+' to '+lastTo.slice(0,7):'no prior year')
+      +cards('Last '+W+' school days vs the '+W+' before',roll,
+            roll?'seasonal \u2014 direction, not size':'needs '+(2*W)+' school days')
+    );
+
   })();
 
   h+=_hmSection('Ability','nothing here yet');
@@ -10356,7 +10436,7 @@ function rSV(){
   // Academic Year discipline: sanctions from start of AY to today for this subject, top 5 pupils
   // Restrict to pupils actually in this year group (from lr)
   const lrIdxSet=new Set(lr.map(r=>r[0]));
-  const aySancStart2=`${CAY}-09-01`;
+  const aySancStart2=ayStartISO(CAY);
   const todaySV=new Date();
   const todaySVISO=`${todaySV.getFullYear()}-${String(todaySV.getMonth()+1).padStart(2,'0')}-${String(todaySV.getDate()).padStart(2,'0')}`;
   const termSancs=(DD.sanctions||[]).filter(s=>s[3]===sub&&s[2]>=aySancStart2&&s[2]<=todaySVISO&&lrIdxSet.has(s[0]));
@@ -10675,7 +10755,7 @@ function rCL(){
   const abTTup=improvements('ab',lr,p5,CT_AB),abYoYup=improvements('ab',lr,p3,CT_AB);
   const efTTup=improvements('ef',lr,p5,CT_EF),efYoYup=improvements('ef',lr,p3,CT_EF);
   const lrIdxSet=new Set(lr.map(r=>r[0]));
-  const clAySancStart=`${CAY}-09-01`;
+  const clAySancStart=ayStartISO(CAY);
   const todayCL=new Date();
   const todayCLISO=`${todayCL.getFullYear()}-${String(todayCL.getMonth()+1).padStart(2,'0')}-${String(todayCL.getDate()).padStart(2,'0')}`;
   const termSancs=(DD.sanctions||[]).filter(s=>s[3]===sub&&s[2]>=clAySancStart&&s[2]<=todayCLISO&&lrIdxSet.has(s[0]));
@@ -10714,7 +10794,7 @@ function rCL(){
   // Academic year only, up to today
   const dhToday=new Date();
   const dhTodayISO=`${dhToday.getFullYear()}-${String(dhToday.getMonth()+1).padStart(2,'0')}-${String(dhToday.getDate()).padStart(2,'0')}`;
-  const dhAyStart=`${CAY}-09-01`;
+  const dhAyStart=ayStartISO(CAY);
   const dhAllSanc=(DD.sanctions||[]).filter(s=>lrIdxSet.has(s[0])&&s[2]>=dhAyStart&&s[2]<=dhTodayISO);
 
   // Per-pupil: codes/oncalls/detentions (all subjects + in this subject)
@@ -10753,7 +10833,7 @@ function rCL(){
   // Equivalent cutoff last year: Sep 1 of previous AY + same number of days
   const dhLastAyStart=new Date(CAY-1,8,1);
   const dhLastAyCutoff=new Date(dhLastAyStart);dhLastAyCutoff.setDate(dhLastAyCutoff.getDate()+dhDaysIntoAY);
-  const dhLastAyStartISO=`${CAY-1}-09-01`;
+  const dhLastAyStartISO=ayStartISO(CAY-1);
   const dhLastAyCutoffISO=`${dhLastAyCutoff.getFullYear()}-${String(dhLastAyCutoff.getMonth()+1).padStart(2,'0')}-${String(dhLastAyCutoff.getDate()).padStart(2,'0')}`;
   // Count last year's sanctions up to equivalent point per pupil
   const dhLastYearSanc=(DD.sanctions||[]).filter(s=>lrIdxSet.has(s[0])&&s[2]>=dhLastAyStartISO&&s[2]<=dhLastAyCutoffISO);
@@ -10825,7 +10905,7 @@ function rCL(){
   const sendPupils=lr.filter(r=>r[4]||r[5]);
   const last3pp=pp.slice(-3).reverse();
   const last3labels=last3pp.map(p=>collLabel(p));
-  const aySancStart=`${CAY}-09-01`,aySancEnd=`${CAY+1}-07-31`;
+  const aySancStart=ayStartISO(CAY),aySancEnd=ayEndISO(CAY);
   const aySancAll=(DD.sanctions||[]).filter(s=>lrIdxSet.has(s[0])&&s[2]>=aySancStart&&s[2]<=aySancEnd&&s[3]===sub);
 
   let sendTableHtml='';
@@ -11017,7 +11097,7 @@ function rCC(){
     // YTD attendance for this class
     const _ccTodayD2=new Date();
     const _ccTodayISO2=`${_ccTodayD2.getFullYear()}-${String(_ccTodayD2.getMonth()+1).padStart(2,'0')}-${String(_ccTodayD2.getDate()).padStart(2,'0')}`;
-    const _ccAyStart=`${CAY}-09-01`;
+    const _ccAyStart=ayStartISO(CAY);
     let _ccTotalAbs=0;
     info.pups.forEach(px=>{const a=countAbsPeriods(px,_ccAyStart,_ccTodayISO2);_ccTotalAbs+=a.total});
     let _ccTotalL=0;
@@ -11042,7 +11122,7 @@ function rCC(){
     const SAN_ALL=DD.sanctions||[];
     const _ccToday=new Date();
     const _ccTodayISO=`${_ccToday.getFullYear()}-${String(_ccToday.getMonth()+1).padStart(2,'0')}-${String(_ccToday.getDate()).padStart(2,'0')}`;
-    const ayStartC=`${CAY}-09-01`;
+    const ayStartC=ayStartISO(CAY);
     const clsSanc=SAN_ALL.filter(s=>pupSetC.has(s[0])&&s[2]>=ayStartC&&s[2]<=_ccTodayISO&&s[3]===sub);
     const clsCodes=clsSanc.filter(s=>s[1]===0).length;
     const clsOnCalls=clsSanc.filter(s=>s[1]===1).length;
@@ -11103,7 +11183,7 @@ function rTGC(){
   const avgAbX=rs=>{const v=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?abRk(r[3][s2])||0:0).filter(x=>x>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
   const avgEfX=rs=>{const v=rs.map(r=>{const s=SUBS.map(s2=>r[3][s2]?r[3][s2][1]:0).filter(x=>x>0);return s.length?s.reduce((a,b)=>a+b,0)/s.length:null}).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
   const _td=new Date();const _todayISO=`${_td.getFullYear()}-${String(_td.getMonth()+1).padStart(2,'0')}-${String(_td.getDate()).padStart(2,'0')}`;
-  const ayStart=`${CAY}-09-01`;
+  const ayStart=ayStartISO(CAY);
   const SAN_ALL=DD.sanctions||[];
   const rows=Object.entries(tm).sort(([a],[b])=>String(a).localeCompare(String(b),undefined,{numeric:true})).map(([tg,pupSet])=>{
     const lr=ygRows(yearGroup,lp).filter(r=>pupSet.has(r[0]));
@@ -11344,7 +11424,7 @@ function peerFilterPupils(filters){
   const WLK=DD.weekLessons||{};
   // Attendance measured over the same academic year as the grades, so the two
   // halves of a comparison cover the same window.
-  const ayStart=`${ay}-09-01`;
+  const ayStart=ayStartISO(ay);
   const _pToday=new Date();
   let _pTodayISO=`${_pToday.getFullYear()}-${String(_pToday.getMonth()+1).padStart(2,'0')}-${String(_pToday.getDate()).padStart(2,'0')}`;
   const _ayEnd=`${ay+1}-08-31`; if(_ayEnd<_pTodayISO) _pTodayISO=_ayEnd;
@@ -11656,7 +11736,7 @@ function rPeer(){
   const SAN=DD.sanctions||[];
   const _tgToday=new Date();
   const _tgTodayISO=`${_tgToday.getFullYear()}-${String(_tgToday.getMonth()+1).padStart(2,'0')}-${String(_tgToday.getDate()).padStart(2,'0')}`;
-  const ayStart=`${CAY}-09-01`;
+  const ayStart=ayStartISO(CAY);
   const WLK=DD.weekLessons||{};
 
   // ── TITLE ──
@@ -12027,7 +12107,7 @@ function rPeer(){
     const SAN=DD.sanctions||[];
     const today=new Date();
     const todayISO=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-    const ayStart=`${CAY}-09-01`;
+    const ayStart=ayStartISO(CAY);
     const WLK=DD.weekLessons||{};
     let totalWeeks=0;
     for(const w of Object.keys(WLK)){if(w>=ayStart&&w<=todayISO)totalWeeks++}
@@ -12541,7 +12621,7 @@ function rPeer(){
     if(_cnSDMod) return;
     const todayD=new Date();
     const todayISO=`${todayD.getFullYear()}-${String(todayD.getMonth()+1).padStart(2,'0')}-${String(todayD.getDate()).padStart(2,'0')}`;
-    const ayStart=`${CAY}-09-01`;
+    const ayStart=ayStartISO(CAY);
     const WLK=DD.weekLessons||{};
     _cnSDMod=[];
     Object.keys(WLK).sort().forEach(wk=>{
@@ -12820,7 +12900,7 @@ function rPeer(){
     if(!yg) return[];
     const fn=firstName(px);
     const items=[];
-    const _ay=`${CAY}-09-01`;
+    const _ay=ayStartISO(CAY);
     const _t=new Date();const _tISO=`${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,'0')}-${String(_t.getDate()).padStart(2,'0')}`;
     const a20=attRAMod(px,20),a60=attRAMod(px,60);
     let attImp=false;
@@ -12921,7 +13001,7 @@ function rPeer(){
     if(!pupilPxs.length){out.innerHTML='<div style="color:var(--mu);padding:1rem">No pupils found</div>';return}
     
     // Determine date range — current AY only (consistent with weekLessons coverage)
-    const ayStart=`${CAY}-09-01`;
+    const ayStart=ayStartISO(CAY);
     const _today=new Date();
     const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
     const ayEnd=`${CAY+1}-07-31`;
@@ -13373,7 +13453,7 @@ function rPeer(){
     const out=document.getElementById('rb-out');
     if(!yearGroup){out.innerHTML='';return}
     
-    const ayStart=`${CAY}-09-01`;
+    const ayStart=ayStartISO(CAY);
     const _today=new Date();
     const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
     
@@ -14485,7 +14565,7 @@ function rPeer(){
     const SAN=DD.sanctions||[];
     const today=new Date();
     const todayISO=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-    const ayStart=`${CAY}-09-01`;
+    const ayStart=ayStartISO(CAY);
     const WLK=DD.weekLessons||{};
     let ytdTotalL=0;
     for(const[w,tl]of Object.entries(WLK)){if(w>=ayStart&&w<=todayISO)ytdTotalL+=tl}
