@@ -3361,9 +3361,18 @@ function renderTimetable(x, ay){
   // But a reader has no way to know detentions exist at all, so say so and give the
   // count. The Calendar Heatmap DOES include them — it is day-based, and a detention
   // has a date even without a slot.
-  // ⚠️ Xporter's school.detentions carries BehaviourId, linking a detention to the
-  // incident that caused it. Once that is available a detention CAN be placed in the
-  // slot of its originating incident, and the dead branch above becomes live.
+  // ⚠️ DECIDED: once BehaviourId is available, a detention SITS IN THE SLOT of its
+  // originating incident, and BOTH are counted — the incident and the detention. That
+  // is how TWS reads it: the lesson generated two things, and the slot should show
+  // both. Detentions with no resolvable slot stay in the Non-Lesson row.
+  // ⚠️ THE CHANGE IS ENTIRELY IN THE ENGINE. The browser is already written for this:
+  // the r[1]===2 branch in slotSanc and the SW_DET weighting exist and are simply never
+  // reached, because import_engine.py writes detentions as
+  //     [pid, 2, date, None, None, type, 'Detention']
+  // Populate subj and period from the linked BehaviourId there and every grid, heatmap
+  // and trigger picks it up with no client change at all.
+  // ⚠️ Revisit once real data lands: counting both may inflate a slot's heat in a way
+  // that is technically right and reads badly. Assess, do not assume.
   (function(){
     const nDet=pSancIdx.filter(s=>s.r[1]===2).length;
     html+='<div style="font-size:.62rem;color:var(--tx2);margin-top:.35rem">'
