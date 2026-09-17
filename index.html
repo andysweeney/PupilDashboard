@@ -3503,7 +3503,13 @@ function renderHPTimetable(x, ay){
   // 5 codes recorded outside a lesson). All 14 were invisible, and the row did not
   // render because she happens to have no non-lesson house points.
   const nlHP=pHP.filter(r=>r[3]===null||r[4]===null);
-  const nlSan=(typeof pSancIdx!=='undefined'?pSancIdx:[]).filter(s=>s.r[3]===null||s.r[4]===null);
+  // ⚠️ BUILD THIS LOCALLY. An earlier attempt reused pSancIdx from the OTHER slot grid
+  // with a `typeof ... !== 'undefined'` guard — different function, so it was always
+  // undefined, the guard quietly returned [] and the row still never appeared. A guard
+  // that hides a scope error is worse than the error.
+  // Same window and same shape as pHP above, so the two halves of this grid agree.
+  const nlSan=(DD.sanctions||[]).filter(r=>r[0]===x&&r[2]>=ayStart&&r[2]<=ayEnd
+    &&(r[3]==null||r[4]==null)).map(r=>({r:r}));
   if(nlHP.length||nlSan.length){
     const nlByDay={0:{hp:0,poc:0,san:0,det:0},1:{hp:0,poc:0,san:0,det:0},2:{hp:0,poc:0,san:0,det:0},3:{hp:0,poc:0,san:0,det:0},4:{hp:0,poc:0,san:0,det:0}};
     nlHP.forEach(r=>{const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;if(dow>=0&&dow<5){if(r[1]===1)nlByDay[dow].poc++;else nlByDay[dow].hp++}});
