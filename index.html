@@ -8514,11 +8514,105 @@ function _hmTutor(){
   });
   const red=con.filter(c=>c.items.some(i=>i.severity==='red')).length;
 
+  // ══════════════════════════════════════════════════════════════════════════
+  //  WHAT HAS CHANGED THIS WEEK
+  // ══════════════════════════════════════════════════════════════════════════
+  // A form tutor already knows their 29 children. A list of who has a concern tells
+  // them what they could get from a printout. What they cannot see without opening this
+  // tab is what MOVED — and that is the only reason to open it on a Monday.
+  //
+  // ⚠️ THIS IS NOT "which concerns are new". pupilOtherConcernItems(px) takes a pupil
+  // and nothing else: there is no as-of date and nothing stores what fired last week,
+  // so last week's concern list cannot be replayed. This is computed from the
+  // UNDERLYING DATA instead — absences, sanctions and positives in the last five school
+  // days against the twenty before — which is more honest about what it measures.
+  // A concern that fired last week and still fires will NOT appear here unless the
+  // numbers behind it moved. That is the point: it is a change feed, not a status list.
+  const _chg=(function(){
+    const sd=_hmSchoolDays();
+    if(sd.length<10)return null;                 // too early in the year to compare
+    const W=Math.min(5,Math.floor(sd.length/2));
+    const now=sd.slice(-W), prev=sd.slice(-(W*5),-W);
+    if(!prev.length)return null;
+    const inWin=(list,days)=>{
+      const a=days[0], b=days[days.length-1];
+      return list.filter(d=>d>=a&&d<=b).length;
+    };
+    // per-pupil dated lists, deduped the same way countAbsPeriods does
+    const absD={},sanD={},hpD={};
+    px.forEach(p=>{
+      const supp=getSuppressed(p), seen=new Set(), ds=[];
+      ((DD.attAbsSubj||{})[String(p)]||[]).forEach(r=>{
+        const k=r[0]+'|'+r[2]; if(supp.has(k)||seen.has(k))return; seen.add(k); ds.push(r[0]);
+      });
+      absD[p]=ds; sanD[p]=[]; hpD[p]=[];
+    });
+    (DD.sanctions||[]).forEach(r=>{ if(sanD[r[0]])sanD[r[0]].push(_hmDate(r)); });
+    (DD.housePoints||[]).forEach(r=>{ if(hpD[r[0]])hpD[r[0]].push(_hmDate(r)); });
+
+    const perDay=(n,d)=>d?n/d:0;
+    const out=[];
+    px.forEach(p=>{
+      const items=[];
+      const aN=perDay(inWin(absD[p],now),now.length), aP=perDay(inWin(absD[p],prev),prev.length);
+      const sN=perDay(inWin(sanD[p],now),now.length), sP=perDay(inWin(sanD[p],prev),prev.length);
+      const hN=perDay(inWin(hpD[p],now),now.length), hP=perDay(inWin(hpD[p],prev),prev.length);
+      // "notable" = at least one a day more than usual, or a clear reversal from none.
+      // Deliberately blunt: a form is 29 pupils and a subtle statistical move is not
+      // something a tutor can act on. Only surface what would change their Monday.
+      if(aN-aP>=0.5&&inWin(absD[p],now)>=2)
+        items.push(['Absence up','var(--red)',inWin(absD[p],now)+' periods this week vs '
+          +(aP*now.length).toFixed(1)+' usual']);
+      if(aP-aN>=0.5&&inWin(absD[p],prev)>=5)
+        items.push(['Absence down','var(--green)','back in more than usual']);
+      if(sN-sP>=0.4&&inWin(sanD[p],now)>=2)
+        items.push(['Sanctions up','var(--red)',inWin(sanD[p],now)+' this week vs '
+          +(sP*now.length).toFixed(1)+' usual']);
+      if(sP-sN>=0.4&&inWin(sanD[p],prev)>=3&&inWin(sanD[p],now)===0)
+        items.push(['No sanctions','var(--green)','first clear week in a while']);
+      if(hN-hP>=0.6&&inWin(hpD[p],now)>=3)
+        items.push(['Positives up','var(--green)',inWin(hpD[p],now)+' this week']);
+      if(items.length)out.push({px:p,items:items,
+        bad:items.some(i=>i[1]==='var(--red)')});
+    });
+    out.sort((a,b)=>(b.bad-a.bad)||(b.items.length-a.items.length));
+    return {rows:out,now:now,prev:prev};
+  })();
+
   let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
     +_hmCard('Need attention',con.length+' of '+px.size,red?red+' red':'',con.length?'bad':'')
     +_hmCard('Going well',good.length+' of '+px.size,'',good.length?'good':'')
     +_hmCard('Already considered',handled.length,'')
     +'</div>';
+
+  // The change feed goes FIRST: the lists below are what a tutor already knows, this is
+  // what they do not. If nothing moved, say so rather than rendering an empty panel —
+  // "nothing changed" is a useful answer and takes two seconds to read.
+  if(_chg){
+    const cap=_hmCap('HM_AMBER_TG',8);
+    const shown=_chg.rows.slice(0,cap), hidden=_chg.rows.slice(cap);
+    const line=r=>'<div style="display:flex;align-items:flex-start;gap:.5rem;margin-bottom:.35rem;font-size:.72rem">'
+      +'<span style="width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        +(r.bad?'<span style="color:var(--red)">\u25cf</span> ':'<span style="color:var(--green)">\u25cf</span> ')
+        +_hmName(r.px)+'</span>'
+      +'<span style="flex:1">'+r.items.map(i=>
+          '<span style="display:inline-block;margin-right:.4rem;margin-bottom:.15rem">'
+          +'<span style="font-size:.62rem;padding:.05rem .35rem;border-radius:3px;background:'+i[1]
+          +';color:#fff">'+i[0]+'</span> '
+          +'<span style="font-size:.64rem;color:var(--tx2)">'+i[2]+'</span></span>').join('')+'</span></div>';
+    h+=_hmPanel('What has changed this week',
+      _chg.rows.length
+        ? 'The last '+_chg.now.length+' school days against the '+_chg.prev.length+' before. '
+          +'<strong>Only pupils whose numbers moved</strong> \u2014 a child who has had a concern all '
+          +'term and still has one will not appear here. '
+          +'⚠️ Derived from attendance, sanctions and positives directly, not from the concern '
+          +'list: nothing records what fired last week, so this cannot say \u201cnew concern\u201d. '
+          +'It says what moved.'
+        : 'Nothing moved in the last '+_chg.now.length+' school days \u2014 no pupil\u2019s absences, '
+          +'sanctions or positives changed notably against their own recent pattern. '
+          +'The lists below are unchanged from last week.',
+      _chg.rows.length?(shown.map(line).join('')+_hmMore(hidden.map(line).join(''),hidden.length)):'');
+  }
 
   // Concerns and Congrats sit side by side. flex-basis 380px means they drop to
   // a single column on a narrow window rather than squeezing the pupil rows,
@@ -8613,17 +8707,6 @@ function _hmYearLeader(){
         +'<span style="width:80px;color:var(--tx2)">'+k+'</span>'
         +'<span style="flex:1">'+_hmBar(100*v/mx,v/mx>0.7?'bad':'warn')+'</span>'
         +'<span style="width:32px;text-align:right">'+v+'</span></div>').join(''));
-  }
-
-  if(multi.length){
-    multi.sort((a,b)=>(b.items.some(i=>i.severity==='red')?1:0)-(a.items.some(i=>i.severity==='red')?1:0)
-                      ||b.items.length-a.items.length);
-    const mblk=m=>_hmPupilBlock(m.px,_hmMergedRows(m.px,m.items),'');
-    const mcap=_hmCapBySeverity(multi,_hmCap('HM_AMBER_YL',10));
-    h+=_hmPanel('Carrying more than one concern',
-      'These pupils have fired several triggers at once — usually the ones to look at first.'
-      +(mcap.hidden.length?' Every red is shown; '+mcap.hidden.length+' amber '+(mcap.hidden.length===1?'pupil is':'pupils are')+' below.':''),
-      mcap.shown.map(mblk).join('')+_hmMore(mcap.hidden.map(mblk).join(''),mcap.hidden.length));
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -8741,6 +8824,19 @@ function _hmYearLeader(){
       +'converging, and usually the shorter list to work through first. Reds first, then the widest spread.',
       shown.map(line).join('')+_hmMore(hidden.map(line).join(''),hidden.length));
   })();
+
+  if(multi.length){
+    multi.sort((a,b)=>(b.items.some(i=>i.severity==='red')?1:0)-(a.items.some(i=>i.severity==='red')?1:0)
+                      ||b.items.length-a.items.length);
+    const mblk=m=>_hmPupilBlock(m.px,_hmMergedRows(m.px,m.items),'');
+    const mcap=_hmCapBySeverity(multi,_hmCap('HM_AMBER_YL',10));
+    h+=_hmPanel('Carrying more than one concern',
+      'These pupils have fired several triggers at once — usually the ones to look at first.'
+      +(mcap.hidden.length?' Every red is shown; '+mcap.hidden.length+' amber '+(mcap.hidden.length===1?'pupil is':'pupils are')+' below.':''),
+      mcap.shown.map(mblk).join('')+_hmMore(mcap.hidden.map(mblk).join(''),mcap.hidden.length));
+  }
+
+
 
   if(!conN&&!goodN.length){
     h+=_hmPanel('Nothing firing','',
@@ -9512,10 +9608,13 @@ function _hmSLT(){
     if(nRes){
       const mxD=Math.max(...dist)||1;
       h+=_hmPanel('Where results sit on the reference scale',
-        'All '+nRes.toLocaleString()+' graded results in '+lbl(lastK)+', by reference band. '
+        'All '+nRes.toLocaleString()+' graded results in '+lbl(lastK)+', by reference band \u2014 '
+        +'<strong>best at the top</strong>. '
         +'Results, not pupils \u2014 a pupil appears once per subject. '
         +'⚠️ Ranked on the reference scale, so subjects on different grading scales are comparable; '
         +'the raw grades are not.',
+        // REF is best-first and rank 1 = REF[0], so this order is already correct:
+        // the top row is the best band.
         (REF||[]).map((lv,i)=>{
           const b=i+1, n=dist[b]||0;
           return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
@@ -9536,14 +9635,20 @@ function _hmSLT(){
         const a=meanRk(perColl[firstK]&&perColl[firstK][p]), b=meanRk(perColl[lastK][p]);
         if(a==null||b==null)return;
         both++;
+        // ⚠️ abilityRank is 1 = BEST. Verified against the data: every one of the 20
+        // subjects maps grade 9 -> rank 1 and grade 2 -> rank 7. So a FALLING rank is
+        // an IMPROVEMENT, the same direction as effort. These panels originally
+        // assumed 7 was the top, which reported Latin — 19 of 23 pupils on grades
+        // 7-9, one of the school's strongest subjects — as one of its weakest.
         const d=b-a;
-        if(d>0.25)up++; else if(d<-0.25)down++; else same++;
+        if(d<-0.25)up++; else if(d>0.25)down++; else same++;
       });
       if(both){
         h+=_hmPanel('Movement, '+lbl(firstK)+' to '+lbl(lastK),
           'Change in a pupil\u2019s mean rank across their own subjects, for the '+both
           +' pupils with results in both collections. A move of less than a quarter of a band '
-          +'counts as unchanged. <strong>Not a trend</strong> \u2014 '+colls.length
+          +'counts as unchanged. \u26a0\ufe0f <strong>Rank 1 is the top band</strong>, so \u201cimproved\u201d '
+          +'means the number FELL. <strong>Not a trend</strong> \u2014 '+colls.length
           +' collections is too few for that; these are counts of direction.',
           '<div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.72rem">'
           +[['Improved',up,'var(--green)'],['Unchanged',same,'var(--tx2)'],['Declined',down,'var(--red)']]
@@ -9567,12 +9672,16 @@ function _hmSLT(){
     const rows=Object.entries(subj)
       .filter(e=>e[1].length>=8)                      // a subject of 3 pupils is noise
       .map(([sk,v])=>({s:SKR[sk]||sk,n:v.length,m:v.reduce((a,b)=>a+b,0)/v.length}))
-      .sort((a,b)=>a.m-b.m);
+      // rank 1 = best, so the HIGHEST mean is the weakest subject. Worst first.
+      .sort((a,b)=>b.m-a.m);
     if(rows.length){
       const schoolMean=nRes?Object.values(subj).flat().reduce((a,b)=>a+b,0)/Object.values(subj).flat().length:0;
       const mxS=Math.max(...rows.map(r=>r.m))||1;
       h+=_hmPanel('Mean rank by subject, '+lbl(lastK),
-        'Against the school mean of <strong>'+schoolMean.toFixed(1)+'</strong>. Lowest first. '
+        'On the reference scale, where <strong>1 is the top band ('+((REF&&REF[0]&&REF[0].label)||'best')
+        +') and '+bands+' the lowest ('+((REF&&REF[bands-1]&&REF[bands-1].label)||'lowest')+')</strong> \u2014 '
+        +'so a LOWER number is better. Against the school mean of <strong>'+schoolMean.toFixed(1)+'</strong>. '
+        +'Weakest first, and a positive difference is worse. '
         +'Subjects with fewer than 8 results are omitted \u2014 a handful of pupils moves a mean. '
         +'⚠️ This compares subjects on the REFERENCE scale, which flattens how hard each '
         +'qualification is; read it as \u201crelative to this school\u201d, not as difficulty.',
@@ -9582,9 +9691,9 @@ function _hmSLT(){
             +'<span style="width:150px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.s+'</span>'
             +'<span style="width:34px;text-align:right;color:var(--tx2);font-size:.66rem">'+r.n+'</span>'
             +'<span style="flex:1;min-width:120px"><div style="max-width:240px">'
-              +_hmBar(100*r.m/mxS,off<-0.5?'bad':off<-0.15?'warn':'ok')+'</div></span>'
+              +_hmBar(100*r.m/mxS,off>0.5?'bad':off>0.15?'warn':'ok')+'</div></span>'
             +'<span style="width:44px;text-align:right;font-variant-numeric:tabular-nums">'+r.m.toFixed(1)+'</span>'
-            +'<span style="width:52px;text-align:right;color:'+(off<0?'var(--red)':'var(--green)')+'">'
+            +'<span style="width:52px;text-align:right;color:'+(off>0?'var(--red)':'var(--green)')+'">'
               +(off>=0?'+':'')+off.toFixed(1)+'</span></div>';
         }).join(''));
     }
@@ -9593,14 +9702,13 @@ function _hmSLT(){
   // ══════════════════════════════════════════════════════════════════════════
   //  EFFORT
   // ══════════════════════════════════════════════════════════════════════════
-  // ⚠️⚠️ EFFORT RUNS THE OPPOSITE WAY TO ABILITY. 1 IS BEST.
-  // _builtinEffortLevels() says so: "ascending -> 1 = best (common UK convention)".
-  // Ability rank is best-LAST (7 is top on TWS's reference scale). So every comparison
-  // between the two has to invert one of them, and every colour and every "improved /
-  // declined" test in this section is the reverse of the Ability section above.
-  // This is the single easiest thing to get wrong here, which is why it is stated at
-  // the top and repeated at each place it matters.
-  h+=_hmSection('Effort','1 is best \u2014 the reverse of the ability scale');
+  // ⚠️ 1 IS BEST — AND SO IS abilityRank. The two scales run the SAME way.
+  // _builtinEffortLevels(): "ascending -> 1 = best (common UK convention)". Verified
+  // for ability against the data: all 20 subjects map grade 9 -> rank 1, grade 2 ->
+  // rank 7. An earlier version of this comment claimed the two were opposites and the
+  // Ability panels were built on that, which reported Latin — 19 of 23 pupils on
+  // grades 7-9 — as one of the school's weakest subjects. Both are best-at-1.
+  h+=_hmSection('Effort','1 is best, the same direction as the ability scale');
 
   (function(){
     const perE={};
@@ -9665,8 +9773,8 @@ function _hmSLT(){
         h+=_hmPanel('Movement, '+lbl(firstK)+' to '+lbl(lastK),
           'Change in a pupil\u2019s mean effort grade across their own subjects, for the '+both
           +' pupils graded in both. A move of less than a quarter of a grade counts as unchanged. '
-          +'⚠️ <strong>Effort improves as the number falls</strong>, so \u201cimproved\u201d here means a '
-          +'lower mean \u2014 the reverse of the Ability section.',
+          +'\u26a0\ufe0f <strong>Effort improves as the number falls</strong>, so \u201cimproved\u201d means a '
+          +'lower mean \u2014 the same direction as the Ability section.',
           '<div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.72rem">'
           +[['Improved',up,'var(--green)'],['Unchanged',same,'var(--tx2)'],['Declined',down,'var(--red)']]
             .map(c=>'<div style="flex:1;min-width:130px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.45rem .6rem">'
@@ -9691,8 +9799,8 @@ function _hmSLT(){
       const mxR=Math.max(...rows.map(r=>r.m))||1;
       h+=_hmPanel('Mean effort grade by subject, '+lbl(lastK),
         'Against the school mean of <strong>'+schoolMean.toFixed(2)+'</strong>. '
-        +'⚠️ <strong>Lower is better</strong>, so this list is worst first and a positive '
-        +'difference is bad \u2014 the reverse of the subject table in Ability. '
+        +'\u26a0\ufe0f <strong>Lower is better</strong>, so this list is worst first and a positive '
+        +'difference is bad \u2014 the same as the subject table in Ability. '
         +'Subjects with fewer than 8 grades are omitted.',
         rows.map(r=>{
           const off=r.m-schoolMean;        // POSITIVE = worse
@@ -9769,8 +9877,10 @@ function _hmSLT(){
        note:'percentage points vs comparison'},
       {key:'san', title:'Sanctions',   unit:'',    better:'low',  f:sanOf,
        note:'sanctions per pupil vs comparison'},
-      {key:'ab',  title:'Attainment',  unit:'',    better:'high', f:abOf,
-       note:'reference bands vs comparison'}
+      // ⚠️ better:'low'. abilityRank is 1 = BEST across every subject (verified: grade 9
+      // maps to rank 1). A higher mean rank is WORSE attainment.
+      {key:'ab',  title:'Attainment',  unit:'',    better:'low',  f:abOf,
+       note:'reference bands vs comparison \u00b7 lower is better'}
     ];
 
     const cols=[];
@@ -9905,7 +10015,8 @@ function _hmSLT(){
                 ['hiEhiA','Working and achieving','var(--green)'],
                 ['loEhiA','Coasting','var(--gold)'],
                 ['loEloA','Most at risk','var(--red)']];
-      const qOf=x=>{ const hiE=x.e<=medE, hiA=x.a>=medA;
+      // both scales are 1 = best, so "higher" means BELOW the median on each
+      const qOf=x=>{ const hiE=x.e<=medE, hiA=x.a<=medA;
         return hiE?(hiA?'hiEhiA':'hiEloA'):(hiA?'loEhiA':'loEloA'); };
       const tally={}; order.concat(['__all']).forEach(k=>tally[k]={hiEhiA:0,hiEloA:0,loEhiA:0,loEloA:0,n:0});
       pairs.forEach(x=>{ const q=qOf(x);
