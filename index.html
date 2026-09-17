@@ -3604,14 +3604,26 @@ function _ptwAbs(x,ay){
   }
   return{slotAbs,slotUn,subRecs};}
 function _ptwConduct(x,ay){
-  const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
-  const hp=Array.from({length:5},()=>Array(5).fill(0)),sn=Array.from({length:5},()=>Array(5).fill(0));
+  // DfE basis, matching ayStartISO()/_hmAyOf() everywhere else. This was m>=9.
+  const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=AY_START_MONTH?y:y-1)};
+  const hp=Array.from({length:TT_ND},()=>Array(TT_PER).fill(0)),sn=Array.from({length:TT_ND},()=>Array(TT_PER).fill(0));
   const hpRecs=[],snRecs=[];const xs=String(x);
-  for(const r of (DD.housePoints||[])){if(String(r[0])!==xs)continue;if(r[4]==null)continue;if(ay&&_ayOf(r[2])!==String(ay))continue;
-    const dow=new Date(r[2]+'T12:00:00').getDay()-1,p=r[4]-1;if(dow<0||dow>4||p<0||p>4)continue;hp[dow][p]++;hpRecs.push([r[2],dow,p]);}
-  for(const r of (DD.sanctions||[])){if(String(r[0])!==xs)continue;if(r[4]==null)continue;if(ay&&_ayOf(r[2])!==String(ay))continue;
-    const dow=new Date(r[2]+'T12:00:00').getDay()-1,p=r[4]-1;if(dow<0||dow>4||p<0||p>4)continue;sn[dow][p]++;snRecs.push([r[2],dow,p]);}
-  return{hp,sn,hpRecs,snRecs};}
+  // ⚠️ NON-LESSON BUCKET. Anything with no period was simply skipped, so a pupil's
+  // detentions (written with subj=null, period=null because the record does not say
+  // which lesson caused them) and any incident recorded outside a lesson vanished from
+  // a grid headed "N HP · N sanctions". Maya Taylor: 46 sanctions, 32 shown, 14 gone.
+  const nl=Array.from({length:TT_ND},()=>({hp:0,sn:0,det:0}));
+  let nlAny=0;
+  const dowOf=iso=>new Date(iso+'T12:00:00').getDay()-1;
+  for(const r of (DD.housePoints||[])){if(String(r[0])!==xs)continue;if(ay&&_ayOf(r[2])!==String(ay))continue;
+    const dow=dowOf(r[2]);if(dow<0||dow>=TT_ND)continue;
+    if(r[4]==null){nl[dow].hp++;nlAny++;continue;}
+    const p=r[4]-1;if(p<0||p>=TT_PER)continue;hp[dow][p]++;hpRecs.push([r[2],dow,p]);}
+  for(const r of (DD.sanctions||[])){if(String(r[0])!==xs)continue;if(ay&&_ayOf(r[2])!==String(ay))continue;
+    const dow=dowOf(r[2]);if(dow<0||dow>=TT_ND)continue;
+    if(r[4]==null){if(r[1]===2)nl[dow].det++;else nl[dow].sn++;nlAny++;continue;}
+    const p=r[4]-1;if(p<0||p>=TT_PER)continue;sn[dow][p]++;snRecs.push([r[2],dow,p]);}
+  return{hp,sn,hpRecs,snRecs,nl,nlAny};}
 function _ptwAbsBg(rate){
   if(rate==null)return 'var(--sf2)';
   const depth=Math.min(1,1.25*Math.max(0,rate)); // 0% -> plain white; doubled ramp -> full red by ~80% absence
@@ -3737,6 +3749,30 @@ function renderConductGrid(x, ay){
         const tip=`${subj} · ${t} · ${hp} house points, ${sn} sanctions`;
         body+=_ptwCondBox(subj,t,hp,sn,false,tip,false);
       }
+    }
+  }
+  // ── NON-LESSON ROW ──
+  // Detentions carry no period (the record does not say which lesson caused them) and
+  // some incidents are recorded outside a lesson. Both were dropped, so a grid headed
+  // "N HP · N sanctions" showed neither. They have a DAY even without a slot, so they
+  // belong on a row of their own rather than nowhere.
+  if(Cd.nlAny){
+    body+=`<div style="display:flex;align-items:center;justify-content:center;font-size:.5rem;`
+      +`font-weight:600;color:var(--mu);line-height:1.1;text-align:center">Non<br>lesson</div>`;
+    for(let d=0;d<TT_ND;d++){
+      const n=Cd.nl[d], tot=n.hp+n.sn+n.det;
+      if(!tot){ body+=`<div style="height:34px;border:1px dashed var(--bd);border-radius:6px"></div>`; continue; }
+      const parts=[];
+      if(n.hp)parts.push(`<span style="color:var(--green-dark)">${n.hp} HP</span>`);
+      if(n.sn)parts.push(`<span style="color:var(--red)">${n.sn}</span>`);
+      if(n.det)parts.push(`<span style="color:var(--red);font-weight:700">${n.det}D</span>`);
+      const tip=[n.hp?n.hp+' house points':'',n.sn?n.sn+' sanctions':'',n.det?n.det+' detentions':'']
+        .filter(Boolean).join(', ')+' outside lessons';
+      const bad=(n.sn+n.det)>n.hp;
+      body+=`<div title="${tip}" style="height:34px;border:1px solid var(--bd);border-radius:6px;`
+        +`display:flex;align-items:center;justify-content:center;gap:4px;font-size:.66rem;`
+        +`font-family:'IBM Plex Mono',monospace;background:${bad?'rgba(181,72,59,.10)':'rgba(46,148,105,.10)'}">`
+        +parts.join(' ')+`</div>`;
     }
   }
   body+=`</div>`;
