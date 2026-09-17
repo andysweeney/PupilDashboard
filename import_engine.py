@@ -22,7 +22,7 @@ Role scoping (added September 2026):
 """
 
 import pandas as pd
-import json, re, os, glob, csv
+import json, re, os, glob, csv, sys
 from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -1616,6 +1616,15 @@ for df_dets in dets_list:
         if not date_iso: continue
         det_type = row.get('Detention Type', '')
         if pd.isna(det_type): det_type = 'Detention'
+        # ⚠️ subj and period are None because a detention record does not say which
+        # lesson caused it. That makes detentions invisible on every slot-based view —
+        # the pupil timetable heatmap skips any row with a null subject or period, so
+        # the client's r[1]==2 branch and its SW_DET weighting are unreachable code.
+        # DECIDED: when Xporter's school.detentions BehaviourId is available, resolve
+        # the linked incident and write ITS subject and period here. Both the incident
+        # and the detention are then counted in that slot — TWS's reading, and the
+        # client already handles it with no change. A detention whose link cannot be
+        # resolved keeps None and stays in the Non-Lesson row, which is correct.
         sanctions.append([int(p), 2, date_iso, None, None, str(det_type), 'Detention'])
 
 sanctions.sort(key=lambda x: (x[2], x[0]))
@@ -2085,6 +2094,37 @@ output = {
 }
 
 out_path = '/home/claude/data_real.json'
+
+# ── REFUSE TO PUBLISH AN EMPTY BUILD OVER A POPULATED SCHOOL ──
+# On 12 Sep the wrong file was deployed as stage_inputs.py, so staging never ran. The
+# engine found an empty input directory, built a VALID but EMPTY data.json, printed
+# "Done!" and exited 0 — and the workflow pushed it over a live school's data.
+# Nothing misbehaved: a school with no data yet is a real case this engine must handle.
+# The gap was that no step asked whether the result was PLAUSIBLE.
+#
+# A genuinely new school has no previous build to compare against, so the guard only
+# fires when a populated file already exists and the new one is empty. Set
+# ALLOW_EMPTY_BUILD=1 to override for a deliberate reset.
+_prev = os.environ.get('PREV_DATA_PATH', out_path)
+if not registry and not os.environ.get('ALLOW_EMPTY_BUILD'):
+    _had = 0
+    if os.path.exists(_prev):
+        try:
+            with open(_prev) as _f:
+                _had = len(json.load(_f).get('registry') or {})
+        except Exception:
+            _had = 0
+    if _had:
+        sys.stderr.write(
+            f"\nERROR: this build has 0 pupils but {_prev} currently holds {_had}.\n"
+            "Refusing to overwrite a populated school with an empty build.\n"
+            "Almost always this means STAGING DID NOT RUN — check that the staging step\n"
+            "produced files in the engine's input directory, and that stage_inputs.py is\n"
+            "the staging script rather than a copy of this one.\n"
+            "Set ALLOW_EMPTY_BUILD=1 if the school really is being reset.\n")
+        sys.exit(1)
+    print("  note: 0 pupils, and no populated previous build — treating as a new school")
+
 with open(out_path, 'w') as f:
     json.dump(output, f, separators=(',', ':'))
 
