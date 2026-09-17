@@ -187,6 +187,11 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 </div>
 
 <div id="vw-hmslt" class="vw">
+<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">
+  <label style="font-size:.72rem;color:var(--tx2);font-weight:600">Cohort</label>
+  <select id="hm-scope-slt" onchange="rHmSLT()" style="font-size:.75rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx)"></select>
+  <span style="font-size:.66rem;color:var(--tx2)">groups, gaps and medians are recalculated within the selection</span>
+</div>
 <div id="hm-out-slt"></div>
 </div>
 <div id="vw-pupil" class="vw">
@@ -7453,7 +7458,15 @@ function rHmYear(){
   _lockSingleSelect('hm-scope-year');
   _hmRender('hm-out-year',_hmYearLeader);
 }
-function rHmSLT(){   _HM_SCOPE='all';                                       _hmRender('hm-out-slt',_hmSLT); }
+function rHmSLT(){
+  // "All year groups" plus one entry per year. Everything on this tab derives from
+  // _hmPupilsInScope(), so the five groups, the baseline, the medians and the gaps are
+  // all recomputed within the selection rather than filtered after the fact — a gap
+  // measured inside Year 10 is not the whole-school gap sliced, it is its own figure.
+  _HM_SCOPE=_hmFill('hm-scope-slt',[['all','All year groups']].concat(_hmYears()))||'all';
+  _lockSingleSelect('hm-scope-slt');
+  _hmRender('hm-out-slt',_hmSLT);
+}
 
 // ---- FORM TUTOR — INFOGRAPHICS ---------------------------------------------
 // Seven visuals for the tutor's own form, all scoped by _hmPupilsInScope().
@@ -7829,17 +7842,17 @@ function _hmPanelPeers(){
     // exists to surface. The headcount beside it is what a head of year acts on,
     // and 90% is the national persistent-absence line rather than a number we
     // invented.
-    { id: 'hm-ig-att', key: 'hmIgAtt', field: 'att', wfield: null, title: 'Attendance',
+    { id: 'hm-ig-att', key: 'hmIgAtt', field: 'att', wfield: null, title: 'Attendance <span style="font-weight:400;font-size:.66rem;color:var(--tx2)">\u00b7 mean</span>',
       opts: { label: 'Attendance', color: PAL.sky, fromZero: false, hardMax: 100,
               fmt: v => (Math.round(v * 10) / 10) + '%' } },
     { id: 'hm-ig-low', key: 'hmIgLow', field: 'belowLow', wfield: null,
       title: `Pupils below ${ATT_LOW}%`,
       opts: { label: `Pupils below ${ATT_LOW}%`, color: PAL.orange, fromZero: true,
               fmt: v => Math.round(v) } },
-    { id: 'hm-ig-pos', key: 'hmIgPos', field: 'pos', wfield: 'posW', title: 'Positives per pupil',
+    { id: 'hm-ig-pos', key: 'hmIgPos', field: 'pos', wfield: 'posW', title: 'Positives per pupil <span style="font-weight:400;font-size:.66rem;color:var(--tx2)">\u00b7 Winsorised mean</span>',
       opts: { label: 'Positives per pupil', color: PAL.green, fromZero: true,
               zeroMeansMissing: true, fmt: v => Math.round(v * 10) / 10 } },
-    { id: 'hm-ig-neg', key: 'hmIgNeg', field: 'neg', wfield: 'negW', title: 'Sanctions per pupil',
+    { id: 'hm-ig-neg', key: 'hmIgNeg', field: 'neg', wfield: 'negW', title: 'Sanctions per pupil <span style="font-weight:400;font-size:.66rem;color:var(--tx2)">\u00b7 Winsorised mean</span>',
       opts: { label: 'Sanctions per pupil', color: PAL.red, fromZero: true,
               fmt: v => Math.round(v * 10) / 10 } }
   ];
@@ -8253,6 +8266,18 @@ function _hmInfographics(ns){
   // details/summary needs no script and survives a re-render, matching _hmMore.
   return '<details open style="margin-bottom:.7rem">'
     + '<summary style="cursor:pointer;font-size:.8rem;font-weight:600;margin-bottom:.5rem">How your form is doing</summary>'
+    // ⚠️ THIS BLOCK USES A WINSORISED MEAN; the group panel further down uses a MEDIAN.
+    // Both are deliberate and neither is a mistake, but a page reporting two different
+    // averages without saying so is how a reader stops trusting either. Say which, and
+    // say why, once — here, where the two meet.
+    + '<div style="font-size:.66rem;color:var(--tx2);margin:-.2rem 0 .5rem">'
+      + 'These charts use a <strong>Winsorised mean</strong>: the top and bottom 10% are pulled in '
+      + 'to the 10th and 90th percentile rather than dropped, so every pupil stays in the '
+      + 'denominator but one extreme pupil cannot move a form\u2019s bar. That suits comparing '
+      + 'forms of similar size. The group breakdown lower down uses a <strong>median</strong> '
+      + 'instead, because those groups are small and heavily skewed \u2014 a few pupils with very '
+      + 'high counts would carry the average. Different questions, different measure.'
+    + '</div>'
     + parts + '</details>';
 }
 
@@ -8601,6 +8626,122 @@ function _hmYearLeader(){
       mcap.shown.map(mblk).join('')+_hmMore(mcap.hidden.map(mblk).join(''),mcap.hidden.length));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  //  WHO IS THIS FALLING ON — the same five groups as the SLT tab
+  // ══════════════════════════════════════════════════════════════════════════
+  // The SLT tab discusses a disadvantage gap the year leader cannot currently see:
+  // this tab breaks the cohort down by FORM but not by FSM / SEN / EHCP. So the person
+  // best placed to act on the gap has no view of it.
+  // Same five exclusive groups, same "ever not now" basis, same median-led treatment —
+  // computed WITHIN this year group, so the baseline is this cohort's own unflagged
+  // pupils rather than the whole school's.
+  (function(){
+    const F=_hmFlags(), all=[...px];
+    const grp={fsm:[],ehcp:[],sen:[],both:[],neither:[]};
+    all.forEach(p=>{
+      const f=F[String(p)]||{}, need=f.ehcp||f.send;
+      if(f.fsm&&need)grp.both.push(p);
+      else if(f.fsm)grp.fsm.push(p);
+      else if(f.ehcp)grp.ehcp.push(p);
+      else if(f.send)grp.sen.push(p);
+      else grp.neither.push(p);
+    });
+    const labels={fsm:'FSM only',ehcp:'EHCP only',sen:'SEN only',
+                  both:'FSM and either SEN or EHCP',neither:'None of the above'};
+    const order=['fsm','ehcp','sen','both','neither'];
+    if(!grp.neither.length||all.length<20)return;   // no baseline, or too few to split
+
+    // sanctions this academic year, per pupil
+    const end=_hmToday(), ayStart=ayStartISO(_hmAyOf(end));
+    const tot={};
+    (DD.sanctions||[]).forEach(r=>{ if(_hmDate(r)>=ayStart)tot[r[0]]=(tot[r[0]]||0)+1; });
+
+    const medOf=l=>{ const v=l.map(p=>tot[p]||0).sort((a,b)=>a-b); if(!v.length)return null;
+      const m=v.length>>1; return v.length%2?v[m]:(v[m-1]+v[m])/2; };
+    const conRate=l=>{ if(!l.length)return null; let n=0;
+      l.forEach(p=>{ if(_hmItems(p).live.length)n++; }); return 100*n/l.length; };
+
+    const baseMed=medOf(grp.neither), baseCon=conRate(grp.neither);
+    const rows=[{k:'__all',label:'All pupils',list:all}]
+      .concat(order.filter(k=>grp[k].length).map(k=>({k:k,label:labels[k],list:grp[k]})));
+    const mxC=Math.max(...rows.map(r=>conRate(r.list)||0))||1;
+
+    h+=_hmPanel('Who is this falling on',
+      'The same groups the leadership view uses, computed <strong>within this year group</strong> \u2014 '
+      +'so the baseline is your own pupils with no FSM, SEN or EHCP, not the whole school. '
+      +'<strong>Median</strong> sanctions, not mean: a few pupils with very high counts pull an average '
+      +'away from what a typical pupil in the group experiences. '
+      +'(The charts above use a Winsorised mean instead \u2014 right for comparing forms of similar '
+      +'size, wrong for small skewed groups. Both are deliberate.) '
+      +'Groups are \u201cever\u201d, not \u201cnow\u201d \u2014 a flag at any point in the data counts here.',
+      '<table style="width:100%;border-collapse:collapse;font-size:.72rem">'
+      +'<tr style="color:var(--tx2);text-align:left">'
+        +'<th style="font-weight:500;padding:.2rem 0">Group</th>'
+        +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Pupils</th>'
+        +'<th style="font-weight:500;padding-left:.4rem">With a live concern</th>'
+        +'<th style="font-weight:500;text-align:right;padding:0 .5rem">%</th>'
+        +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Median sanctions</th>'
+        +'<th style="font-weight:500;text-align:right">vs baseline</th></tr>'
+      +rows.map((r,i)=>{
+        const c=conRate(r.list)||0, md=medOf(r.list);
+        const gap=(md==null||baseMed==null)?null:md-baseMed;
+        const isBase=r.k==='neither';
+        return '<tr'+(i===0?' style="font-weight:600"':'')+'>'
+          +'<td style="padding:.22rem 0;white-space:nowrap;color:var(--tx2)">'+r.label+'</td>'
+          +'<td style="text-align:right;padding:0 .5rem;color:var(--mu);font-weight:400">'+r.list.length+'</td>'
+          +'<td style="padding-left:.4rem"><div style="max-width:200px">'
+            +_hmBar(100*c/mxC,c>=75?'bad':c>=50?'warn':'ok')+'</div></td>'
+          +'<td style="text-align:right;padding:0 .5rem">'+Math.round(c)+'%</td>'
+          +'<td style="text-align:right;padding:0 .5rem;font-variant-numeric:tabular-nums">'+(md==null?'\u2014':md)+'</td>'
+          +'<td style="text-align:right;color:'+(isBase?'var(--mu)':(gap>0?'var(--red)':gap<0?'var(--green)':'var(--tx2)'))+'">'
+            +(isBase?'baseline':(gap==null?'\u2014':((gap>0?'+':'')+gap)))+'</td></tr>';
+      }).join('')+'</table>');
+  })();
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  ACROSS DOMAINS — a pupil flagged in two places is a different case
+  // ══════════════════════════════════════════════════════════════════════════
+  // "Carrying more than one concern" above counts TRIGGERS. Two attendance triggers on
+  // the same pupil is one problem seen twice; attendance AND behaviour AND a subject
+  // pattern is three problems converging, and it is a different conversation.
+  // This is the triage version of the SLT tab's cross-domain read: same idea, but named
+  // pupils and a running order rather than a pattern.
+  (function(){
+    const DOM={ 'att-rising':'Attendance','att-pa':'Attendance','abs-pattern':'Attendance',
+                'seasonal-abs':'Attendance',
+                'sanc-accel':'Behaviour','sanc-conc':'Behaviour',
+                'subj-avoid':'Subject','disengage':'Subject' };
+    const rows=[];
+    px.forEach(p=>{
+      const live=_hmItems(p).live;
+      if(!live.length)return;
+      const doms=new Set();
+      live.forEach(it=>{ const d=DOM[it.type]; if(d)doms.add(d); });
+      if(doms.size>=2)rows.push({px:p,doms:[...doms].sort(),n:live.length,
+        red:live.some(i=>i.severity==='red')});
+    });
+    if(!rows.length)return;
+    // reds first, then the widest spread, then the most triggers
+    rows.sort((a,b)=>(b.red-a.red)||(b.doms.length-a.doms.length)||(b.n-a.n));
+    const COL={Attendance:'var(--sky)',Behaviour:'var(--red)',Subject:'var(--gold)'};
+    const cap=_hmCap('HM_AMBER_YL',10);
+    const shown=rows.slice(0,cap), hidden=rows.slice(cap);
+    const line=r=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+      +'<span style="width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        +(r.red?'<span style="color:var(--red)">\u25cf</span> ':'')+_hmName(r.px)+'</span>'
+      +'<span style="width:60px;color:var(--tx2);font-size:.66rem">'+(_hmReg(r.px)||'\u2014')+'</span>'
+      +'<span style="flex:1">'+r.doms.map(d=>
+          '<span style="display:inline-block;font-size:.62rem;padding:.05rem .35rem;border-radius:3px;'
+          +'margin-right:.25rem;background:'+COL[d]+';color:#fff">'+d+'</span>').join('')+'</span>'
+      +'<span style="width:74px;text-align:right;color:var(--tx2);font-size:.66rem">'+r.n+' triggers</span></div>';
+    h+=_hmPanel('Flagged in more than one area',
+      '<strong>'+rows.length+' pupils</strong> are firing triggers in two or more different areas. '
+      +'Not the same as \u201ccarrying more than one concern\u201d above, which counts triggers \u2014 two '
+      +'attendance triggers is one problem seen twice. Attendance <em>and</em> behaviour is two problems '
+      +'converging, and usually the shorter list to work through first. Reds first, then the widest spread.',
+      shown.map(line).join('')+_hmMore(hidden.map(line).join(''),hidden.length));
+  })();
+
   if(!conN&&!goodN.length){
     h+=_hmPanel('Nothing firing','',
       '<div style="font-size:.75rem;color:var(--tx2)">No pupil in this year group has triggered a concern. The triggers are in Admin &rsaquo; Thresholds.</div>');
@@ -8613,7 +8754,14 @@ function _hmSLT(){
   const SAN=DD.sanctions||[], F=_hmFlags();
   const end=_hmToday(), ayStart=ayStartISO(_hmAyOf(end));   // DfE basis, 1 August
   const reg=DD.registry||{};
-  const all=Object.keys(reg).map(Number);
+  // Honour the cohort selector. EVERYTHING on this tab flows from `all`: the five
+  // groups, the baseline, the medians, the gaps, the attendance index. So selecting a
+  // year group recomputes each of those WITHIN that year rather than filtering a
+  // whole-school figure afterwards — a gap inside Year 10 is its own number, not the
+  // school gap sliced.
+  const _scope=_hmPupilsInScope();
+  const all=Object.keys(reg).map(Number).filter(p=>_scope.has(p));
+  if(!all.length) return '<div style="padding:1rem;color:var(--tx2)">No pupils in this selection.</div>';
   // Five mutually exclusive groups. Order matters: FSM-AND-need is tested FIRST so a
   // pupil with both lands in the combined group rather than being swallowed by EHCP.
   // (The old order put EHCP first, so an FSM pupil with an EHCP never reached 'both'.)
@@ -8789,7 +8937,16 @@ function _hmSLT(){
       +'number of children rather than the group. <strong>Ratio is house points per '
       +'sanction</strong> \u2014 below 1:1 a group receives more sanctions than positives. '
       +'Same groups as below \u2014 no pupil counted twice, and \u201cever\u201d rather than '
-      +'\u201cnow\u201d.',mwBody);
+      +'\u201cnow\u201d. '
+      // ⚠️ MEAN + WINSORISED HERE; the Gaps table below uses a MEDIAN. Both deliberate.
+      // A page reporting two different averages without saying so is how a reader stops
+      // trusting either, so state the difference where the two meet.
+      +'<br><span style="color:var(--tx2)">This panel shows the <strong>mean and Winsorised '
+      +'mean</strong>: the question here is how much volume each group attracts per head, and '
+      +'every pupil should stay in the denominator. The <strong>Gaps</strong> section lower down '
+      +'uses a <strong>median</strong> \u2014 there the question is what a typical pupil '
+      +'experiences, and those groups are small enough that a few very high counts would carry '
+      +'the average. Different questions, different measure.</span>',mwBody);
   }
 
   h+=_hmPanel('Sanctions per pupil by group',
@@ -9086,9 +9243,9 @@ function _hmSLT(){
       +'<span style="width:48px;text-align:right;color:var(--tx2)">'+Math.round(100*counts[i]/(cur.length||1))+'%</span></div>').join('')
       +'<div style="border-top:1px solid var(--bd);margin:.45rem 0 .35rem"></div>'
       +'<div style="display:flex;gap:1.2rem;font-size:.72rem;flex-wrap:wrap">'
-        +'<span>Mean <strong>'+(cur.reduce((a,b)=>a+b,0)/(cur.length||1)).toFixed(1)+'%</strong></span>'
-        +'<span>Winsorised <strong>'+((_hmWinsorMean(cur)||0).toFixed(1))+'%</strong></span>'
-        +'<span>Median <strong>'+(cur.slice().sort((a,b)=>a-b)[Math.floor(cur.length/2)]||0).toFixed(1)+'%</strong></span>'
+        +'<span title="every pupil counted, so a few very low attenders pull it down">Mean <strong>'+(cur.reduce((a,b)=>a+b,0)/(cur.length||1)).toFixed(1)+'%</strong></span>'
+        +'<span title="top and bottom 10% pulled in \u2014 every pupil stays in the denominator">Winsorised <strong>'+((_hmWinsorMean(cur)||0).toFixed(1))+'%</strong></span>'
+        +'<span title="the typical pupil \u2014 half above, half below">Median <strong>'+(cur.slice().sort((a,b)=>a-b)[Math.floor(cur.length/2)]||0).toFixed(1)+'%</strong></span>'
         +'<span style="color:'+(below?'var(--red)':'var(--tx2)')+'">Below '+ATT_LOW+'%: <strong>'+below+' pupils</strong></span>'
       +'</div>'
       +'<div style="margin-top:.5rem;padding:.4rem .5rem;border:1px dashed var(--bd);border-radius:6px;font-size:.68rem;color:var(--tx2)">'
@@ -9189,8 +9346,8 @@ function _hmSLT(){
     };
     // reuse the deduped date lists built above rather than a second pass
     const absByWeek={};
-    Object.keys(_absDates).forEach(px=>{
-      _absDates[px].forEach(dt=>{ const wk=mondayOf(dt); absByWeek[wk]=(absByWeek[wk]||0)+1; });
+    all.forEach(p=>{
+      (_absDates[String(p)]||[]).forEach(dt=>{ const wk=mondayOf(dt); absByWeek[wk]=(absByWeek[wk]||0)+1; });
     });
 
     // Denominator: pupils with a timetable that year x lessons scheduled that week.
@@ -9205,7 +9362,9 @@ function _hmSLT(){
     Object.keys(WLK).sort().forEach(wk=>{
       const lessons=WLK[wk]||0; if(!lessons)return;
       const {ay,wk:wn}=dfeWeekOf(wk);
-      const n=Object.keys(TTB[String(ay)]||{}).length;
+      // denominator must follow the cohort selector, not the whole school
+      const tt=TTB[String(ay)]||{};
+      const n=all.reduce((a,p)=>a+(tt[String(p)]?1:0),0);
       if(!n)return;
       const pct=100-((absByWeek[wk]||0)/(n*lessons)*100);
       if(pct<0||pct>100)return;                          // a week with partial data
@@ -9703,7 +9862,9 @@ function _hmSLT(){
       +'<strong>The headline figure is the MEDIAN gap</strong> \u2014 what a typical pupil in the '
       +'group experiences. The mean sits under it in small type, because the two answer different '
       +'questions and on skewed data they disagree: the EHCP group has a median of 0 sanctions and '
-      +'a mean of 14.5, since most receive none and two pupils carry the average.'
+      +'a mean of 14.5, since most receive none and two pupils carry the average. '
+      +'(The Behaviour panels above use a mean and a Winsorised mean instead \u2014 right for '
+      +'per-head volume across the whole school, wrong for small skewed groups. Both deliberate.)'
       +(anySplit?' \u26a0\ufe0f An amber mean points the OPPOSITE way to the median \u2014 that group\u2019s '
         +'average is being carried by a few pupils rather than describing the group.':''),
       tbl);
