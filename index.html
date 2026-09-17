@@ -2322,7 +2322,7 @@ function saveThresholds(){
       SAV_RATIO, SAV_MIN,
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
-      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN,
+      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN, AB_DOW_PCT, AB_DOW_MIN,
       HM_UNPREP, HM_AMBER_TG, HM_AMBER_YL
     };
     saveCfg('thresholds', _LS_KEY, obj);
@@ -2376,6 +2376,8 @@ function applyThresholdValues(v){
   if((n=safeI(v.SW_CODE))!=null) SW_CODE=n;
   if((n=safeI(v.SW_ONCALL))!=null) SW_ONCALL=n;
   if((n=safeI(v.SW_DET))!=null) SW_DET=n;
+  if((n=safeF(v.AB_DOW_PCT))!=null&&n>0&&n<=100) AB_DOW_PCT=n;
+  if((n=safeI(v.AB_DOW_MIN))!=null&&n>0) AB_DOW_MIN=n;
   if((n=safeF(v.SC_DOW_PCT))!=null&&n>0&&n<=100) SC_DOW_PCT=n;
   if((n=safeI(v.SC_DOW_MIN))!=null&&n>0) SC_DOW_MIN=n;
   if((n=safeF(v.SC_PER_PCT))!=null&&n>0&&n<=100) SC_PER_PCT=n;
@@ -2395,7 +2397,7 @@ const _THRESHOLD_DEFAULTS = {
   SAV_RATIO:2.0, SAV_MIN:3,
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
   TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
-  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8,
+  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8, AB_DOW_PCT:50, AB_DOW_MIN:6,
   HM_UNPREP:15, HM_AMBER_TG:4, HM_AMBER_YL:10
 };
 
@@ -2413,6 +2415,7 @@ const _THRESHOLD_INPUTS = {
   TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
   SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det',
   SC_DOW_PCT:'sc-dow-pct', SC_DOW_MIN:'sc-dow-min', SC_PER_PCT:'sc-per-pct', SC_PER_MIN:'sc-per-min',
+  AB_DOW_PCT:'ab-dow-pct', AB_DOW_MIN:'ab-dow-min',
   HM_UNPREP:'hm-unprep', HM_AMBER_TG:'hm-amber-tg', HM_AMBER_YL:'hm-amber-yl'
 };
 
@@ -2476,6 +2479,8 @@ function applyCT(){
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
   CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
   ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
+  AB_DOW_PCT=parseFloat(document.getElementById('ab-dow-pct').value)||50;
+  AB_DOW_MIN=parseInt(document.getElementById('ab-dow-min').value)||6;
   SC_DOW_PCT=parseFloat(document.getElementById('sc-dow-pct').value)||40;
   SC_DOW_MIN=parseInt(document.getElementById('sc-dow-min').value)||8;
   SC_PER_PCT=parseFloat(document.getElementById('sc-per-pct').value)||30;
@@ -2526,6 +2531,15 @@ let SW_CODE=1, SW_ONCALL=3, SW_DET=5;
 // Both need a MINIMUM COUNT as well as a share: 3 of 4 sanctions is 75% and means
 // nothing.
 let SC_DOW_PCT=40, SC_DOW_MIN=8;      // day of week
+// Absence concentrated on one weekday. Maya Taylor missed four Fridays and one
+// Wednesday all year — 20 of her 26 absence periods on Fridays, none on a Monday or
+// Tuesday. Nothing flagged it and nothing would: her year-to-date attendance is 93.8%,
+// and her Friday rate peaks at one in four, so no rate-based rule fires.
+// What makes it visible is EXCLUSIVITY, not volume. Five days spread across a week is
+// a different pupil from five Fridays, and only the second is telling you something.
+// Absence Pattern already exists but works on SLOTS — "always misses period 5 PE" —
+// not on the day as a whole.
+let AB_DOW_PCT=50, AB_DOW_MIN=6;      // absence: share on one weekday, min absence periods
 let SC_PER_PCT=30, SC_PER_MIN=8;      // period number
 // GCSE 1-9 → ability letter mapping (used to render OTA grades in dashboard).
 // Loaded from config.gcse_to_letter; falls back to the default below.
@@ -3390,159 +3404,6 @@ function renderTimetable(x, ay){
 
 // House-point version of the weekly timetable: same grid, but each slot shows House
 // Points (HP) and Positive on-calls (POC) with a positive (green) heatmap.
-function renderHPTimetable(x, ay){
-  const wrap=document.getElementById('p-tt-hp');
-  if(!wrap) return;
-  const ttByAY=DD.timetablesByAY||{};
-  const pAYS=Object.keys(ttByAY).filter(a=>ttByAY[a] && ttByAY[a][String(x)]).sort((a,b)=>(+a)-(+b));
-  if(!ay) ay = pAYS.includes(String(CAY)) ? String(CAY) : (pAYS[pAYS.length-1]||String(CAY));
-  ay=String(ay);
-  const grid=(ttByAY[ay]||{})[String(x)];
-  if(!grid){wrap.innerHTML='';return}
-
-  const HP=DD.housePoints||[];
-  const _today=new Date();
-  const _todayISO=`${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
-  const ayStart=ayStartISO(ay);
-  const ayEnd=(ay===String(CAY))?_todayISO:`${(+ay)+1}-08-31`;
-
-  // House points for this pupil within the selected AY
-  const pHP=HP.filter(r=>r[0]===x&&r[2]>=ayStart&&r[2]<=ayEnd);
-  const pHPLesson=pHP.filter(r=>r[3]!=null&&r[4]!=null);
-
-  // slot "dow|period" -> {hp, poc} (+ per-subject variant)
-  const slotHP={}, slotSubjHP={};
-  pHPLesson.forEach(r=>{
-    const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;const per=(r[4]||1)-1;
-    if(dow>=0&&dow<5){
-      const key=dow+'|'+per;
-      if(!slotHP[key])slotHP[key]={hp:0,poc:0};
-      const sk3=key+'|'+r[3];
-      if(!slotSubjHP[sk3])slotSubjHP[sk3]={hp:0,poc:0};
-      const t=r[1]===1?'poc':'hp';
-      slotHP[key][t]++;slotSubjHP[sk3][t]++;
-    }
-  });
-
-  // Subject summary (lessons/week) — same as the sanctions timetable
-  const subjCount={};
-  for(let d=0;d<TT_ND;d++)for(let p=0;p<TT_PER;p++){const c=grid[d][p];if(c)subjCount[c[0]]=(subjCount[c[0]]||0)+1}
-  const totalLessons=Object.values(subjCount).reduce((a,b)=>a+b,0);
-  const subjSummary=Object.entries(subjCount).sort((a,b)=>b[1]-a[1]).map(([s,n])=>{
-    const col=TT_COLORS[s]||'var(--ac)';
-    return`<span style="display:inline-flex;align-items:center;gap:.2rem;padding:.1rem .4rem;border-radius:4px;background:${col}12;border:1px solid ${col}30;font-size:.65rem;color:${col};white-space:nowrap"><span style="font-weight:600">${s}</span>×${n}</span>`;
-  }).join(' ');
-
-  // Year selector (calls renderHPTimetable)
-  const _ttInk=REG[String(x)]?.intake;
-  const ayLabel=a=>{const yg=_ttInk?((+a)-_ttInk+7):null; return (yg&&yg>=7&&yg<=13)?`Y${yg} (${a}-${(+a)+1})`:`${a}-${(+a)+1}`;};
-  const ttYearSel = pAYS.length>1
-    ? `<select onchange="renderHPTimetable(${x},this.value)" onclick="event.stopPropagation()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.62rem;padding:.1rem .25rem;border-radius:4px">${pAYS.map(a=>`<option value="${a}"${a===ay?' selected':''}>${ayLabel(a)}</option>`).join('')}</select>`
-    : `<span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.62rem;color:var(--mu)">${ayLabel(ay)}</span>`;
-
-  // Weighted score per slot for the heatmap (HP weight + POC weight)
-  const wHP=hpWeight(0), wPOC=hpWeight(1);
-  const slotScores={};let maxScore=0;
-  for(const[sk,sc] of Object.entries(slotHP)){const score=(sc.hp||0)*wHP+(sc.poc||0)*wPOC;slotScores[sk]=score;if(score>maxScore)maxScore=score}
-  function heatBg(score){
-    if(!score||!maxScore)return'';
-    const i=Math.min(score/maxScore,1);
-    if(i<0.15)return'background:rgba(46,148,105,0.07)';
-    if(i<0.3)return'background:rgba(46,148,105,0.14)';
-    if(i<0.5)return'background:rgba(46,148,105,0.22)';
-    if(i<0.7)return'background:rgba(46,138,95,0.30)';
-    if(i<0.85)return'background:rgba(46,138,95,0.40)';
-    return'background:rgba(46,122,85,0.50)';
-  }
-  const totalHP=pHP.filter(r=>r[1]===0).length, totalPOC=pHP.filter(r=>r[1]===1).length;
-
-  let html=`<div class="dw"><div class="dwt" style="display:flex;align-items:center;gap:.6rem;cursor:pointer" onclick="this.parentElement.querySelector('.tt-body').classList.toggle('tt-hide');this.querySelector('.tt-arrow').classList.toggle('tt-open')">Weekly Timetable — House Points <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:.68rem;color:var(--mu)">${totalHP} HP · ${totalPOC} POC</span>${ttYearSel}<span class="tt-arrow" style="margin-left:auto;font-size:.6rem;transition:transform .2s">▼</span></div>`;
-  html+=`<div class="tt-body">`;
-  html+=`<div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.6rem">${subjSummary}</div>`;
-  html+='<div class="tt-grid">';
-  html+='<div class="tt-hd"></div>';
-  TT_DAYS.forEach(d=>{html+=`<div class="tt-hd">${d}</div>`});
-
-  function hpForSubj(slotKey,subjName){
-    const ss=slotSubjHP[slotKey+'|'+subjName];if(!ss)return'';
-    const parts=[];
-    if(ss.hp)parts.push(`<span style="color:var(--green-dark);text-shadow:0 0 2px rgba(255,255,255,.6)">${ss.hp} HP</span>`);
-    if(ss.poc)parts.push(`<span style="color:var(--navy);text-shadow:0 0 2px rgba(255,255,255,.6)">${ss.poc} POC</span>`);
-    return parts.length?`<span style="font-size:.6rem;font-weight:500;font-family:'IBM Plex Mono',monospace">${parts.join(' ')}</span>`:'';
-  }
-
-  for(let p=0;p<TT_PERIODS;p++){
-    html+=`<div class="tt-per">P${p+1}</div>`;
-    for(let d=0;d<TT_ND;d++){
-      const cell=grid[d][p];
-      if(cell){
-        const isSplit=cell.length===4;
-        const subj=cell[0];const subj2=isSplit?cell[2]:null;
-        const col=TT_COLORS[subj]||'var(--ac)';const col2=subj2?(TT_COLORS[subj2]||'var(--ac)'):'';
-        const sk2=d+'|'+p;const sc=slotHP[sk2];const heat=heatBg(slotScores[sk2]||0);
-        const hpHtml=(()=>{if(!sc)return'';const parts=[];if(sc.hp)parts.push(`<span style="color:var(--green-dark);text-shadow:0 0 2px rgba(255,255,255,.6)">${sc.hp} HP</span>`);if(sc.poc)parts.push(`<span style="color:var(--navy);text-shadow:0 0 2px rgba(255,255,255,.6)">${sc.poc} POC</span>`);return parts.length?`<span style="font-size:.65rem;font-weight:500;font-family:'IBM Plex Mono',monospace">${parts.join(' · ')}</span>`:''})();
-        if(isSplit){
-          html+=`<div class="tt-cell" style="padding:0;${heat}"><div style="border-left:2px solid ${col};padding:.2rem .3rem;border-bottom:1px dashed var(--bd)"><span class="tt-subj" style="font-size:.55rem">${subj}</span>${hpForSubj(sk2,subj)?`<div>${hpForSubj(sk2,subj)}</div>`:''}</div><div style="border-left:2px solid ${col2};padding:.2rem .3rem"><span class="tt-subj" style="font-size:.55rem">${subj2}</span>${hpForSubj(sk2,subj2)?`<div>${hpForSubj(sk2,subj2)}</div>`:''}</div></div>`;
-        }else{
-          html+=`<div class="tt-cell" style="border-left:2px solid ${col};${heat}"><span class="tt-subj">${subj}</span>${hpHtml}</div>`;
-        }
-      }else{
-        html+=`<div class="tt-cell"><span style="color:var(--mu)">—</span></div>`;
-      }
-    }
-  }
-
-  // Non-lesson HP row
-  // ⚠️ THIS ROW USED TO BE HOUSE POINTS ONLY.
-  // The grid is titled "N HP · N sanctions", but the Non-Lesson row was gated on
-  // nlHP.length and tallied only hp/poc — so a pupil with no non-lesson house points
-  // got no row at all, and their non-lesson SANCTIONS vanished from a chart that
-  // claims to show both.
-  // Maya Taylor is the case: 46 sanctions this year, 32 with a slot, and 14 with
-  // neither subject nor period (9 detentions, which have no slot by construction, plus
-  // 5 codes recorded outside a lesson). All 14 were invisible, and the row did not
-  // render because she happens to have no non-lesson house points.
-  const nlHP=pHP.filter(r=>r[3]===null||r[4]===null);
-  // ⚠️ BUILD THIS LOCALLY. An earlier attempt reused pSancIdx from the OTHER slot grid
-  // with a `typeof ... !== 'undefined'` guard — different function, so it was always
-  // undefined, the guard quietly returned [] and the row still never appeared. A guard
-  // that hides a scope error is worse than the error.
-  // Same window and same shape as pHP above, so the two halves of this grid agree.
-  const nlSan=(DD.sanctions||[]).filter(r=>r[0]===x&&r[2]>=ayStart&&r[2]<=ayEnd
-    &&(r[3]==null||r[4]==null)).map(r=>({r:r}));
-  if(nlHP.length||nlSan.length){
-    const nlByDay={0:{hp:0,poc:0,san:0,det:0},1:{hp:0,poc:0,san:0,det:0},2:{hp:0,poc:0,san:0,det:0},3:{hp:0,poc:0,san:0,det:0},4:{hp:0,poc:0,san:0,det:0}};
-    nlHP.forEach(r=>{const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;if(dow>=0&&dow<5){if(r[1]===1)nlByDay[dow].poc++;else nlByDay[dow].hp++}});
-    nlSan.forEach(sx=>{const r=sx.r;const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;
-      if(dow>=0&&dow<5){ if(r[1]===2)nlByDay[dow].det++; else nlByDay[dow].san++; }});
-    let nlMax=0;const nlScores={};
-    for(let d=0;d<TT_ND;d++){const sc2=nlByDay[d];
-      // sanctions weigh into the heat as well, detentions at SW_DET like everywhere else
-      const score=(sc2.hp||0)*wHP+(sc2.poc||0)*wPOC+(sc2.san||0)+(sc2.det||0)*SW_DET;
-      nlScores[d]=score;if(score>nlMax)nlMax=score}
-    const combinedMax=Math.max(maxScore,nlMax);
-    function heatBgNL(score){if(!score||!combinedMax)return'';const i=Math.min(score/combinedMax,1);if(i<0.15)return'background:rgba(46,148,105,0.07)';if(i<0.3)return'background:rgba(46,148,105,0.14)';if(i<0.5)return'background:rgba(46,148,105,0.22)';if(i<0.7)return'background:rgba(46,138,95,0.30)';if(i<0.85)return'background:rgba(46,138,95,0.40)';return'background:rgba(46,122,85,0.50)'}
-    html+=`<div class="tt-per" style="font-size:.55rem;white-space:nowrap">Non<br>Lesson</div>`;
-    for(let d=0;d<TT_ND;d++){
-      const sc2=nlByDay[d];const heat=heatBgNL(nlScores[d]||0);
-      if(sc2.hp||sc2.poc||sc2.san||sc2.det){
-        const parts=[];
-        if(sc2.hp)parts.push(`<span style="color:var(--green-dark)">${sc2.hp} HP</span>`);
-        if(sc2.poc)parts.push(`<span style="color:var(--navy)">${sc2.poc} POC</span>`);
-        // sanctions and detentions, in the same red the rest of the grid uses
-        if(sc2.san)parts.push(`<span style="color:var(--red)">${sc2.san} sanc</span>`);
-        if(sc2.det)parts.push(`<span style="color:var(--red);font-weight:600">${sc2.det} det</span>`);
-        html+=`<div class="tt-cell" style="border-left:2px solid var(--mu);${heat}"><span style="font-size:.65rem;font-weight:500;font-family:'IBM Plex Mono',monospace;text-shadow:0 0 2px rgba(255,255,255,.6)">${parts.join(', ')}</span></div>`;
-      }else{
-        html+=`<div class="tt-cell"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
-      }
-    }
-  }
-  html+='</div>';
-  if(!pHP.length) html+=`<div style="font-size:.7rem;color:var(--mu);padding:.4rem 0">No house points recorded for ${ayLabel(ay)}.</div>`;
-  html+='</div></div>';
-  wrap.innerHTML=html;
-}
 
 // ── PUPIL VIEW ──
 /* ───────────────────────────────────────────────────────────────────────
@@ -13952,6 +13813,51 @@ function rPeer(){
       }
     })();
 
+    // ── 7a. ABSENCE ON ONE DAY OF THE WEEK ──
+    // Absence Pattern (above) works on SLOTS — "always misses period 5 PE". A pupil who
+    // misses the WHOLE of one weekday is invisible to it, and invisible to every
+    // attendance rule as well if their overall figure is fine.
+    // Maya Taylor: 20 of 26 absent periods on Fridays, four of five whole days off on a
+    // Friday, none at all on a Monday or Tuesday — and a year-to-date attendance of
+    // 93.8%, so nothing fired. The signal is EXCLUSIVITY, not volume.
+    // Detectable from her second Friday, 24 October.
+    (function(){
+      const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const aas=(DD.attAbsSubj||{})[String(px)]||{};
+      // same window the other triggers use: this year group's school days
+      const _sd=(_cnYgSDMod&&_cnYgSDMod[yg])?_cnYgSDMod[yg]:_cnSDMod;
+      if(!_sd||!_sd.length)return;
+      const winFrom=_sd[0], winTo=(_cnYgLatestMod&&_cnYgLatestMod[yg])||_sd[_sd.length-1];
+      const supp=getSuppressed(px), seen=new Set();
+      const byDay={}, wholeDays={};
+      let n=0;
+      Object.entries(aas).forEach(([k,list])=>{
+        const iso=(DD.dateIndex||[])[+k]||k;
+        if(!iso||iso<winFrom||iso>winTo)return;
+        const dn=DOW[new Date(iso+'T12:00:00').getDay()];
+        (list||[]).forEach(l=>{
+          const key=iso+'|'+l[1];
+          if(supp.has(key)||seen.has(key))return;
+          seen.add(key); n++;
+          byDay[dn]=(byDay[dn]||0)+1;
+        });
+        if((list||[]).length>=_hmPerPerDay()-1)wholeDays[dn]=(wholeDays[dn]||0)+1;
+      });
+      if(n<AB_DOW_MIN)return;
+      const top=Object.keys(byDay).sort((a,b)=>byDay[b]-byDay[a])[0];
+      if(!top)return;
+      const pct=100*byDay[top]/n;
+      if(pct<AB_DOW_PCT)return;
+      const wd=wholeDays[top]||0;
+      items.push({type:'abs-dow',subkey:top,label:'Absence on one day',
+        severity:pct>=AB_DOW_PCT*1.4?'red':'amber',
+        detail:`${Math.round(pct)}% of ${fn}'s absence this year falls on a ${top} `
+          +`\u2014 ${byDay[top]} of ${n} periods`
+          +(wd?`, including ${wd} whole ${top}${wd===1?'':'s'}`:'')
+          +`. A pupil who misses one weekday repeatedly can still have a perfectly `
+          +`ordinary overall attendance figure, so this will not show up anywhere else.`});
+    })();
+
     // ── 7b. SANCTIONS ON ONE DAY / IN ONE PERIOD ──
     // Maya Taylor took 21 of 37 codes on Mondays (57%) against 3% on Tuesdays, spread
     // across PE, Maths and Personal Development — so no single teacher stood out and
@@ -15271,7 +15177,9 @@ function rPeer(){
           +'before \u2014 rather than at general defiance. Nothing else looks at either: Sanctions '
           +'Concentration is per teacher, and Absence Pattern covers slots but only for absence.',
           'Concerns \u2192 Sanctions on one day / Sanctions in one period',
-          inputRow('Day of week \u2014 share (%)','sc-dow-pct',SC_DOW_PCT,{min:20,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s sanctions fall on a single weekday. With five teaching days an even spread is 20%, so 40% is double the expected share.'})
+          inputRow('Absence \u2014 share on one day (%)','ab-dow-pct',AB_DOW_PCT,{min:25,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s absent periods fall on a single weekday. An even spread is 20%, so 50% is two and a half times the expected share. This catches a pupil who is otherwise a good attender but repeatedly misses one day \u2014 invisible to any rule based on overall attendance.'})
+          +inputRow('Absence \u2014 minimum periods','ab-dow-min',AB_DOW_MIN,{min:3,max:60,step:1,hint:'The floor before the share is tested. One whole day off is usually 5 periods, so 6 means at least two separate absences.'})
+          +inputRow('Sanctions \u2014 day of week share (%)','sc-dow-pct',SC_DOW_PCT,{min:20,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s sanctions fall on a single weekday. With five teaching days an even spread is 20%, so 40% is double the expected share.'})
           +inputRow('Day of week \u2014 minimum sanctions','sc-dow-min',SC_DOW_MIN,{min:3,max:50,step:1,hint:'A share means nothing on small numbers \u2014 3 of 4 sanctions on a Monday is 75% and tells you nothing. This is the floor before the share is tested.'})
           +inputRow('Period \u2014 share (%)','sc-per-pct',SC_PER_PCT,{min:10,max:100,step:5,hint:'Flag when this percentage or more fall in one period of the day. Set lower than the day threshold because there are usually more periods than days, so the expected share per period is smaller.'})
           +inputRow('Period \u2014 minimum sanctions','sc-per-min',SC_PER_MIN,{min:3,max:50,step:1,hint:'The floor before the period share is tested.'})
@@ -16483,7 +16391,8 @@ function rPeer(){
   window.renderAttTable=renderAttTable;
   window.renderDistCharts=renderDistCharts;
   window.renderHPDistCharts=renderHPDistCharts;
-  window.renderHPTimetable=renderHPTimetable;
+  // renderHPTimetable removed 12 Sep: a dead duplicate of renderConductGrid that
+  // still looked live and absorbed three rounds of fixes meant for the real grid.
   window.renderTimetable=renderTimetable;
   window.renderAbsencePattern=renderAbsencePattern;
   window.renderPresenceGrid=renderPresenceGrid;
