@@ -2322,7 +2322,7 @@ function saveThresholds(){
       SAV_RATIO, SAV_MIN,
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
-      SW_CODE, SW_ONCALL, SW_DET,
+      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN,
       HM_UNPREP, HM_AMBER_TG, HM_AMBER_YL
     };
     saveCfg('thresholds', _LS_KEY, obj);
@@ -2376,6 +2376,10 @@ function applyThresholdValues(v){
   if((n=safeI(v.SW_CODE))!=null) SW_CODE=n;
   if((n=safeI(v.SW_ONCALL))!=null) SW_ONCALL=n;
   if((n=safeI(v.SW_DET))!=null) SW_DET=n;
+  if((n=safeF(v.SC_DOW_PCT))!=null&&n>0&&n<=100) SC_DOW_PCT=n;
+  if((n=safeI(v.SC_DOW_MIN))!=null&&n>0) SC_DOW_MIN=n;
+  if((n=safeF(v.SC_PER_PCT))!=null&&n>0&&n<=100) SC_PER_PCT=n;
+  if((n=safeI(v.SC_PER_MIN))!=null&&n>0) SC_PER_MIN=n;
   if((n=safeI(v.HM_UNPREP))!=null) HM_UNPREP=n;
   if((n=safeI(v.HM_AMBER_TG))!=null) HM_AMBER_TG=n;
   if((n=safeI(v.HM_AMBER_YL))!=null) HM_AMBER_YL=n;
@@ -2391,7 +2395,7 @@ const _THRESHOLD_DEFAULTS = {
   SAV_RATIO:2.0, SAV_MIN:3,
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
   TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
-  SW_CODE:1, SW_ONCALL:3, SW_DET:5,
+  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8,
   HM_UNPREP:15, HM_AMBER_TG:4, HM_AMBER_YL:10
 };
 
@@ -2408,6 +2412,7 @@ const _THRESHOLD_INPUTS = {
   CL_MIN_PUPILS:'cl-min-pupils', CL_MIN_CODES:'cl-min-codes', CL_RATIO_AMBER:'cl-ratio-amber', CL_RATIO_RED:'cl-ratio-red',
   TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
   SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det',
+  SC_DOW_PCT:'sc-dow-pct', SC_DOW_MIN:'sc-dow-min', SC_PER_PCT:'sc-per-pct', SC_PER_MIN:'sc-per-min',
   HM_UNPREP:'hm-unprep', HM_AMBER_TG:'hm-amber-tg', HM_AMBER_YL:'hm-amber-yl'
 };
 
@@ -2471,6 +2476,10 @@ function applyCT(){
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
   CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
   ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
+  SC_DOW_PCT=parseFloat(document.getElementById('sc-dow-pct').value)||40;
+  SC_DOW_MIN=parseInt(document.getElementById('sc-dow-min').value)||8;
+  SC_PER_PCT=parseFloat(document.getElementById('sc-per-pct').value)||30;
+  SC_PER_MIN=parseInt(document.getElementById('sc-per-min').value)||8;
   CG_AT=parseFloat(document.getElementById('cg-at').value)||1.3;
   CG_PA_PCT=parseFloat(document.getElementById('cg-pa-pct').value)||10;
   CG_SC=parseFloat(document.getElementById('cg-sc').value)||1.5;
@@ -2509,6 +2518,15 @@ function hideCTModal(){}
 
 // Sanction weightings (global)
 let SW_CODE=1, SW_ONCALL=3, SW_DET=5;
+// Day-of-week and period concentration. A pupil taking 57% of their sanctions on one
+// day, or a large share in one period, is pointing at something structural — the
+// timetable, a transition, the lesson before — rather than at general defiance.
+// Nothing looked at either: Sanctions Concentration is per TEACHER, and Absence
+// Pattern is slots but only for absence.
+// Both need a MINIMUM COUNT as well as a share: 3 of 4 sanctions is 75% and means
+// nothing.
+let SC_DOW_PCT=40, SC_DOW_MIN=8;      // day of week
+let SC_PER_PCT=30, SC_PER_MIN=8;      // period number
 // GCSE 1-9 → ability letter mapping (used to render OTA grades in dashboard).
 // Loaded from config.gcse_to_letter; falls back to the default below.
 let GCSE_TO_LETTER = (DD.config && DD.config.gcse_to_letter) ? DD.config.gcse_to_letter : {};
@@ -13839,6 +13857,118 @@ function rPeer(){
       }
     })();
 
+    // ── 7b. SANCTIONS ON ONE DAY / IN ONE PERIOD ──
+    // Maya Taylor took 21 of 37 codes on Mondays (57%) against 3% on Tuesdays, spread
+    // across PE, Maths and Personal Development — so no single teacher stood out and
+    // Sanctions Concentration, which is per TEACHER, never fired. Nothing else looked
+    // at day or period for sanctions at all.
+    // The 3% Tuesday is what makes it worth surfacing: general defiance spreads out,
+    // and a pupil who is fine on Tuesday and difficult on Monday is telling you
+    // something specific — the timetable, the weekend, or the Monday detention itself.
+    // ⚠️ SHARE ALONE IS MEANINGLESS ON SMALL NUMBERS. Both tests need a minimum count
+    // first: 3 of 4 sanctions on a Monday is 75% and says nothing.
+    // Both thresholds are in Admin -> Sanction Concentration.
+    (function(){
+      const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const sd=_cnYgSDMod&&_cnYgSDMod[yg]?_cnYgSDMod[yg]:_cnSDMod;
+      const from=sd.length?sd[0]:'';
+      const rows=(DD.sanctions||[]).filter(r=>r[0]===px&&r[1]!==2&&(!from||r[2]>=from));
+      if(!rows.length)return;
+      const subjOf=r=>r[3]||null;
+      const tally=(keyFn)=>{
+        const t={},subs={};
+        rows.forEach(r=>{ const k=keyFn(r); if(k==null||k==='')return;
+          t[k]=(t[k]||0)+1;
+          const sj=subjOf(r); if(sj)((subs[k]=subs[k]||{})[sj]=(subs[k][sj]||0)+1); });
+        const n=Object.values(t).reduce((a,b)=>a+b,0);
+        if(!n)return null;
+        const top=Object.keys(t).sort((a,b)=>t[b]-t[a])[0];
+        return {top:top,count:t[top],total:n,pct:100*t[top]/n,
+                subs:Object.entries(subs[top]||{}).sort((a,b)=>b[1]-a[1]).map(x=>x[0])};
+      };
+      const named=l=>l.length>1?l.slice(0,-1).join(', ')+' and '+l[l.length-1]:(l[0]||'');
+
+      const dw=tally(r=>{ const d2=new Date(r[2]+'T12:00:00'); return isNaN(d2)?null:DOW[d2.getDay()]; });
+      if(dw&&dw.total>=SC_DOW_MIN&&dw.pct>=SC_DOW_PCT){
+        items.push({type:'sanc-dow',subkey:dw.top,label:'Sanctions on one day',
+          severity:dw.pct>=SC_DOW_PCT*1.5?'red':'amber',
+          detail:`${Math.round(dw.pct)}% of ${fn}'s sanctions this year fall on a ${dw.top} `
+            +`\u2014 ${dw.count} of ${dw.total}.`
+            +(dw.subs.length?` Mostly ${named(dw.subs.slice(0,3))}.`:'')
+            +` A day with this much of the total usually points at something in the timetable `
+            +`or the routine around it rather than at the pupil.`});
+      }
+
+      const pr=tally(r=>r[4]||null);
+      if(pr&&pr.total>=SC_PER_MIN&&pr.pct>=SC_PER_PCT){
+        items.push({type:'sanc-period',subkey:String(pr.top),label:'Sanctions in one period',
+          severity:pr.pct>=SC_PER_PCT*1.5?'red':'amber',
+          detail:`${Math.round(pr.pct)}% of ${fn}'s sanctions this year are in period ${pr.top} `
+            +`\u2014 ${pr.count} of ${pr.total}.`
+            +(pr.subs.length?` Mostly ${named(pr.subs.slice(0,3))}.`:'')
+            +` Worth checking what happens immediately before that lesson.`});
+      }
+    })();
+
+    // ── 8. ATTAINMENT / EFFORT DROP ──
+    // Term-on-term and year-on-year drops were ALREADY detected and shown as badges on
+    // the pupil page — but a badge only appears if someone opens that pupil. Nothing
+    // surfaced them, so a pupil whose attainment fell across four subjects never
+    // reached a Concerns list, a year leader's view or a tutor's.
+    // Maya Davies is the case that prompted this: Double Science 2->5, French 3->6,
+    // Maths 4->6, Photography 2->4 between T1 and T2, and not one behaviour or
+    // attendance trigger fired all year because her sanction load, though the heaviest
+    // in the cohort, was FLAT and the sanctions triggers detect acceleration.
+    //
+    // ⚠️ SAME THRESHOLDS AS THE BADGES (CT_AB / CT_EF) BY DESIGN. Two systems reporting
+    // the same drop with different cutoffs would disagree in front of a teacher, and
+    // the badge would be right as often as the trigger. One number, two places.
+    // ⚠️ Ranks are 1 = BEST, so a drop is a POSITIVE difference. Effort runs the same
+    // way. Both match dgBadges() on the pupil page.
+    (function(){
+      const ink=REG[String(px)]?.intake; if(!ink)return;
+      const rows=PRG[inkKey(ink)]||{};
+      const pp=(PER||[]).filter(k=>rows[k]);
+      const rowFor=k=>(rows[k]||[]).find(r=>r[0]===px);
+      const scOf=k=>{ const r=rowFor(k); return r?(progCol(r,'scores')||{}):null; };
+      // latest collection this pupil actually has scores in, and the one before it
+      let lp=null; for(let i=pp.length-1;i>=0;i--){ const sc=scOf(pp[i]); if(sc&&Object.keys(sc).length){lp=pp[i];break;} }
+      if(!lp)return;
+      const i=pp.indexOf(lp), p5=i>=1?pp[i-1]:null;
+      if(!p5)return;
+      const cur=scOf(lp), prv=scOf(p5);
+      if(!cur||!prv)return;
+      const drops=(mode,thresh)=>{
+        const out=[];
+        Object.keys(cur).forEach(sk=>{
+          const c=cur[sk], p2=prv[sk]; if(!c||!p2)return;
+          let a,b;
+          if(mode==='ab'){ a=abRk(p2)||0; b=abRk(c)||0; if(!a||!b)return; }
+          else { a=p2[1]; b=c[1]; if(a==null||b==null||!a||!b)return; }
+          // the loader expands score keys to full subject names, so sk IS the name
+          if(b-a>=thresh)out.push({s:sk,by:b-a});
+        });
+        return out.sort((x,y)=>y.by-x.by);
+      };
+      const ab=drops('ab',CT_AB), ef=drops('ef',CT_EF);
+      // period keys are expanded to their labels by the loader as well
+      const lbl=k=>k;
+      const name=l=>l.length>1?l.slice(0,-1).map(x=>x.s).join(', ')+' and '+l[l.length-1].s:l[0].s;
+      if(ab.length){
+        items.push({type:'attain-drop',subkey:'',label:'Attainment Dropped',
+          severity:(ab.length>=3||ab.some(x=>x.by>=3))?'red':'amber',
+          detail:`${fn} has dropped ${ab.length===1?'a band':ab[0].by+' bands'} or more in `
+            +`${ab.length} subject${ab.length===1?'':'s'} between ${lbl(p5)} and ${lbl(lp)} `
+            +`\u2014 ${name(ab)}.`});
+      }
+      if(ef.length){
+        items.push({type:'effort-drop',subkey:'',label:'Effort Dropped',
+          severity:(ef.length>=3)?'red':'amber',
+          detail:`${fn}'s effort grade has fallen in ${ef.length} subject${ef.length===1?'':'s'} `
+            +`between ${lbl(p5)} and ${lbl(lp)} \u2014 ${name(ef)}.`});
+      }
+    })();
+
     return items;
   }
   function _pocRender(px,items){
@@ -15038,6 +15168,18 @@ function rPeer(){
           'Concerns tab → Pupil Concerns; Pupil tab',
           inputRow('Decline multiplier','ct-at',CT_AT,{min:1.0,max:3.0,step:0.05,hint:'Recent absence rate must exceed the older rate by this multiplier to fire. Default 1.3 (i.e. 30% higher).'})+
           inputRow('Minimum recent absences','ct-am',CT_AM,{min:0,max:50,step:1,hint:'A pupil must have at least this many absent periods in the recent 20-day window before any flag fires. Default 3.'})
+        )}
+        ${groupPanel(
+          'Sanction Concentration',
+          'A pupil taking a large share of their sanctions on one day of the week, or in one period, '
+          +'is usually pointing at something structural \u2014 the timetable, a transition, the lesson '
+          +'before \u2014 rather than at general defiance. Nothing else looks at either: Sanctions '
+          +'Concentration is per teacher, and Absence Pattern covers slots but only for absence.',
+          'Concerns \u2192 Sanctions on one day / Sanctions in one period',
+          inputRow('Day of week \u2014 share (%)','sc-dow-pct',SC_DOW_PCT,{min:20,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s sanctions fall on a single weekday. With five teaching days an even spread is 20%, so 40% is double the expected share.'})
+          +inputRow('Day of week \u2014 minimum sanctions','sc-dow-min',SC_DOW_MIN,{min:3,max:50,step:1,hint:'A share means nothing on small numbers \u2014 3 of 4 sanctions on a Monday is 75% and tells you nothing. This is the floor before the share is tested.'})
+          +inputRow('Period \u2014 share (%)','sc-per-pct',SC_PER_PCT,{min:10,max:100,step:5,hint:'Flag when this percentage or more fall in one period of the day. Set lower than the day threshold because there are usually more periods than days, so the expected share per period is smaller.'})
+          +inputRow('Period \u2014 minimum sanctions','sc-per-min',SC_PER_MIN,{min:3,max:50,step:1,hint:'The floor before the period share is tested.'})
         )}
         ${groupPanel(
           'Attendance Display',
