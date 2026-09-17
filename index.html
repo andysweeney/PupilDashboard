@@ -8517,66 +8517,78 @@ function _hmTutor(){
   // ══════════════════════════════════════════════════════════════════════════
   //  WHAT HAS CHANGED THIS WEEK
   // ══════════════════════════════════════════════════════════════════════════
-  // A form tutor already knows their 29 children. A list of who has a concern tells
-  // them what they could get from a printout. What they cannot see without opening this
-  // tab is what MOVED — and that is the only reason to open it on a Monday.
+  // MILESTONES, not rate-of-change. An earlier version compared each pupil's last five
+  // school days against the twenty before, which duplicated what the Concerns triggers
+  // already do — with different windows and different thresholds. Two systems answering
+  // the same question with different numbers is worse than one, because a tutor cannot
+  // tell which to believe.
+  // A milestone is an EVENT: first sanction, fifth sanction, first house point, fifth,
+  // a detention. Nothing to tune, nothing to disagree with Concerns about, and a tutor
+  // can act on it the same morning.
   //
-  // ⚠️ THIS IS NOT "which concerns are new". pupilOtherConcernItems(px) takes a pupil
-  // and nothing else: there is no as-of date and nothing stores what fired last week,
-  // so last week's concern list cannot be replayed. This is computed from the
-  // UNDERLYING DATA instead — absences, sanctions and positives in the last five school
-  // days against the twenty before — which is more honest about what it measures.
-  // A concern that fired last week and still fires will NOT appear here unless the
-  // numbers behind it moved. That is the point: it is a change feed, not a status list.
+  // ⚠️ ATTENDANCE IS NOT A MILESTONE AND NOT A WEEKLY COMPARISON.
+  // Year-to-date attendance is CUMULATIVE, so it gets progressively harder to move: three
+  // days missed in September shifts the average far more than the same three days in
+  // June. A week-on-week comparison therefore goes quiet exactly when a slide is hardest
+  // to spot, and a pupil drifting down all year never triggers one at all.
+  // What matters is the EFFECT ON THEIR YEAR-TO-DATE FIGURE — did this week push it down,
+  // and is it now at or near the line. That is what the second list below shows.
   const _chg=(function(){
     const sd=_hmSchoolDays();
-    if(sd.length<10)return null;                 // too early in the year to compare
+    if(sd.length<6)return null;
     const W=Math.min(5,Math.floor(sd.length/2));
-    const now=sd.slice(-W), prev=sd.slice(-(W*5),-W);
-    if(!prev.length)return null;
-    const inWin=(list,days)=>{
-      const a=days[0], b=days[days.length-1];
-      return list.filter(d=>d>=a&&d<=b).length;
-    };
-    // per-pupil dated lists, deduped the same way countAbsPeriods does
-    const absD={},sanD={},hpD={};
-    px.forEach(p=>{
-      const supp=getSuppressed(p), seen=new Set(), ds=[];
-      ((DD.attAbsSubj||{})[String(p)]||[]).forEach(r=>{
-        const k=r[0]+'|'+r[2]; if(supp.has(k)||seen.has(k))return; seen.add(k); ds.push(r[0]);
-      });
-      absD[p]=ds; sanD[p]=[]; hpD[p]=[];
+    const cut=sd[sd.length-W];                      // first day of "this week"
+    const prevEnd=sd[sd.length-W-1];                // last day before it
+
+    // ── milestones ──
+    const sanD={},hpD={},detD={};
+    px.forEach(p=>{sanD[p]=[];hpD[p]=[];detD[p]=[];});
+    (DD.sanctions||[]).forEach(r=>{
+      if(!sanD[r[0]])return;
+      const d=_hmDate(r);
+      if(r[1]===2)detD[r[0]].push(d); else sanD[r[0]].push(d);
     });
-    (DD.sanctions||[]).forEach(r=>{ if(sanD[r[0]])sanD[r[0]].push(_hmDate(r)); });
     (DD.housePoints||[]).forEach(r=>{ if(hpD[r[0]])hpD[r[0]].push(_hmDate(r)); });
 
-    const perDay=(n,d)=>d?n/d:0;
-    const out=[];
+    const nth=(list,n)=>{ const v=list.slice().sort(); return v.length>=n?v[n-1]:null; };
+    const inWeek=d=>d&&d>=cut;
+    const mile=[];
     px.forEach(p=>{
       const items=[];
-      const aN=perDay(inWin(absD[p],now),now.length), aP=perDay(inWin(absD[p],prev),prev.length);
-      const sN=perDay(inWin(sanD[p],now),now.length), sP=perDay(inWin(sanD[p],prev),prev.length);
-      const hN=perDay(inWin(hpD[p],now),now.length), hP=perDay(inWin(hpD[p],prev),prev.length);
-      // "notable" = at least one a day more than usual, or a clear reversal from none.
-      // Deliberately blunt: a form is 29 pupils and a subtle statistical move is not
-      // something a tutor can act on. Only surface what would change their Monday.
-      if(aN-aP>=0.5&&inWin(absD[p],now)>=2)
-        items.push(['Absence up','var(--red)',inWin(absD[p],now)+' periods this week vs '
-          +(aP*now.length).toFixed(1)+' usual']);
-      if(aP-aN>=0.5&&inWin(absD[p],prev)>=5)
-        items.push(['Absence down','var(--green)','back in more than usual']);
-      if(sN-sP>=0.4&&inWin(sanD[p],now)>=2)
-        items.push(['Sanctions up','var(--red)',inWin(sanD[p],now)+' this week vs '
-          +(sP*now.length).toFixed(1)+' usual']);
-      if(sP-sN>=0.4&&inWin(sanD[p],prev)>=3&&inWin(sanD[p],now)===0)
-        items.push(['No sanctions','var(--green)','first clear week in a while']);
-      if(hN-hP>=0.6&&inWin(hpD[p],now)>=3)
-        items.push(['Positives up','var(--green)',inWin(hpD[p],now)+' this week']);
-      if(items.length)out.push({px:p,items:items,
-        bad:items.some(i=>i[1]==='var(--red)')});
+      const s1=nth(sanD[p],1), s5=nth(sanD[p],5);
+      const h1=nth(hpD[p],1), h5=nth(hpD[p],5);
+      if(inWeek(s1))items.push(['First sanction','var(--red)','of the year']);
+      else if(inWeek(s5))items.push(['Fifth sanction','var(--red)','now on '+sanD[p].length]);
+      if(detD[p].some(inWeek))items.push(['Detention','var(--red)',
+        detD[p].filter(inWeek).length>1?detD[p].filter(inWeek).length+' this week':'']);
+      if(inWeek(h1))items.push(['First house point','var(--green)','of the year']);
+      else if(inWeek(h5))items.push(['Fifth house point','var(--green)','now on '+hpD[p].length]);
+      if(items.length)mile.push({px:p,items:items,bad:items.some(i=>i[1]==='var(--red)')});
     });
-    out.sort((a,b)=>(b.bad-a.bad)||(b.items.length-a.items.length));
-    return {rows:out,now:now,prev:prev};
+    mile.sort((a,b)=>(b.bad-a.bad)||(b.items.length-a.items.length));
+
+    // ── attendance: the effect of this week on the YEAR-TO-DATE figure ──
+    const ppd=_hmPerPerDay();
+    const ytd=(p,upto)=>{
+      const days=sd.filter(d=>d<=upto);
+      if(!days.length)return null;
+      const n=days.length*ppd;
+      return n>0?100-(countAbsPeriods(p,days[0],days[days.length-1]).total/n*100):null;
+    };
+    const att=[];
+    px.forEach(p=>{
+      const now=ytd(p,sd[sd.length-1]), was=ytd(p,prevEnd);
+      if(now==null||was==null)return;
+      const d=now-was;
+      const near=now>=ATT_LOW&&now<ATT_LOW+2;
+      const crossed=was>=ATT_LOW&&now<ATT_LOW;
+      if(crossed)att.push({px:p,now:now,d:d,tag:'Crossed below '+ATT_LOW+'%',tone:'var(--red)'});
+      else if(now<ATT_LOW&&d<=-0.3)att.push({px:p,now:now,d:d,tag:'Still falling',tone:'var(--red)'});
+      else if(near&&d<0)att.push({px:p,now:now,d:d,tag:'Approaching '+ATT_LOW+'%',tone:'var(--orange)'});
+      else if(d<=-0.8)att.push({px:p,now:now,d:d,tag:'Biggest fall this week',tone:'var(--orange)'});
+    });
+    att.sort((a,b)=>a.now-b.now);
+    return {mile:mile,att:att,days:W};
   })();
 
   let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
@@ -8586,32 +8598,48 @@ function _hmTutor(){
     +'</div>';
 
   // The change feed goes FIRST: the lists below are what a tutor already knows, this is
-  // what they do not. If nothing moved, say so rather than rendering an empty panel —
-  // "nothing changed" is a useful answer and takes two seconds to read.
+  // what they do not. If nothing moved, say so rather than rendering an empty panel.
   if(_chg){
     const cap=_hmCap('HM_AMBER_TG',8);
-    const shown=_chg.rows.slice(0,cap), hidden=_chg.rows.slice(cap);
-    const line=r=>'<div style="display:flex;align-items:flex-start;gap:.5rem;margin-bottom:.35rem;font-size:.72rem">'
+    const mline=r=>'<div style="display:flex;align-items:flex-start;gap:.5rem;margin-bottom:.35rem;font-size:.72rem">'
       +'<span style="width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
-        +(r.bad?'<span style="color:var(--red)">\u25cf</span> ':'<span style="color:var(--green)">\u25cf</span> ')
-        +_hmName(r.px)+'</span>'
+        +'<span style="color:'+(r.bad?'var(--red)':'var(--green)')+'">\u25cf</span> '+_hmName(r.px)+'</span>'
       +'<span style="flex:1">'+r.items.map(i=>
           '<span style="display:inline-block;margin-right:.4rem;margin-bottom:.15rem">'
           +'<span style="font-size:.62rem;padding:.05rem .35rem;border-radius:3px;background:'+i[1]
-          +';color:#fff">'+i[0]+'</span> '
-          +'<span style="font-size:.64rem;color:var(--tx2)">'+i[2]+'</span></span>').join('')+'</span></div>';
-    h+=_hmPanel('What has changed this week',
-      _chg.rows.length
-        ? 'The last '+_chg.now.length+' school days against the '+_chg.prev.length+' before. '
-          +'<strong>Only pupils whose numbers moved</strong> \u2014 a child who has had a concern all '
-          +'term and still has one will not appear here. '
-          +'⚠️ Derived from attendance, sanctions and positives directly, not from the concern '
-          +'list: nothing records what fired last week, so this cannot say \u201cnew concern\u201d. '
-          +'It says what moved.'
-        : 'Nothing moved in the last '+_chg.now.length+' school days \u2014 no pupil\u2019s absences, '
-          +'sanctions or positives changed notably against their own recent pattern. '
-          +'The lists below are unchanged from last week.',
-      _chg.rows.length?(shown.map(line).join('')+_hmMore(hidden.map(line).join(''),hidden.length)):'');
+          +';color:#fff">'+i[0]+'</span>'
+          +(i[2]?' <span style="font-size:.64rem;color:var(--tx2)">'+i[2]+'</span>':'')
+          +'</span>').join('')+'</span></div>';
+    const ms=_chg.mile.slice(0,cap), mh=_chg.mile.slice(cap);
+    h+=_hmPanel('Milestones this week',
+      _chg.mile.length
+        ? 'Firsts and fifths in the last '+_chg.days+' school days \u2014 a pupil\u2019s first sanction of '
+          +'the year, their fifth, a detention, their first or fifth house point. '
+          +'<strong>Events, not trends</strong>: the Concerns tab already watches rates and '
+          +'patterns, and a second system using different thresholds would only disagree with it.'
+        : 'No firsts or fifths in the last '+_chg.days+' school days. No pupil in your form picked up '
+          +'their first or fifth sanction or house point, and none had a detention.',
+      _chg.mile.length?(ms.map(mline).join('')+_hmMore(mh.map(mline).join(''),mh.length)):'');
+
+    const aline=r=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.32rem;font-size:.72rem">'
+      +'<span style="width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        +'<span style="color:'+r.tone+'">\u25cf</span> '+_hmName(r.px)+'</span>'
+      +'<span style="width:120px"><span style="font-size:.62rem;padding:.05rem .35rem;border-radius:3px;'
+        +'background:'+r.tone+';color:#fff">'+r.tag+'</span></span>'
+      +'<span style="flex:1;color:var(--tx2);font-size:.66rem">now <strong style="color:var(--tx)">'
+        +r.now.toFixed(1)+'%</strong> for the year, '+(r.d<0?'down ':'up ')+Math.abs(r.d).toFixed(1)
+        +' points this week</span></div>';
+    const as=_chg.att.slice(0,cap), ah=_chg.att.slice(cap);
+    h+=_hmPanel('Attendance moving the wrong way',
+      _chg.att.length
+        ? 'What this week did to each pupil\u2019s <strong>year-to-date</strong> attendance, not the week '
+          +'on its own. ⚠️ A year-to-date figure is cumulative, so it gets harder to move as the year '
+          +'goes on \u2014 three days missed in September shift it far more than the same three in June. '
+          +'A week-on-week comparison would go quiet exactly when a slow slide is hardest to see. '
+          +'Lowest first.'
+        : 'No pupil\u2019s year-to-date attendance fell notably this week, and none crossed or '
+          +'approached '+ATT_LOW+'%.',
+      _chg.att.length?(as.map(aline).join('')+_hmMore(ah.map(aline).join(''),ah.length)):'');
   }
 
   // Concerns and Congrats sit side by side. flex-basis 380px means they drop to
