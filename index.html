@@ -3351,6 +3351,30 @@ function renderTimetable(x, ay){
       }
     }
   }
+  // ⚠️ DETENTIONS CANNOT APPEAR ON THIS GRID.
+  // The engine writes every detention as [pid, 2, date, None, None, type, 'Detention'] —
+  // no subject, no period — because a detention record does not say which lesson caused
+  // it. Line "if(r[3]===null||r[4]===null) return" above therefore skips them all, which
+  // makes the r[1]===2 branch and the SW_DET weighting below it dead code.
+  // This is correct as far as it goes: a detention is a consequence served after school,
+  // not an incident in a lesson, so placing it in a lesson's cell would be wrong.
+  // But a reader has no way to know detentions exist at all, so say so and give the
+  // count. The Calendar Heatmap DOES include them — it is day-based, and a detention
+  // has a date even without a slot.
+  // ⚠️ Xporter's school.detentions carries BehaviourId, linking a detention to the
+  // incident that caused it. Once that is available a detention CAN be placed in the
+  // slot of its originating incident, and the dead branch above becomes live.
+  (function(){
+    const nDet=pSancIdx.filter(s=>s.r[1]===2).length;
+    html+='<div style="font-size:.62rem;color:var(--tx2);margin-top:.35rem">'
+      +'Incidents recorded in lessons. '
+      +(nDet? '<strong>'+nDet+' detention'+(nDet===1?'':'s')+'</strong> this year '
+              +(nDet===1?'is':'are')+' not shown here \u2014 a detention record carries no '
+              +'subject or period, so there is no cell to put it in. They appear in the '
+              +'Calendar Heatmap below, which is day-based.'
+            : 'No detentions this year.')
+      +'</div>';
+  })();
   html+='</div></div></div>';
   wrap.innerHTML=html;
 }
@@ -3460,19 +3484,39 @@ function renderHPTimetable(x, ay){
   }
 
   // Non-lesson HP row
+  // ⚠️ THIS ROW USED TO BE HOUSE POINTS ONLY.
+  // The grid is titled "N HP · N sanctions", but the Non-Lesson row was gated on
+  // nlHP.length and tallied only hp/poc — so a pupil with no non-lesson house points
+  // got no row at all, and their non-lesson SANCTIONS vanished from a chart that
+  // claims to show both.
+  // Maya Taylor is the case: 46 sanctions this year, 32 with a slot, and 14 with
+  // neither subject nor period (9 detentions, which have no slot by construction, plus
+  // 5 codes recorded outside a lesson). All 14 were invisible, and the row did not
+  // render because she happens to have no non-lesson house points.
   const nlHP=pHP.filter(r=>r[3]===null||r[4]===null);
-  if(nlHP.length){
-    const nlByDay={0:{hp:0,poc:0},1:{hp:0,poc:0},2:{hp:0,poc:0},3:{hp:0,poc:0},4:{hp:0,poc:0}};
+  const nlSan=(typeof pSancIdx!=='undefined'?pSancIdx:[]).filter(s=>s.r[3]===null||s.r[4]===null);
+  if(nlHP.length||nlSan.length){
+    const nlByDay={0:{hp:0,poc:0,san:0,det:0},1:{hp:0,poc:0,san:0,det:0},2:{hp:0,poc:0,san:0,det:0},3:{hp:0,poc:0,san:0,det:0},4:{hp:0,poc:0,san:0,det:0}};
     nlHP.forEach(r=>{const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;if(dow>=0&&dow<5){if(r[1]===1)nlByDay[dow].poc++;else nlByDay[dow].hp++}});
+    nlSan.forEach(sx=>{const r=sx.r;const d2=new Date(r[2]+'T12:00:00');const dow=d2.getDay()-1;
+      if(dow>=0&&dow<5){ if(r[1]===2)nlByDay[dow].det++; else nlByDay[dow].san++; }});
     let nlMax=0;const nlScores={};
-    for(let d=0;d<TT_ND;d++){const sc2=nlByDay[d];const score=(sc2.hp||0)*wHP+(sc2.poc||0)*wPOC;nlScores[d]=score;if(score>nlMax)nlMax=score}
+    for(let d=0;d<TT_ND;d++){const sc2=nlByDay[d];
+      // sanctions weigh into the heat as well, detentions at SW_DET like everywhere else
+      const score=(sc2.hp||0)*wHP+(sc2.poc||0)*wPOC+(sc2.san||0)+(sc2.det||0)*SW_DET;
+      nlScores[d]=score;if(score>nlMax)nlMax=score}
     const combinedMax=Math.max(maxScore,nlMax);
     function heatBgNL(score){if(!score||!combinedMax)return'';const i=Math.min(score/combinedMax,1);if(i<0.15)return'background:rgba(46,148,105,0.07)';if(i<0.3)return'background:rgba(46,148,105,0.14)';if(i<0.5)return'background:rgba(46,148,105,0.22)';if(i<0.7)return'background:rgba(46,138,95,0.30)';if(i<0.85)return'background:rgba(46,138,95,0.40)';return'background:rgba(46,122,85,0.50)'}
     html+=`<div class="tt-per" style="font-size:.55rem;white-space:nowrap">Non<br>Lesson</div>`;
     for(let d=0;d<TT_ND;d++){
       const sc2=nlByDay[d];const heat=heatBgNL(nlScores[d]||0);
-      if(sc2.hp||sc2.poc){
-        const parts=[];if(sc2.hp)parts.push(`<span style="color:var(--green-dark)">${sc2.hp} HP</span>`);if(sc2.poc)parts.push(`<span style="color:var(--navy)">${sc2.poc} POC</span>`);
+      if(sc2.hp||sc2.poc||sc2.san||sc2.det){
+        const parts=[];
+        if(sc2.hp)parts.push(`<span style="color:var(--green-dark)">${sc2.hp} HP</span>`);
+        if(sc2.poc)parts.push(`<span style="color:var(--navy)">${sc2.poc} POC</span>`);
+        // sanctions and detentions, in the same red the rest of the grid uses
+        if(sc2.san)parts.push(`<span style="color:var(--red)">${sc2.san} sanc</span>`);
+        if(sc2.det)parts.push(`<span style="color:var(--red);font-weight:600">${sc2.det} det</span>`);
         html+=`<div class="tt-cell" style="border-left:2px solid var(--mu);${heat}"><span style="font-size:.65rem;font-weight:500;font-family:'IBM Plex Mono',monospace;text-shadow:0 0 2px rgba(255,255,255,.6)">${parts.join(', ')}</span></div>`;
       }else{
         html+=`<div class="tt-cell"><span style="color:var(--mu);font-size:.55rem">—</span></div>`;
