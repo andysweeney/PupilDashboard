@@ -8840,7 +8840,12 @@ function _hmSLT(){
   // this year", "FSM gap" and "Pupils with none" left the reader to infer the
   // subject from a panel further down the page. Say the noun, say the window,
   // and say what a ratio is a ratio OF.
-  const totalSanc=Object.values(tot).reduce((a,b)=>a+b,0);
+  // ⚠️ SCOPE THIS. Object.values(tot) sums EVERY pupil in the school, because `tot` is
+  // built from the whole sanction list and keyed by pupil rather than filtered. The
+  // house point total beside it IS scoped, so selecting a year divided one year's
+  // positives by the whole school's sanctions and the ratio collapsed — 4.0:1 for all
+  // pupils but 2.2:1 for Year 10, which is arithmetically impossible for a subset.
+  const totalSanc=all.reduce((a,p)=>a+(tot[p]||0),0);
   const clean=all.filter(p=>!tot[p]).length;
   let h='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem">'
     // Sanctions and house points on ONE card: shown apart, a reader takes the sanction
