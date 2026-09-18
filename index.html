@@ -1884,7 +1884,35 @@ function abTick(v){if(!Number.isInteger(v)||v<1||v>ABILITY.n)return '';const lv=
 // show that (and, when it differs from the shared-ladder label because the cohort has crossed a
 // grading system, show both: native grade + "(ladder on scale)"). Averaged datasets have no _raw and
 // fall back to the ladder label, exactly as before. y1 is the attendance overlay.
-function abTipLabel(ctx){const v=ctx.parsed.y;if(v==null)return ' '+ctx.dataset.label;if(ctx.dataset.yAxisID==='y1')return ' '+ctx.dataset.label+': '+v+'%';const ladder=abTick(v);const raw=ctx.dataset._raw?ctx.dataset._raw[ctx.dataIndex]:null;if(raw!=null&&raw!==''){return raw===ladder?(' '+ctx.dataset.label+': '+raw):(' '+ctx.dataset.label+': '+raw+'  ('+ladder+' on scale)');}return ' '+ctx.dataset.label+': '+ladder;}
+function abTipLabel(ctx){
+  const v=ctx.parsed.y;
+  if(v==null)return ' '+ctx.dataset.label;
+  if(ctx.dataset.yAxisID==='y1')return ' '+ctx.dataset.label+': '+v+'%';
+  const ladder=abTick(v);
+  const raw=ctx.dataset._raw?ctx.dataset._raw[ctx.dataIndex]:null;
+  // ⚠️ POSITION IN THE SUBJECT, appended here because this tooltip is where a reader
+  // actually looks. The same figure is in the Per-Subject Breakdown table, but nobody
+  // scrolls to a table to interpret a point they are already hovering.
+  // The dataset carries the pupil and the collection keys so the tooltip can resolve it
+  // without reaching for page state.
+  let pos='';
+  try{
+    const px=ctx.dataset._px, pk=ctx.dataset._colls&&ctx.dataset._colls[ctx.dataIndex];
+    if(px!=null&&pk){
+      const p=subjPos(px, ctx.dataset._subj, pk);
+      if(p){
+        pos = p.n<SUBJ_MIN_N
+          ? '  \u00b7 '+p.rank+'/'+p.n+' in the year'
+          : '  \u00b7 Q'+Math.max(1,Math.min(4,4-Math.floor(p.pct/25)))+' ('+Math.round(p.pct)+'th of '+p.n+')';
+      }
+    }
+  }catch(e){}
+  if(raw!=null&&raw!==''){
+    return raw===ladder ? (' '+ctx.dataset.label+': '+raw+pos)
+                        : (' '+ctx.dataset.label+': '+raw+'  ('+ladder+' on scale)'+pos);
+  }
+  return ' '+ctx.dataset.label+': '+ladder+pos;
+}
 // Achievement-chart "grading system changed here" markers. Given the x-axis period keys (pp, e.g.
 // "T1 2025") and a cohort intake, finds where the cohort crosses a key-stage boundary (Y9->Y10 =
 // KS3->KS4, Y11->Y12 = KS4->KS5) — i.e. where its grades switch system. Returns [] (and the plugin
@@ -4530,7 +4558,11 @@ function rP(){
   if(hasGrades){
   const labs=pp.map(p=>collLabel(p));
   document.getElementById('p-ch').innerHTML=`<div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Ability Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${ABILITY.bestLabel} = best)</span><button onclick="toggleAll('pab',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pab',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pab"></canvas></div></div><div class="chc"><div class="cht" style="display:flex;align-items:center;gap:.6rem">Effort Over Time <span style="font-weight:400;font-size:.55rem;color:var(--mu);margin-left:.3rem">(${EFFORT.bestLabel} = highest effort)</span><button onclick="toggleAll('pef',false)" style="margin-left:auto;background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Deselect All</button><button onclick="toggleAll('pef',true)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--mu);font-family:inherit;font-size:.62rem;padding:.2rem .5rem;border-radius:4px;cursor:pointer">Select All</button></div><div class="chw"><canvas id="c-pef"></canvas></div></div>`;
-  const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?abRk(data[p].sc[s])||null:null),_raw:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][0]:null),borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
+  const abDS=act.map((s,i)=>({label:isA?s:pu.id,data:pp.map(p=>data[p]?.sc[s]?abRk(data[p].sc[s])||null:null),_raw:pp.map(p=>data[p]?.sc[s]?data[p].sc[s][0]:null),_px:x,_subj:s,_colls:pp,  // ⚠️ carry the SUBJECT explicitly: dataset.label is the subject only when a
+  // single pupil is shown across all subjects. With one subject selected the label
+  // becomes the pupil's name, and using it as a subject key would silently look up
+  // nothing. `s` is always the subject; `x` is always the pupil.
+  borderColor:`hsl(${i*360/act.length},48%,45%)`,tension:.4,pointRadius:isA?2:4,borderWidth:isA?1:2.5,fill:false,yAxisID:'y'}));
   if(!isA){abDS.push({label:'Cohort Avg',data:pp.map(p=>{const rs=allR(ink,p);const s=rs.map(r=>r[3][sf]?abRk(r[3][sf])||0:0).filter(v=>v>0);return s.length?parseFloat((s.reduce((a,b)=>a+b,0)/s.length).toFixed(2)):null}),borderColor:PAL.slate,borderWidth:1.5,borderDash:[5,3],pointRadius:2,tension:.4,fill:false,yAxisID:'y'})}
   // Attendance overlay: subject-specific when single subject, overall when all
   const pAtt=ABP[String(x)];
