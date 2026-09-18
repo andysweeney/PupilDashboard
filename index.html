@@ -2602,6 +2602,28 @@ let SC_PER_PCT=30, SC_PER_MIN=8;      // period number
 // Loaded from config.gcse_to_letter; falls back to the default below.
 let GCSE_TO_LETTER = (DD.config && DD.config.gcse_to_letter) ? DD.config.gcse_to_letter : {};
 function sancWeight(type){return type===2?SW_DET:type===1?SW_ONCALL:SW_CODE}
+
+// ── PRIOR-PERIOD RATE ──────────────────────────────────────────────────────
+// Every "is this rising/falling" test in this file compared a short window against a
+// longer one that CONTAINS it — 20 days against 60, 10 against 100. That drags the
+// baseline towards the recent value, so the bigger the change the more it is hidden:
+// a pupil who improves pulls down the average they are measured against, and one who
+// worsens inflates it. The effect is largest exactly when the change matters most.
+//
+// This recovers the EARLIER period by subtraction. Both inputs must be rates over a
+// known number of school days; the units cancel, so it works for sanRA()'s weighted
+// points per 10sd and for attendance percentages alike:
+//     total(long)  = longVal  x longN
+//     total(short) = shortVal x shortN
+//     prior rate   = (total(long) - total(short)) / (longN - shortN)
+//
+// Returns 0 when the earlier period holds nothing, so callers must guard with > 0
+// before dividing — a ratio against nothing is not a ratio.
+function _priorWin(shortVal, shortN, longVal, longN){
+  if(!(longN > shortN)) return 0;
+  const v = (longVal * longN - shortVal * shortN) / (longN - shortN);
+  return v > 0 ? v : 0;
+}
 function applySW(){
   SW_CODE=parseInt(document.getElementById('sw-code').value)||1;
   SW_ONCALL=parseInt(document.getElementById('sw-oncall').value)||3;
@@ -4044,8 +4066,8 @@ function rP(){
     _bcSubjs.forEach(subj=>{
       const subjSan=_bcAllSan.filter(r=>(r[3]||'Non-Lesson')===subj);
       const s10=_bcRA(10,subjSan),s20=_bcRA(20,subjSan),s100=_bcRA(100,subjSan);
-      if(s10>s20*CT_SC&&s20>0&&subjSan.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-10)]&&r[2]<=_bcISO).length>=CT_MN) immConcerns.push(subj);
-      if(s10>s100*CT_SC&&s100>0&&subjSan.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-10)]&&r[2]<=_bcISO).length>=CT_MN) gradConcerns.push(subj);
+      if(s10>_priorWin(s10,10,s20,20)*CT_SC&&_priorWin(s10,10,s20,20)>0&&subjSan.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-10)]&&r[2]<=_bcISO).length>=CT_MN) immConcerns.push(subj);
+      if(s10>_priorWin(s10,10,s100,100)*CT_SC&&_priorWin(s10,10,s100,100)>0&&subjSan.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-10)]&&r[2]<=_bcISO).length>=CT_MN) gradConcerns.push(subj);
     });
     if(immConcerns.length) bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(181,72,59,.12);border:1px solid rgba(181,72,59,.4);font-size:.7rem;font-weight:600;color:var(--red)">⚠ Immediate Behavioural Concern: ${immConcerns.join(', ')}</span>`;
     if(gradConcerns.length) bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(187,107,26,.12);border:1px solid rgba(187,107,26,.4);font-size:.7rem;font-weight:600;color:var(--orange)">⚠ Graduated Behavioural Concern: ${gradConcerns.join(', ')}</span>`;
@@ -5808,8 +5830,8 @@ function rBC(){
     const _ygSD=ygSD[yg]||bcSD;
     const _ygEnd=ygLatest[yg]||allLatest;
     const sanCount10=pSan.filter(r=>r[2]>=_ygSD[Math.max(0,_ygSD.length-10)]&&r[2]<=_ygEnd).length;
-    const imm=s10>s20*CT_SC&&s20>0&&sanCount10>=CT_MN;
-    const grad=s10>s100*CT_SC&&s100>0&&sanCount10>=CT_MN;
+    const _pi=_priorWin(s10,10,s20,20);const imm=_pi>0&&s10>_pi*CT_SC&&sanCount10>=CT_MN;
+    const _pg=_priorWin(s10,10,s100,100);const grad=_pg>0&&s10>_pg*CT_SC&&sanCount10>=CT_MN;
     if(imm||grad){
       const pct10v20=s20>0?((s10-s20)/s20*100):0;
       const pct10v100=s100>0?((s10-s100)/s100*100):0;
@@ -5884,8 +5906,8 @@ function rBC(){
       const _ygSD2=ygSD[yg]||bcSD;
       const _ygEnd2=ygLatest[yg]||allLatest;
       const sSanCount10=sSan.filter(r=>r[2]>=_ygSD2[Math.max(0,_ygSD2.length-10)]&&r[2]<=_ygEnd2).length;
-      const imm=s10>s20*CT_SC&&s20>0&&sSanCount10>=CT_MN;
-      const grad=s10>s100*CT_SC&&s100>0&&sSanCount10>=CT_MN;
+      const _pi2=_priorWin(s10,10,s20,20);const imm=_pi2>0&&s10>_pi2*CT_SC&&sSanCount10>=CT_MN;
+      const _pg2=_priorWin(s10,10,s100,100);const grad=_pg2>0&&s10>_pg2*CT_SC&&sSanCount10>=CT_MN;
       if(imm||grad){
         const ci=getClsInfo(px,subj);
         const pct10v20=s20>0?((s10-s20)/s20*100):0;
@@ -13741,8 +13763,9 @@ function rPeer(){
     
     // 1. Attendance Declining
     const a20=attRAMod(px,20),a60=attRAMod(px,60);
-    if(a20.rate>a60.rate*CT_AT && a60.rate>0 && a20.absent>=CT_AM){
-      const sev=a20.rate>a60.rate*2?'red':'amber';
+    const _pAbs=_priorWin(a20.rate,20,a60.rate,60);   // days 21-60
+    if(_pAbs>0 && a20.rate>_pAbs*CT_AT && a20.absent>=CT_AM){
+      const sev=a20.rate>_pAbs*2?'red':'amber';
       items.push({type:'att-rising',subkey:'',label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} Periods in the last 20 school days (${a20.rate.toFixed(1)}% of Periods) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average).`});
     }
     // 2. Persistent Absence
@@ -13770,9 +13793,16 @@ function rPeer(){
     const s10=sanRAMod(px,yg,10),s20=sanRAMod(px,yg,20),
           s60=sanRAMod(px,yg,60),s100=sanRAMod(px,yg,100);
     const sCount10=sanCountInMod(px,yg,10),sCount20=sanCountInMod(px,yg,20);
-    const _imm =s10>s20*CT_SC  && s20>0  && sCount10>=CT_MN;
-    const _bld =s10>s100*CT_SC && s100>0 && sCount10>=CT_MN;
-    const _rise=s20>s60*CT_SC  && s60>0  && sCount20>=CT_MN;
+    // ⚠️ COMPARE AGAINST THE EARLIER PERIOD, NOT AN OVERLAPPING AVERAGE.
+    // These used to test s10 > s20 * 1.5 — but the 20-day figure CONTAINS the 10, so a
+    // pupil's own spike inflated the baseline it was measured against and the test got
+    // harder the worse things got. _priorWin() recovers days 11-20, 21-60, 11-100.
+    const _p10v20 =_priorWin(s10,10,s20,20);    // days 11-20
+    const _p10v100=_priorWin(s10,10,s100,100);  // days 11-100
+    const _p20v60 =_priorWin(s20,20,s60,60);    // days 21-60
+    const _imm =_p10v20 >0 && s10>_p10v20 *CT_SC && sCount10>=CT_MN;
+    const _bld =_p10v100>0 && s10>_p10v100*CT_SC && sCount10>=CT_MN;
+    const _rise=_p20v60 >0 && s20>_p20v60 *CT_SC && sCount20>=CT_MN;
     if(_imm||_bld||_rise){
       // Which subject the recent sanctions are in. Named only when one subject
       // holds most of them — otherwise it is spread and saying "Maths" misleads.
@@ -13794,12 +13824,12 @@ function rPeer(){
       // wrong way round.
       const _kind=_imm?'Sudden Sanctions Increase'
                  :(_bld?'Long-Term Sanctions Increase':'Recent Sanctions Increase');
-      const _sev=(_imm&&s10>s20*2)||(_bld&&s10>s100*2)||(s20>s60*2)?'red':'amber';
+      const _sev=(_imm&&s10>_p10v20*2)||(_bld&&s10>_p10v100*2)||(_rise&&s20>_p20v60*2)?'red':'amber';
       const _detail=_imm
-        ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against ${s20.toFixed(1)} over 20 days, ${(s10/s20).toFixed(1)}\u00d7.${_where}`
+        ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against ${_p10v20.toFixed(1)} in the 10 school days before that, ${(s10/_p10v20).toFixed(1)}\u00d7 the earlier rate.${_where}`
         : _bld
-        ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against a 100-day average of ${s100.toFixed(1)}, ${(s10/s100).toFixed(1)}\u00d7. This has been building rather than sudden.${_where}`
-        : `${fn} has had ${sCount20} sanctions in the last 20 school days \u2014 a weighted score of ${s20.toFixed(1)} against a 60-day average of ${s60.toFixed(1)}, ${(s20/s60).toFixed(1)}\u00d7.${_where}`;
+        ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against ${_p10v100.toFixed(1)} over the preceding 90 school days, ${(s10/_p10v100).toFixed(1)}\u00d7 the term baseline.${_where}`
+        : `${fn} has had ${sCount20} sanctions in the last 20 school days \u2014 a weighted score of ${s20.toFixed(1)} against ${_p20v60.toFixed(1)} in the 40 school days before that, ${(s20/_p20v60).toFixed(1)}\u00d7 the earlier rate.${_where}`;
       items.push({type:'sanc-accel',subkey:'',label:_kind,severity:_sev,detail:_detail});
     }
     // 4. Absence Pattern (slot-level)
@@ -14097,18 +14127,20 @@ function rPeer(){
     const _t=new Date();const _tISO=`${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,'0')}-${String(_t.getDate()).padStart(2,'0')}`;
     const a20=attRAMod(px,20),a60=attRAMod(px,60);
     let attImp=false;
-    if(a60.rate>=CG_PA_PCT && a20.rate*CG_AT<a60.rate){
-      attImp=true;const strong=a20.rate*2<a60.rate;
+    const _pAbsI=_priorWin(a20.rate,20,a60.rate,60);
+        if(a60.rate>=CG_PA_PCT && _pAbsI>0 && a20.rate*CG_AT<_pAbsI){
+      attImp=true;const strong=a20.rate*2<_pAbsI;
       const fac=a20.rate>0?` (${(a60.rate/a20.rate).toFixed(1)}× better than their rolling average)`:'';
       items.push({label:'Attendance Improving',severity:strong?'green-strong':'green',
         detail:`${fn} is recovering from a high absence rate — ${a20.rate.toFixed(1)}% of periods missed over the last 20 school days vs ${a60.rate.toFixed(1)}% across 60 days${fac}.`});
     }
     const s20=sanRAMod(px,yg,20),s60=sanRAMod(px,yg,60),c20=sanCountInMod(px,yg,20),c60=sanCountInMod(px,yg,60);
     let sancRed=false;
-    if((c60-c20)>=CG_MN && s60>0 && s20*CG_SC<s60){
-      sancRed=true;const strong=s20*2<s60;
+    const _pSan=_priorWin(s20,20,s60,60);   // days 21-60, recovered by subtraction
+        if((c60-c20)>=CG_MN && _pSan>0 && s20*CG_SC<_pSan){
+      sancRed=true;const strong=s20*2<_pSan;
       items.push({label:'Sanctions Reducing',severity:strong?'green-strong':'green',
-        detail:`${fn} is easing off — only ${c20} sanction${c20===1?'':'s'} in the last 20 school days after ${c60-c20} in the prior 40 (weighted ${s20.toFixed(1)} vs ${s60.toFixed(1)}).`});
+        detail:`${fn} is easing off — only ${c20} sanction${c20===1?'':'s'} in the last 20 school days after ${c60-c20} in the prior 40 (weighted ${s20.toFixed(1)} now against ${_pSan.toFixed(1)} then).`});
     }
     if(attImp&&sancRed){
       items.push({label:'Re-engaging',severity:'green-strong',
@@ -15604,6 +15636,25 @@ function rPeer(){
     location.reload();
   };
 
+  // Brief inline notice under the subject mapper. An alert() would be heavier than the
+  // situation deserves — this is guidance, not an error.
+  function _subjNote(msg){
+    try{
+      let el=document.getElementById('subj-note');
+      if(!el){
+        // Anchor to the subject mapper if it can be found (the "Add subject" input is
+        // inside it), else the admin pane. There is no dedicated id for that block.
+        const near=document.getElementById('subj-new-name');
+        const host=(near&&near.closest('div'))||document.getElementById('admin-out')||document.body;
+        el=document.createElement('div'); el.id='subj-note';
+        host.insertBefore(el,host.firstChild);
+      }
+      el.style.cssText='margin:.4rem 0;padding:.4rem .6rem;border-radius:6px;font-size:.72rem;'
+        +'background:rgba(187,107,26,.12);border:1px solid rgba(187,107,26,.35);color:var(--tx)';
+      el.textContent=msg;
+      clearTimeout(el._t); el._t=setTimeout(()=>{try{el.remove();}catch(e){}},6000);
+    }catch(e){ try{ console.info('[subjects]',msg); }catch(_){} }
+  }
   window._adminSetSubject=function(kind,key,value){
     DD.config.subject_map=DD.config.subject_map||{aliases:{},canonical:{}};
     const A=DD.config.subject_map.aliases=DD.config.subject_map.aliases||{};
@@ -15611,7 +15662,18 @@ function rPeer(){
     const _prune=id=>{if(C[id]&&!C[id].created&&!C[id].display&&!_cfList(C[id].continuesFrom).length&&!Object.values(A).includes(id))delete C[id];};
     const _setPar=(id,list)=>{C[id]=C[id]||{};if(list.length)C[id].continuesFrom=list;else delete C[id].continuesFrom;_prune(id);};
     if(kind==='alias'){
-      if(!value||value===key){const had=A[key];delete A[key];if(had)_prune(had);}
+      // ⚠️ MAPPING A SUBJECT TO ITSELF IS A NO-OP, AND USED TO BE A SILENT ONE.
+      // canonicalOf() already falls back to the raw name when no alias exists, so
+      // A['Art']='Art' would be redundant — the branch below correctly deletes it.
+      // But the page then re-rendered with nothing changed, which is indistinguishable
+      // from a failed save. Say what happened instead.
+      if(value&&value===key){
+        _subjNote(key+' is already its own subject \u2014 nothing to map. '
+          +'Map a DIFFERENT spelling to it (\u201cArt & Design\u201d \u2192 \u201c'+key+'\u201d) '
+          +'to fold the two together.');
+        return;
+      }
+      if(!value){const had=A[key];delete A[key];if(had)_prune(had);}
       else{A[key]=value;C[value]=C[value]||{};}
     }else if(kind==='display'){
       C[key]=C[key]||{};
@@ -15901,8 +15963,9 @@ function rPeer(){
         // now markedly better (a genuine recovery, not an already-good pupil drifting fractionally).
         const a20=attRA(px,20),a60=attRA(px,60);
         let attImp=false;
-        if(a60.rate>=CG_PA_PCT && a20.rate*CG_AT<a60.rate){
-          attImp=true;const strong=a20.rate*2<a60.rate;
+        const _pAbsI=_priorWin(a20.rate,20,a60.rate,60);
+        if(a60.rate>=CG_PA_PCT && _pAbsI>0 && a20.rate*CG_AT<_pAbsI){
+          attImp=true;const strong=a20.rate*2<_pAbsI;
           const fac=a20.rate>0?`${(a60.rate/a20.rate).toFixed(1)}× better than`:'far below';
           wins.push({type:'att-improving',severity:strong?'green-strong':'green',label:'Attendance Improving',
             detail:`Recovering from a high absence rate — 20sd ${a20.rate.toFixed(1)}% absent vs 60sd ${a60.rate.toFixed(1)}% (${fac} the rolling average).`});
@@ -15910,10 +15973,11 @@ function rPeer(){
         // Sanctions Reducing — had ≥CT_MN sanctions earlier in the 60sd window, now eased off.
         const s20=sanRA(px,yg,20),s60=sanRA(px,yg,60),c20=sanCountIn(px,yg,20),c60=sanCountIn(px,yg,60);
         let sancRed=false;
-        if((c60-c20)>=CG_MN && s60>0 && s20*CG_SC<s60){
-          sancRed=true;const strong=s20*2<s60;
+        const _pSan=_priorWin(s20,20,s60,60);   // days 21-60, recovered by subtraction
+        if((c60-c20)>=CG_MN && _pSan>0 && s20*CG_SC<_pSan){
+          sancRed=true;const strong=s20*2<_pSan;
           wins.push({type:'sanc-reducing',severity:strong?'green-strong':'green',label:'Sanctions Reducing',
-            detail:`Easing off — only ${c20} sanction${c20===1?'':'s'} in the last 20sd after ${c60-c20} in the prior 40sd (weighted ${s20.toFixed(1)} vs ${s60.toFixed(1)}).`});
+            detail:`Easing off — only ${c20} sanction${c20===1?'':'s'} in the last 20sd after ${c60-c20} in the prior 40sd (weighted ${s20.toFixed(1)} now against ${_pSan.toFixed(1)} then).`});
         }
         // Re-engaging — both at once (mirror of Possible Disengagement).
         if(attImp&&sancRed){
@@ -15987,8 +16051,9 @@ function rPeer(){
       const a20=attRA(px,20);
       const a60=attRA(px,60);
       let attDeclining=false;
-      if(a20.rate>a60.rate*CT_AT && a60.rate>0 && a20.absent>=CT_AM){
-        const sev=a20.rate>a60.rate*2 ? 'red' : 'amber';
+      const _pAbs=_priorWin(a20.rate,20,a60.rate,60);   // days 21-60
+    if(_pAbs>0 && a20.rate>_pAbs*CT_AT && a20.absent>=CT_AM){
+        const sev=a20.rate>_pAbs*2 ? 'red' : 'amber';
         attDeclining=true;
         concerns.push({
           type:'att-rising', subkey:'',
@@ -16020,20 +16085,24 @@ function rPeer(){
       const s10=sanRA(px,yg,10), s20=sanRA(px,yg,20),
             s60=sanRA(px,yg,60), s100=sanRA(px,yg,100);
       const sanCount10=sanCountIn(px,yg,10), sanCount20=sanCountIn(px,yg,20);
-      const _cImm =s10>s20*CT_SC  && s20>0  && sanCount10>=CT_MN;
-      const _cBld =s10>s100*CT_SC && s100>0 && sanCount10>=CT_MN;
-      const _cRise=s20>s60*CT_SC  && s60>0  && sanCount20>=CT_MN;
+      // prior-period comparison, same as the pupil page — see _priorWin()
+      const _cp10v20 =_priorWin(s10,10,s20,20);
+      const _cp10v100=_priorWin(s10,10,s100,100);
+      const _cp20v60 =_priorWin(s20,20,s60,60);
+      const _cImm =_cp10v20 >0 && s10>_cp10v20 *CT_SC && sanCount10>=CT_MN;
+      const _cBld =_cp10v100>0 && s10>_cp10v100*CT_SC && sanCount10>=CT_MN;
+      const _cRise=_cp20v60 >0 && s20>_cp20v60 *CT_SC && sanCount20>=CT_MN;
       let sancAccel=false;
       if(_cImm||_cBld||_cRise){
         sancAccel=true;
-        const sev=((_cImm&&s10>s20*2)||(_cBld&&s10>s100*2)||(s20>s60*2))?'red':'amber';
+        const sev=((_cImm&&s10>_cp10v20*2)||(_cBld&&s10>_cp10v100*2)||(_cRise&&s20>_cp20v60*2))?'red':'amber';
         const lbl=_cImm?'Sudden Sanctions Increase'
                  :(_cBld?'Long-Term Sanctions Increase':'Recent Sanctions Increase');
         const det=_cImm
-          ? `10sd weighted ${s10.toFixed(1)} vs 20sd ${s20.toFixed(1)} (${sanCount10} sanctions in last 10sd, ${(s10/s20).toFixed(1)}× older window)`
+          ? `10sd weighted ${s10.toFixed(1)} vs ${_cp10v20.toFixed(1)} in the 10sd before (${sanCount10} sanctions, ${(s10/_cp10v20).toFixed(1)}× the earlier rate)`
           : _cBld
-          ? `10sd weighted ${s10.toFixed(1)} vs 100sd ${s100.toFixed(1)} (${sanCount10} sanctions in last 10sd, ${(s10/s100).toFixed(1)}× the term baseline)`
-          : `20sd weighted ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)} (${sanCount20} sanctions in last 20sd, ${(s20/s60).toFixed(1)}× older window)`;
+          ? `10sd weighted ${s10.toFixed(1)} vs ${_cp10v100.toFixed(1)} over the preceding 90sd (${sanCount10} sanctions, ${(s10/_cp10v100).toFixed(1)}× the term baseline)`
+          : `20sd weighted ${s20.toFixed(1)} vs ${_cp20v60.toFixed(1)} in the 40sd before (${sanCount20} sanctions, ${(s20/_cp20v60).toFixed(1)}× the earlier rate)`;
         concerns.push({type:'sanc-accel', subkey:'', severity:sev, label:lbl, detail:det});
       }
 
