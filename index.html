@@ -624,7 +624,12 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
   }
 
   function dsmLoadLocal(){try{const r=localStorage.getItem(dsmLsKey());return r?JSON.parse(r):{};}catch(e){return{};}}
-  function dsmPersist(){try{localStorage.setItem(dsmLsKey(),JSON.stringify(DSM));}catch(e){console.warn('Could not save dismissals:',e);}}
+  function dsmPersist(){
+  // ⚠️ A DISMISSAL CHANGES WHAT _hmItems() RETURNS, and that result is memoised per
+  // render. Without this, dismissing a concern would leave it on screen until the next
+  // full re-render — the classic stale-cache bug where the data is right and the page
+  // is not.
+  try{ _hmItemsReset(); }catch(e){}try{localStorage.setItem(dsmLsKey(),JSON.stringify(DSM));}catch(e){console.warn('Could not save dismissals:',e);}}
 
   // Merge two dismissal maps: union keys, concatenate histories (deduped by
   // when+who+note). Lets a re-deployed dismissals.json and this browser's local
@@ -7515,6 +7520,7 @@ function _hmRender(outId,fn){
   const el=document.getElementById(outId);
   if(!el)return;
   try{
+    _hmItemsReset();          // one evaluation per pupil per render
     el.innerHTML=fn();
     // ⚠️ FLUSH THE CHART QUEUE HERE, not only inside _hmInfographics.
     // _hmChart() defers chart construction until the canvas is in the DOM, and the
@@ -8494,7 +8500,25 @@ window.rPGCurrent = rPGCurrent; window.rPGHistoric = rPGHistoric;
 // Mirrors the Concerns and Congrats tabs exactly. The school sets its triggers
 // once in Admin; this page shows which of THIS tutor's pupils have fired them,
 // nothing more. No separate idea of "concern" lives here.
+// ⚠️ MEMOISED PER RENDER. _hmItems() runs ~15 triggers, several of which do real work
+// (subject avoidance, sanctions concentration, seasonal absence across years). The Year
+// Leader tab called it FOUR TIMES per pupil — once in the main loop, twice through
+// conRate() for the group panel, once for the cross-domain panel — so 240 pupils became
+// roughly 1,000 full evaluations. The SLT tab is the same shape.
+// The result depends only on the pupil, the scope and the dismissal state, none of which
+// change during a render, so one evaluation per pupil per render is correct.
+// Cleared by _hmRender() and by anything that changes a dismissal.
+var _hmItemsCache=null;
+function _hmItemsReset(){ _hmItemsCache=null; }
 function _hmItems(p,scope){
+  if(!_hmItemsCache)_hmItemsCache={};
+  const _ck=p+'|'+(scope||'');
+  if(_hmItemsCache[_ck])return _hmItemsCache[_ck];
+  const _r=_hmItemsBuild(p,scope);
+  _hmItemsCache[_ck]=_r;
+  return _r;
+}
+function _hmItemsBuild(p,scope){
   let con=[],cong=[];
   try{ con=(typeof pupilOtherConcernItems==='function')?pupilOtherConcernItems(p):[]; }catch(e){}
   try{ cong=(typeof pupilCongratsItems==='function')?pupilCongratsItems(p):[]; }catch(e){}
@@ -13377,7 +13401,8 @@ function rPeer(){
   function getSanctionsConcentration(px){
     const SAN=DD.sanctions||[];
     const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
-    const pSan=SAN.filter(s=>s[0]===px&&s[1]===0&&s[3]!=null&&_ayOf(s[2])===String(CAY)); // Codes with subject only — CURRENT academic year (matches the current-year timetable used below)
+    // was SAN.filter over all 27,510 rows PER PUPIL — see _sanFor()'s note
+    const pSan=_sanFor(px).filter(s=>s[1]===0&&s[3]!=null&&_ayOf(s[2])===String(CAY)); // Codes with subject only — CURRENT year
     if(pSan.length<SA_MIN_TOTAL) return[];
 
     // Get pupil's timetable to compute expected teacher share
