@@ -2379,7 +2379,7 @@ function saveThresholds(){
       SAV_RATIO, SAV_MIN,
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
-      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN, AB_DOW_PCT, AB_DOW_MIN,
+      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN, AB_DOW_PCT, AB_DOW_MIN, YOY_RATIO, YOY_MIN, AYOY_RATIO, AYOY_MIN, DEC_PCT, DEC_MIN,
       HM_UNPREP, HM_AMBER_TG, HM_AMBER_YL
     };
     saveCfg('thresholds', _LS_KEY, obj);
@@ -2433,6 +2433,12 @@ function applyThresholdValues(v){
   if((n=safeI(v.SW_CODE))!=null) SW_CODE=n;
   if((n=safeI(v.SW_ONCALL))!=null) SW_ONCALL=n;
   if((n=safeI(v.SW_DET))!=null) SW_DET=n;
+  if((n=safeF(v.AYOY_RATIO))!=null&&n>1) AYOY_RATIO=n;
+  if((n=safeI(v.AYOY_MIN))!=null&&n>0) AYOY_MIN=n;
+  if((n=safeF(v.DEC_PCT))!=null&&n>0&&n<50) DEC_PCT=n;
+  if((n=safeI(v.DEC_MIN))!=null&&n>0) DEC_MIN=n;
+  if((n=safeF(v.YOY_RATIO))!=null&&n>1) YOY_RATIO=n;
+  if((n=safeI(v.YOY_MIN))!=null&&n>0) YOY_MIN=n;
   if((n=safeF(v.AB_DOW_PCT))!=null&&n>0&&n<=100) AB_DOW_PCT=n;
   if((n=safeI(v.AB_DOW_MIN))!=null&&n>0) AB_DOW_MIN=n;
   if((n=safeF(v.SC_DOW_PCT))!=null&&n>0&&n<=100) SC_DOW_PCT=n;
@@ -2454,7 +2460,7 @@ const _THRESHOLD_DEFAULTS = {
   SAV_RATIO:2.0, SAV_MIN:3,
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
   TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
-  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8, AB_DOW_PCT:50, AB_DOW_MIN:6,
+  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8, AB_DOW_PCT:50, AB_DOW_MIN:6, YOY_RATIO:1.5, YOY_MIN:20, AYOY_RATIO:1.4, AYOY_MIN:15, DEC_PCT:10, DEC_MIN:15,
   HM_UNPREP:15, HM_AMBER_TG:4, HM_AMBER_YL:10
 };
 
@@ -2472,7 +2478,7 @@ const _THRESHOLD_INPUTS = {
   TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
   SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det',
   SC_DOW_PCT:'sc-dow-pct', SC_DOW_MIN:'sc-dow-min', SC_PER_PCT:'sc-per-pct', SC_PER_MIN:'sc-per-min',
-  AB_DOW_PCT:'ab-dow-pct', AB_DOW_MIN:'ab-dow-min',
+  AB_DOW_PCT:'ab-dow-pct', AB_DOW_MIN:'ab-dow-min', YOY_RATIO:'yoy-ratio', YOY_MIN:'yoy-min', AYOY_RATIO:'ayoy-ratio', AYOY_MIN:'ayoy-min', DEC_PCT:'dec-pct', DEC_MIN:'dec-min',
   HM_UNPREP:'hm-unprep', HM_AMBER_TG:'hm-amber-tg', HM_AMBER_YL:'hm-amber-yl'
 };
 
@@ -2536,6 +2542,12 @@ function applyCT(){
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
   CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
   ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
+  AYOY_RATIO=parseFloat(document.getElementById('ayoy-ratio').value)||1.4;
+  AYOY_MIN=parseInt(document.getElementById('ayoy-min').value)||15;
+  DEC_PCT=parseFloat(document.getElementById('dec-pct').value)||10;
+  DEC_MIN=parseInt(document.getElementById('dec-min').value)||15;
+  YOY_RATIO=parseFloat(document.getElementById('yoy-ratio').value)||1.5;
+  YOY_MIN=parseInt(document.getElementById('yoy-min').value)||20;
   AB_DOW_PCT=parseFloat(document.getElementById('ab-dow-pct').value)||50;
   AB_DOW_MIN=parseInt(document.getElementById('ab-dow-min').value)||6;
   SC_DOW_PCT=parseFloat(document.getElementById('sc-dow-pct').value)||40;
@@ -2597,6 +2609,21 @@ let SC_DOW_PCT=40, SC_DOW_MIN=8;      // day of week
 // Absence Pattern already exists but works on SLOTS — "always misses period 5 PE" —
 // not on the day as a whole.
 let AB_DOW_PCT=50, AB_DOW_MIN=6;      // absence: share on one weekday, min absence periods
+// Year-on-year escalation. EVERY other trigger looks at most 100 school days back — about
+// half a year — so a pupil who gets steadily worse ACROSS years never fires one: within
+// any single year they look flat. Maya Davies went 0.1 -> 1.2 -> 2.3 -> 4.1 sanctions per
+// week over four years and fired nothing all year, because her monthly counts this year
+// were 17, 24, 25, 10, 16, 24, 17 — no acceleration to detect.
+// Compares this year TO DATE against the SAME POINT last year, which controls for
+// seasonality: December is heavy everywhere, and a full-year comparison would flatter
+// anyone measured in October.
+let YOY_RATIO=1.5, YOY_MIN=20;        // x last year's rate, and min weighted score this year
+let AYOY_RATIO=1.4, AYOY_MIN=15;      // same, for ABSENCE: x last year's rate, min absent periods
+// Top-decile crossing. The remaining gap after year-on-year: a pupil who is consistently
+// very bad, evenly spread, and no worse than last year trips nothing. This is a LEVEL
+// test, and it fires on the CROSSING rather than continuously — a pupil who has been in
+// the top decile all year is not news, but one who has just entered it is.
+let DEC_PCT=10, DEC_MIN=15;           // top N% of the year group, min sanctions to qualify
 let SC_PER_PCT=30, SC_PER_MIN=8;      // period number
 // GCSE 1-9 → ability letter mapping (used to render OTA grades in dashboard).
 // Loaded from config.gcse_to_letter; falls back to the default below.
@@ -8467,7 +8494,7 @@ window.rPGCurrent = rPGCurrent; window.rPGHistoric = rPGHistoric;
 // Mirrors the Concerns and Congrats tabs exactly. The school sets its triggers
 // once in Admin; this page shows which of THIS tutor's pupils have fired them,
 // nothing more. No separate idea of "concern" lives here.
-function _hmItems(p){
+function _hmItems(p,scope){
   let con=[],cong=[];
   try{ con=(typeof pupilOtherConcernItems==='function')?pupilOtherConcernItems(p):[]; }catch(e){}
   try{ cong=(typeof pupilCongratsItems==='function')?pupilCongratsItems(p):[]; }catch(e){}
@@ -8476,7 +8503,15 @@ function _hmItems(p){
     try{ key=dismKey(p,it.type,it.subkey||''); act=dismActive(key); }catch(e){}
     return Object.assign({},it,{_key:key,_dismissal:act});
   });
-  return {live:ann.filter(a=>!a._dismissal), considered:ann.filter(a=>a._dismissal), good:cong};
+  // ⚠️ tutorOnly ITEMS ARE FILTERED BY VIEW, NOT BY TRIGGER.
+  // "Entered the top N%" is meaningful to a tutor with 29 pupils and meaningless to a
+  // year leader with 240, who would see ~24 pupils in the top decile by definition.
+  // _hmItems() takes an optional scope so the trigger stays in one place and each view
+  // asks for what it needs. Default is 'tutor' (everything) — callers that must not show
+  // these pass 'wide'.
+  const _live=ann.filter(a=>!a._dismissal);
+  return {live:(scope==='wide')?_live.filter(a=>!a.tutorOnly):_live,
+          considered:ann.filter(a=>a._dismissal), good:cong};
 }
 function _hmConcernRow(px,it){
   const col=it.severity==='red'?'var(--red)':'var(--orange)';
@@ -8745,7 +8780,7 @@ function _hmYearLeader(){
   const byType={},byForm={},multi=[],goodN=[];
   let conN=0,redN=0,consN=0;
   px.forEach(p=>{
-    const r=_hmItems(p);
+    const r=_hmItems(p,'wide');   // year leader: no tutor-only items
     consN+=r.considered.length;
     if(r.good.length)goodN.push(p);
     if(!r.live.length)return;
@@ -8825,7 +8860,7 @@ function _hmYearLeader(){
     const medOf=l=>{ const v=l.map(p=>tot[p]||0).sort((a,b)=>a-b); if(!v.length)return null;
       const m=v.length>>1; return v.length%2?v[m]:(v[m-1]+v[m])/2; };
     const conRate=l=>{ if(!l.length)return null; let n=0;
-      l.forEach(p=>{ if(_hmItems(p).live.length)n++; }); return 100*n/l.length; };
+      l.forEach(p=>{ if(_hmItems(p,'wide').live.length)n++; }); return 100*n/l.length; };
 
     const baseMed=medOf(grp.neither), baseCon=conRate(grp.neither);
     const rows=[{k:'__all',label:'All pupils',list:all}]
@@ -8881,12 +8916,13 @@ function _hmYearLeader(){
     const DOM={ 'att-rising':'Attendance','att-pa':'Attendance','abs-pattern':'Attendance',
                 'seasonal-abs':'Attendance','abs-dow':'Attendance',
                 'sanc-accel':'Behaviour','sanc-conc':'Behaviour',
-                'sanc-dow':'Behaviour','sanc-period':'Behaviour',
+                'sanc-dow':'Behaviour','sanc-period':'Behaviour','yoy-escalate':'Behaviour',
+                'yoy-absence':'Attendance',
                 'subj-avoid':'Subject',
                 'attain-drop':'Attainment','effort-drop':'Attainment' };
     const rows=[];
     px.forEach(p=>{
-      const live=_hmItems(p).live;
+      const live=_hmItems(p,'wide').live;
       if(!live.length)return;
       const doms=new Set();
       live.forEach(it=>{ const d=DOM[it.type]; if(d)doms.add(d); });
@@ -9254,7 +9290,7 @@ function _hmSLT(){
   // Rate of pupils with a live concern, per group. (Rendered under Concerns below.)
   const conRate=list=>{
     if(!list.length)return null;
-    let n=0; list.forEach(p=>{ const r=_hmItems(p); if(r.live.length)n++; });
+    let n=0; list.forEach(p=>{ const r=_hmItems(p,'wide'); if(r.live.length)n++; });   // SLT: no tutor-only items
     return 100*n/list.length;
   };
   const conBy={};
@@ -9299,7 +9335,7 @@ function _hmSLT(){
   const mix={}, sevMix={};
   let anyLive=0;
   all.forEach(p=>{
-    const live=_hmItems(p).live;
+    const live=_hmItems(p,'wide').live;
     if(live.length)anyLive++;
     const seen=new Set();
     live.forEach(it=>{
@@ -14006,6 +14042,119 @@ function rPeer(){
           +`the pattern that usually comes before a pupil withdraws from school life.`});
     }
 
+    // ── 6c. ESCALATING YEAR ON YEAR ──
+    // ⚠️ THE ONLY TRIGGER THAT LOOKS BEYOND THE CURRENT YEAR. Every other one uses at
+    // most 100 school days, so a pupil who worsens steadily ACROSS years fires nothing:
+    // inside any single year they are flat. Maya Davies went 0.1 -> 1.2 -> 2.3 -> 4.1
+    // sanctions per week over four years and triggered no sanctions concern at all,
+    // because her monthly counts this year were 17, 24, 25, 10, 16, 24, 17.
+    // Compares this year TO DATE against the SAME CALENDAR POINT last year — not last
+    // year's full total, which would flatter anyone measured in October.
+    (function(){
+      const end=_hmToday();
+      const ay=+_hmAyOf(end);
+      const lastEnd=(+end.slice(0,4)-1)+end.slice(4);
+      const ayStartNow=ayStartISO(String(ay)), ayStartPrev=ayStartISO(String(ay-1));
+      let wNow=0,wPrev=0,cNow=0,cPrev=0;
+      (DD.sanctions||[]).forEach(r=>{
+        if(r[0]!==px)return;
+        const t=r[2], w=sancWeight(r[1]);
+        if(t>=ayStartNow&&t<=end){wNow+=w;cNow++;}
+        else if(t>=ayStartPrev&&t<=lastEnd){wPrev+=w;cPrev++;}
+      });
+      if(wPrev<=0||wNow<YOY_MIN)return;      // no prior year, or too little to judge
+      // school days to the same point in each year, so the rates are comparable
+      const sdAll=_hmDaysBetween(ayStartPrev,end);
+      const dNow=sdAll.filter(t=>t>=ayStartNow&&t<=end).length;
+      const dPrev=sdAll.filter(t=>t>=ayStartPrev&&t<=lastEnd).length;
+      if(!dNow||!dPrev)return;
+      const rNow=wNow/dNow, rPrev=wPrev/dPrev;
+      if(rNow<=rPrev*YOY_RATIO)return;
+      const x=(rNow/rPrev);
+      items.push({type:'yoy-escalate',subkey:'',label:'Escalating year on year',
+        severity:x>=YOY_RATIO*1.6?'red':'amber',
+        detail:`${fn} has had ${cNow} sanction${cNow===1?'':'s'} so far this year against `
+          +`${cPrev} by the same point last year \u2014 ${x.toFixed(1)}\u00d7 the rate, weighted. `
+          +`⚠️ Nothing else would show this: every other trigger compares at most the last `
+          +`100 school days, and within this year alone the pattern is steady.`});
+    })();
+
+    // ── 6d. ABSENCE ESCALATING YEAR ON YEAR ──
+    // Same reasoning as 6c, for attendance. A pupil drifting down a few points each year
+    // is invisible to every within-year rule: 95% then 92% then 88% never looks like a
+    // decline inside any single year.
+    (function(){
+      const end=_hmToday(), ay=+_hmAyOf(end);
+      const lastEnd=(+end.slice(0,4)-1)+end.slice(4);
+      const startNow=ayStartISO(String(ay)), startPrev=ayStartISO(String(ay-1));
+      const rows=(DD.attAbsSubj||{})[String(px)]||[];
+      const supp=getSuppressed(px), seen=new Set();
+      let aNow=0,aPrev=0;
+      rows.forEach(r=>{
+        const k=r[0]+'|'+r[2];
+        if(supp.has(k)||seen.has(k))return;
+        seen.add(k);
+        if(r[0]>=startNow&&r[0]<=end)aNow++;
+        else if(r[0]>=startPrev&&r[0]<=lastEnd)aPrev++;
+      });
+      if(aPrev<=0||aNow<AYOY_MIN)return;
+      const sdAll=_hmDaysBetween(startPrev,end);
+      const dNow=sdAll.filter(t=>t>=startNow&&t<=end).length;
+      const dPrev=sdAll.filter(t=>t>=startPrev&&t<=lastEnd).length;
+      if(!dNow||!dPrev)return;
+      const rNow=aNow/dNow, rPrev=aPrev/dPrev;
+      if(rNow<=rPrev*AYOY_RATIO)return;
+      const ppd=_hmPerPerDay()||5;
+      const pctNow=100-(aNow/(dNow*ppd)*100), pctPrev=100-(aPrev/(dPrev*ppd)*100);
+      items.push({type:'yoy-absence',subkey:'',label:'Absence escalating year on year',
+        severity:(rNow/rPrev)>=AYOY_RATIO*1.6?'red':'amber',
+        detail:`${fn}'s attendance is ${pctNow.toFixed(1)}% so far this year against `
+          +`${pctPrev.toFixed(1)}% by the same point last year \u2014 ${aNow} absent periods `
+          +`against ${aPrev}. A drift of a few points a year never looks like a decline `
+          +`inside any single year, so nothing else would show it.`});
+    })();
+
+    // ── 6e. ENTERED THE TOP DECILE ──
+    // ⚠️ A LEVEL TEST, AND IT FIRES ON THE CROSSING ONLY.
+    // The last gap: a pupil who is consistently very bad, evenly spread across days and
+    // periods, and no worse than last year, trips nothing at all. But a pupil who has sat
+    // in the top decile since September is not news to their tutor — the moment they
+    // ENTER it is. So this compares their standing now against their standing a half-term
+    // ago and fires once, on the way in.
+    // ⚠️ TUTOR VIEW ONLY (tutorOnly:true). A year leader looking at 240 pupils would see
+    // roughly 24 of them in the top decile by definition, which is noise at that level.
+    // A tutor with 29 pupils seeing one cross is a conversation.
+    (function(){
+      const end=_hmToday(), ayS=ayStartISO(_hmAyOf(end));
+      const sdY=(_cnYgSDMod&&_cnYgSDMod[yg])?_cnYgSDMod[yg]:_cnSDMod;
+      if(!sdY||sdY.length<40)return;
+      const backTo=sdY[Math.max(0,sdY.length-30)];      // ~6 weeks ago
+      const peers=[];
+      Object.keys(REG||{}).forEach(k=>{ if(curYG(REG[k]&&REG[k].intake)===yg)peers.push(+k); });
+      if(peers.length<20)return;
+      const now={},was={};
+      (DD.sanctions||[]).forEach(r=>{
+        if(r[2]<ayS||r[2]>end)return;
+        now[r[0]]=(now[r[0]]||0)+1;
+        if(r[2]<=backTo)was[r[0]]=(was[r[0]]||0)+1;
+      });
+      const cut=arr=>{ const v=arr.slice().sort((a,b)=>b-a);
+        const i=Math.max(0,Math.floor(v.length*(DEC_PCT/100))-1);
+        return v.length?v[i]:Infinity; };
+      const cutNow=cut(peers.map(p=>now[p]||0)), cutWas=cut(peers.map(p=>was[p]||0));
+      const mine=now[px]||0, mineWas=was[px]||0;
+      if(mine<DEC_MIN)return;
+      const inNow=mine>=cutNow, inWas=mineWas>=cutWas&&mineWas>=DEC_MIN;
+      if(!inNow||inWas)return;                          // only on the way IN
+      const rank=peers.map(p=>now[p]||0).filter(v=>v>mine).length+1;
+      items.push({type:'decile',subkey:'',tutorOnly:true,
+        label:'Entered the top '+DEC_PCT+'% for sanctions',severity:'red',
+        detail:`${fn} has entered the worst ${DEC_PCT}% of ${yg} for sanctions this year \u2014 `
+          +`${mine} sanctions, ranking ${rank} of ${peers.length}. Six weeks ago they were `
+          +`outside it. This flags the crossing, not the standing: it will not fire again `
+          +`while they stay there.`});
+    })();
+
     // ── 7a. ABSENCE ON ONE DAY OF THE WEEK ──
     // Absence Pattern (above) works on SLOTS — "always misses period 5 PE". A pupil who
     // misses the WHOLE of one weekday is invisible to it, and invisible to every
@@ -15372,7 +15521,13 @@ function rPeer(){
           +'before \u2014 rather than at general defiance. Nothing else looks at either: Sanctions '
           +'Concentration is per teacher, and Absence Pattern covers slots but only for absence.',
           'Concerns \u2192 Sanctions on one day / Sanctions in one period',
-          inputRow('Absence \u2014 share on one day (%)','ab-dow-pct',AB_DOW_PCT,{min:25,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s absent periods fall on a single weekday. An even spread is 20%, so 50% is two and a half times the expected share. This catches a pupil who is otherwise a good attender but repeatedly misses one day \u2014 invisible to any rule based on overall attendance.'})
+          inputRow('Year on year \u2014 escalation (\u00d7)','yoy-ratio',YOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s weighted sanction rate TO DATE is this many times last year\u2019s rate at the same point. Compares like with like across years, which no other trigger does \u2014 the longest baseline elsewhere is 100 school days, so a pupil who worsens gradually across years looks flat inside any one of them.'})
+          +inputRow('Year on year \u2014 minimum score','yoy-min',YOY_MIN,{min:5,max:200,step:5,hint:'Minimum weighted sanction score this year before the ratio is tested. A pupil going from 2 to 6 has tripled and means nothing.'})
+          +inputRow('Year on year \u2014 absence escalation (\u00d7)','ayoy-ratio',AYOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s absence rate to date is this many times last year\u2019s at the same point. Set lower than the sanctions equivalent \u2014 absence moves in smaller steps, and a 40% rise is already substantial.'})
+          +inputRow('Year on year \u2014 minimum absent periods','ayoy-min',AYOY_MIN,{min:5,max:200,step:5,hint:'Minimum absent periods this year before the ratio is tested.'})
+          +inputRow('Top decile \u2014 threshold (%)','dec-pct',DEC_PCT,{min:2,max:49,step:1,hint:'A pupil entering the worst N% of their YEAR GROUP for sanctions is flagged, once, when they cross. Not while they stay there \u2014 a pupil who has been in the top decile all year is not news; one who has just entered it is. Tutor view only.'})
+          +inputRow('Top decile \u2014 minimum sanctions','dec-min',DEC_MIN,{min:3,max:100,step:1,hint:'Minimum sanctions before the decile is tested. In a well-behaved year group the top 10% might be on four sanctions, which is not worth a flag.'})
+          +inputRow('Absence \u2014 share on one day (%)','ab-dow-pct',AB_DOW_PCT,{min:25,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s absent periods fall on a single weekday. An even spread is 20%, so 50% is two and a half times the expected share. This catches a pupil who is otherwise a good attender but repeatedly misses one day \u2014 invisible to any rule based on overall attendance.'})
           +inputRow('Absence \u2014 minimum periods','ab-dow-min',AB_DOW_MIN,{min:3,max:60,step:1,hint:'The floor before the share is tested. One whole day off is usually 5 periods, so 6 means at least two separate absences.'})
           +inputRow('Sanctions \u2014 day of week share (%)','sc-dow-pct',SC_DOW_PCT,{min:20,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s sanctions fall on a single weekday. With five teaching days an even spread is 20%, so 40% is double the expected share.'})
           +inputRow('Day of week \u2014 minimum sanctions','sc-dow-min',SC_DOW_MIN,{min:3,max:50,step:1,hint:'A share means nothing on small numbers \u2014 3 of 4 sanctions on a Monday is 75% and tells you nothing. This is the floor before the share is tested.'})
@@ -15888,7 +16043,10 @@ function rPeer(){
     {id:'subj-engage',  label:'Subject Engagement'},
     {id:'subj-avoid',   label:'Subject Avoidance'},
     // emitted by pupilOtherConcernItems but had no chip, so it could not be filtered
-    {id:'seasonal-abs', label:'Recurring Seasonal Absence'}
+    {id:'seasonal-abs', label:'Recurring Seasonal Absence'},
+    {id:'yoy-escalate', label:'Escalating year on year'},
+    {id:'yoy-absence',  label:'Absence escalating year on year'},
+    {id:'decile',       label:'Entered the top decile'}   // tutor view only
     // NOTE 'subj-engage' above is pushed ONLY by the class-concerns builder, so its
     // chip will always be empty in pupil-level views. Left in place deliberately.
   ];
