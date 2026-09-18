@@ -7450,7 +7450,9 @@ function _hmSection(title,note){
     +'</div>';
 }
 function _hmBar(pct,tone){
-  const c=tone==='bad'?'var(--red)':tone==='warn'?'var(--orange)':'var(--sky)';
+  // 'good' added for the positives panel — without it a green bar fell through to
+  // sky and read as neutral next to the red concern bars.
+  const c=tone==='bad'?'var(--red)':tone==='warn'?'var(--orange)':tone==='good'?'var(--green)':'var(--sky)';
   return '<span style="display:inline-block;width:'+Math.max(2,Math.round(pct))+'%;height:7px;background:'+c+';border-radius:4px;vertical-align:middle"></span>';
 }
 
@@ -8871,10 +8873,17 @@ function _hmYearLeader(){
   // This is the triage version of the SLT tab's cross-domain read: same idea, but named
   // pupils and a running order rather than a pattern.
   (function(){
+    // ⚠️ 'disengage' IS DELIBERATELY ABSENT. Possible Disengagement is itself the
+    // cross-domain signal — it fires only when attendance AND sanctions both fire, so
+    // the pupil already contributes those two domains. Counting it as a third (it was
+    // mapped to 'Subject', which it has nothing to do with) would inflate the spread
+    // of exactly the pupils this panel is meant to rank.
     const DOM={ 'att-rising':'Attendance','att-pa':'Attendance','abs-pattern':'Attendance',
-                'seasonal-abs':'Attendance',
+                'seasonal-abs':'Attendance','abs-dow':'Attendance',
                 'sanc-accel':'Behaviour','sanc-conc':'Behaviour',
-                'subj-avoid':'Subject','disengage':'Subject' };
+                'sanc-dow':'Behaviour','sanc-period':'Behaviour',
+                'subj-avoid':'Subject',
+                'attain-drop':'Attainment','effort-drop':'Attainment' };
     const rows=[];
     px.forEach(p=>{
       const live=_hmItems(p).live;
@@ -8887,7 +8896,7 @@ function _hmYearLeader(){
     if(!rows.length)return;
     // reds first, then the widest spread, then the most triggers
     rows.sort((a,b)=>(b.red-a.red)||(b.doms.length-a.doms.length)||(b.n-a.n));
-    const COL={Attendance:'var(--sky)',Behaviour:'var(--red)',Subject:'var(--gold)'};
+    const COL={Attendance:'var(--sky)',Behaviour:'var(--red)',Subject:'var(--gold)',Attainment:'var(--lilac)'};
     const cap=_hmCap('HM_AMBER_YL',10);
     const shown=rows.slice(0,cap), hidden=rows.slice(cap);
     const line=r=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
@@ -9331,6 +9340,66 @@ function _hmSLT(){
       +'thresholds are in Admin \u2192 Concern thresholds. Instances exceed pupils where a concern '
       +'fires per subject or per teacher. Dismissed items are excluded.',mixBody);
   }
+
+  // ── WHICH POSITIVES ARE FIRING ──
+  // The tab was entirely negative: every panel counted sanctions, absence or concerns.
+  // A leadership team reading it would conclude the school was failing, when the same
+  // data holds 128,391 house points against 27,510 sanctions and a set of positive
+  // triggers nobody ever sees. _hmItems().good has carried these all along.
+  // ⚠️ NOT the mirror image of concerns, and should not be read as one. A pupil can
+  // hold both — improving attendance while sanctions rise is a real and common state —
+  // so the two panels are not complementary and their totals will not sum to the roll.
+  (function(){
+    const gmix={};
+    let anyGood=0;
+    all.forEach(p=>{
+      const good=_hmItems(p).good||[];
+      if(good.length)anyGood++;
+      const seen=new Set();
+      good.forEach(it=>{
+        const k=it.label||it.type||'(unlabelled)';
+        if(!gmix[k])gmix[k]={pupils:0,items:0,strong:0};
+        gmix[k].items++;
+        if((it.severity||'').indexOf('strong')>=0)gmix[k].strong++;
+        if(!seen.has(k)){gmix[k].pupils++;seen.add(k);}
+      });
+    });
+    const rows=Object.entries(gmix).sort((a,b)=>b[1].pupils-a[1].pupils);
+    if(!rows.length){
+      h+=_hmPanel('Which positives are firing',
+        'No pupil is currently triggering a positive. That is worth checking rather than '
+        +'accepting \u2014 the positive triggers need a prior period to improve FROM, so early '
+        +'in the year they stay quiet by design.','');
+      return;
+    }
+    const mx=Math.max(...rows.map(r=>r[1].pupils))||1;
+    const body='<table style="width:100%;border-collapse:collapse;font-size:.72rem">'
+      +'<tr style="color:var(--tx2);text-align:left">'
+      +'<th style="font-weight:500;padding:.2rem 0">Positive</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">Pupils</th>'
+      +'<th style="font-weight:500;padding-left:.4rem">Share of the roll</th>'
+      +'<th style="font-weight:500;text-align:right;padding:0 .5rem">% roll</th>'
+      +'<th style="font-weight:500;text-align:right">Instances</th>'
+      +'<th style="font-weight:500;text-align:right;padding-left:.5rem">Strong</th></tr>'
+      +rows.map(([k,v])=>{
+        const pct=100*v.pupils/(all.length||1);
+        return '<tr><td style="padding:.25rem 0;white-space:nowrap">'+k+'</td>'
+          +'<td style="text-align:right;color:var(--tx2);padding:0 .5rem;width:48px">'+v.pupils+'</td>'
+          +'<td style="padding-left:.4rem"><div style="max-width:220px">'
+            +_hmBar(100*v.pupils/mx,'good')+'</div></td>'
+          +'<td style="text-align:right;width:48px">'+Math.round(pct)+'%</td>'
+          +'<td style="text-align:right;color:var(--tx2);width:62px">'+v.items+'</td>'
+          +'<td style="text-align:right;width:48px;color:'+(v.strong?'var(--green)':'var(--tx2)')+'">'
+            +v.strong+'</td></tr>';
+      }).join('')+'</table>';
+    h+=_hmPanel('Which positives are firing',
+      Math.round(100*anyGood/(all.length||1))+'% of pupils ('+anyGood+' of '+all.length+') are '
+      +'triggering at least one positive. <strong>Strong</strong> counts the emphatic version of '
+      +'each \u2014 attendance recovered by more than half, sanctions more than halved. '
+      +'\u26a0\ufe0f This is not the mirror of the concerns panel: a pupil can appear in both, and '
+      +'often should \u2014 improving on one measure while slipping on another is the normal shape '
+      +'of a pupil turning a corner.',body);
+  })();
   // ── SECTIONS NOT YET POPULATED ──
   // Headings are shown deliberately, so an empty domain reads as "not built yet"
   // rather than "broken". Remove each note as its panels land.
@@ -13764,7 +13833,9 @@ function rPeer(){
     // 1. Attendance Declining
     const a20=attRAMod(px,20),a60=attRAMod(px,60);
     const _pAbs=_priorWin(a20.rate,20,a60.rate,60);   // days 21-60
+    let _attDecl=false;                               // fed to Possible Disengagement below
     if(_pAbs>0 && a20.rate>_pAbs*CT_AT && a20.absent>=CT_AM){
+      _attDecl=true;
       const sev=a20.rate>_pAbs*2?'red':'amber';
       items.push({type:'att-rising',subkey:'',label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} Periods in the last 20 school days (${a20.rate.toFixed(1)}% of Periods) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average).`});
     }
@@ -13912,6 +13983,28 @@ function rPeer(){
             +(ahead===0?'under way now':ahead===1?'next month':`${ahead} months away`)+`.`});
       }
     })();
+
+    // ── 6b. POSSIBLE DISENGAGEMENT ──
+    // Attendance falling AND sanctions rising at the same time. Either alone is common;
+    // both together is the pattern that precedes a pupil dropping out of school life,
+    // and it is worth more than the sum of its parts.
+    // ⚠️ THIS EXISTED ONLY IN THE CLASS-CONCERNS BUILDER. It never reached a pupil's own
+    // page, a tutor's list, a year leader's list or the SLT tab, because all of those
+    // read _hmItems() -> pupilOtherConcernItems(), and this was pushed into a different
+    // array entirely. The strongest composite signal in the system was visible in one
+    // view only.
+    // Both inputs are already computed above, so this is genuinely derived — it cannot
+    // disagree with the two concerns it is built from.
+    if(_attDecl && (_imm||_bld||_rise)){
+      const _sTxt=_imm?`${s10.toFixed(1)} vs ${_p10v20.toFixed(1)} over the previous 10`
+                :(_bld?`${s10.toFixed(1)} vs ${_p10v100.toFixed(1)} over the term`
+                      :`${s20.toFixed(1)} vs ${_p20v60.toFixed(1)} over the previous 40`);
+      items.push({type:'disengage',subkey:'',label:'Possible Disengagement',severity:'red',
+        detail:`${fn} is absent more AND being sanctioned more at the same time \u2014 absence `
+          +`${a20.rate.toFixed(0)}% over the last 20 school days against ${_pAbs.toFixed(0)}% before that, `
+          +`and a weighted sanction score of ${_sTxt}. Either on its own is common; together they are `
+          +`the pattern that usually comes before a pupil withdraws from school life.`});
+    }
 
     // ── 7a. ABSENCE ON ONE DAY OF THE WEEK ──
     // Absence Pattern (above) works on SLOTS — "always misses period 5 PE". A pupil who
@@ -15785,10 +15878,19 @@ function rPeer(){
     {id:'att-pa',       label:'Persistent Absence'},
     {id:'sanc-accel',   label:'Sanctions Increase'},   // umbrella: Sudden / Recent / Long-Term
     {id:'disengage',    label:'Possible Disengagement'},
+    {id:'abs-dow',      label:'Absence on one day'},
+    {id:'sanc-dow',     label:'Sanctions on one day'},
+    {id:'sanc-period',  label:'Sanctions in one period'},
+    {id:'attain-drop',  label:'Attainment Dropped'},
+    {id:'effort-drop',  label:'Effort Dropped'},
     {id:'sanc-conc',    label:'Sanctions Concentration'},
     {id:'abs-pattern',  label:'Absence Pattern'},
     {id:'subj-engage',  label:'Subject Engagement'},
-    {id:'subj-avoid',   label:'Subject Avoidance'}
+    {id:'subj-avoid',   label:'Subject Avoidance'},
+    // emitted by pupilOtherConcernItems but had no chip, so it could not be filtered
+    {id:'seasonal-abs', label:'Recurring Seasonal Absence'}
+    // NOTE 'subj-engage' above is pushed ONLY by the class-concerns builder, so its
+    // chip will always be empty in pupil-level views. Left in place deliberately.
   ];
 
   // Toggle a card's collapsed state and re-render
