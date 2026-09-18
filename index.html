@@ -13723,7 +13723,7 @@ function rPeer(){
     return n;
   }
   // Combined alert for the 5 pupil-level concerns (Attendance Declining, Persistent
-  // Absence, Sanctions Accelerating, Absence Pattern, Subject Avoidance). Renders a
+  // Absence, Sanctions Increase, Absence Pattern, Subject Avoidance). Renders a
   // single bordered panel listing each one that has fired, with severity colour and
   // brief detail. Mirrors the Concerns tab logic so the same triggers apply.
   function pupilOtherConcernsAlert(px){
@@ -13750,15 +13750,23 @@ function rPeer(){
     if(aPA.rate>=CT_PA_PCT){
       items.push({type:'att-pa',subkey:'',label:'Persistent Absence',severity:'red',detail:`${fn} has been absent for ${aPA.absent} Periods in the last ${CT_PA_WIN} school days (${aPA.rate.toFixed(1)}% absence rate).`});
     }
-    // 3. Sanctions Accelerating
+    // 3. Sanctions Increase — Sudden / Recent / Long-Term, by baseline window
     // Absorbs what the separate Behavioural Concerns tab used to do. That tab
     // ran the same weighted-rate ratio on 10-vs-20 and 10-vs-100 windows, while
     // this ran 20-vs-60 — so the two produced different lists from the same
     // test and nothing explained the difference. Three windows now, one place.
     //
-    //   Immediate : 10 against 20  — something happened in the last fortnight
-    //   Building  : 10 against 100 — a rise that has been underway for months
-    //   Rising    : 20 against 60  — the original, slower signal
+    //   Sudden    : 10 against 20  — something happened in the last fortnight
+    //   Long-Term : 10 against 100 — the recent fortnight sits well above the term's
+    //               own baseline, and has done for a while (if it were only the last
+    //               10 days, Sudden would have caught it first)
+    //   Recent    : 20 against 60  — the original, slower signal
+    // ⚠️ ALL THREE MEASURE CHANGE, NOT LEVEL. A pupil whose sanction load is very high
+    // and FLAT trips none of them: every window looks like the one before. Maya Davies
+    // had the heaviest load in the cohort — 264 codes, 19 detentions — and never fired
+    // any of these, because she was consistently bad rather than getting worse.
+    // Labels are by PRECEDENCE, not exclusivity: a pupil may satisfy all three and
+    // only ever sees the most urgent.
     const s10=sanRAMod(px,yg,10),s20=sanRAMod(px,yg,20),
           s60=sanRAMod(px,yg,60),s100=sanRAMod(px,yg,100);
     const sCount10=sanCountInMod(px,yg,10),sCount20=sanCountInMod(px,yg,20);
@@ -13780,14 +13788,19 @@ function rPeer(){
         ? (_top==='Non-Lesson'?' Most of them are outside lessons.'
                               :` Most of them are in ${_top}.`)
         : '';
-      const _kind=_imm?'Immediate':(_bld?'Building':'Rising');
+      // Named for what a reader needs to know — how fast, and against what baseline.
+      // Was Immediate / Building / Rising, which did not convey that "Building" meant
+      // "against months" and "Rising" meant "against weeks"; most people guessed the
+      // wrong way round.
+      const _kind=_imm?'Sudden Sanctions Increase'
+                 :(_bld?'Long-Term Sanctions Increase':'Recent Sanctions Increase');
       const _sev=(_imm&&s10>s20*2)||(_bld&&s10>s100*2)||(s20>s60*2)?'red':'amber';
       const _detail=_imm
         ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against ${s20.toFixed(1)} over 20 days, ${(s10/s20).toFixed(1)}\u00d7.${_where}`
         : _bld
         ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against a 100-day average of ${s100.toFixed(1)}, ${(s10/s100).toFixed(1)}\u00d7. This has been building rather than sudden.${_where}`
         : `${fn} has had ${sCount20} sanctions in the last 20 school days \u2014 a weighted score of ${s20.toFixed(1)} against a 60-day average of ${s60.toFixed(1)}, ${(s20/s60).toFixed(1)}\u00d7.${_where}`;
-      items.push({type:'sanc-accel',subkey:'',label:'Sanctions '+_kind,severity:_sev,detail:_detail});
+      items.push({type:'sanc-accel',subkey:'',label:_kind,severity:_sev,detail:_detail});
     }
     // 4. Absence Pattern (slot-level)
     const absAnalysis=analyseAbsencePattern(px, String(CAY));
@@ -15708,7 +15721,7 @@ function rPeer(){
   const CN_TYPES = [
     {id:'att-rising',   label:'Attendance Declining'},
     {id:'att-pa',       label:'Persistent Absence'},
-    {id:'sanc-accel',   label:'Sanctions Accelerating'},
+    {id:'sanc-accel',   label:'Sanctions Increase'},   // umbrella: Sudden / Recent / Long-Term
     {id:'disengage',    label:'Possible Disengagement'},
     {id:'sanc-conc',    label:'Sanctions Concentration'},
     {id:'abs-pattern',  label:'Absence Pattern'},
@@ -15991,23 +16004,40 @@ function rPeer(){
         concerns.push({type:'att-pa', subkey:'',severity:'red',label:'Persistent Absence',detail:`${CT_PA_WIN}sd absence ${aPA.rate.toFixed(1)}% (${aPA.absent} absent periods)`});
       }
 
-      // 3. Sanctions Accelerating — rolling 20sd vs 60sd weighted sanction score
-      const s20=sanRA(px,yg,20);
-      const s60=sanRA(px,yg,60);
-      const sanCount20=sanCountIn(px,yg,20);
+      // 3. Sanctions Increase — the SAME three-way test as pupilOtherConcernItems().
+      // This path used to run only the 20-vs-60 comparison, so the same pupil on the
+      // same day could read "Sudden Sanctions Increase" on their own page and only
+      // "Recent Sanctions Increase" in the year leader's class view — or, worse, show
+      // nothing here while showing a red concern there, because a pupil whose last
+      // fortnight has spiked against a term baseline trips Sudden or Long-Term without
+      // tripping Recent at all.
+      //   Sudden    : 10 against 20  — something happened in the last fortnight
+      //   Long-Term : 10 against 100 — the fortnight sits well above the term baseline
+      //   Recent    : 20 against 60  — the original, slower signal
+      // Precedence, not exclusivity: a pupil may satisfy all three and sees the most
+      // urgent. ⚠️ All three measure CHANGE, not level — a consistently very high but
+      // FLAT load trips none of them.
+      const s10=sanRA(px,yg,10), s20=sanRA(px,yg,20),
+            s60=sanRA(px,yg,60), s100=sanRA(px,yg,100);
+      const sanCount10=sanCountIn(px,yg,10), sanCount20=sanCountIn(px,yg,20);
+      const _cImm =s10>s20*CT_SC  && s20>0  && sanCount10>=CT_MN;
+      const _cBld =s10>s100*CT_SC && s100>0 && sanCount10>=CT_MN;
+      const _cRise=s20>s60*CT_SC  && s60>0  && sanCount20>=CT_MN;
       let sancAccel=false;
-      if(s20>s60*CT_SC && s60>0 && sanCount20>=CT_MN){
-        const sev=s20>s60*2 ? 'red' : 'amber';
+      if(_cImm||_cBld||_cRise){
         sancAccel=true;
-        concerns.push({
-          type:'sanc-accel', subkey:'',
-          severity:sev,
-          label:'Sanctions Accelerating',
-          detail:`20sd weighted ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)} (${sanCount20} sanctions in last 20sd, ${(s20/s60).toFixed(1)}× older window)`
-        });
+        const sev=((_cImm&&s10>s20*2)||(_cBld&&s10>s100*2)||(s20>s60*2))?'red':'amber';
+        const lbl=_cImm?'Sudden Sanctions Increase'
+                 :(_cBld?'Long-Term Sanctions Increase':'Recent Sanctions Increase');
+        const det=_cImm
+          ? `10sd weighted ${s10.toFixed(1)} vs 20sd ${s20.toFixed(1)} (${sanCount10} sanctions in last 10sd, ${(s10/s20).toFixed(1)}× older window)`
+          : _cBld
+          ? `10sd weighted ${s10.toFixed(1)} vs 100sd ${s100.toFixed(1)} (${sanCount10} sanctions in last 10sd, ${(s10/s100).toFixed(1)}× the term baseline)`
+          : `20sd weighted ${s20.toFixed(1)} vs 60sd ${s60.toFixed(1)} (${sanCount20} sanctions in last 20sd, ${(s20/s60).toFixed(1)}× older window)`;
+        concerns.push({type:'sanc-accel', subkey:'', severity:sev, label:lbl, detail:det});
       }
 
-      // 4. Possible Disengagement — derived: both Attendance Declining AND Sanctions Accelerating fire
+      // 4. Possible Disengagement — derived: both Attendance Declining AND a Sanctions Increase fire
       if(attDeclining && sancAccel){
         concerns.push({
           type:'disengage', subkey:'',
