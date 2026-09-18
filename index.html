@@ -15678,25 +15678,42 @@ function rPeer(){
           inputRow('Decline multiplier','ct-at',CT_AT,{min:1.0,max:3.0,step:0.05,hint:'Recent absence rate must exceed the older rate by this multiplier to fire. Default 1.3 (i.e. 30% higher).'})+
           inputRow('Minimum recent absences','ct-am',CT_AM,{min:0,max:50,step:1,hint:'A pupil must have at least this many absent periods in the recent 20-day window before any flag fires. Default 3.'})
         )}
+${groupPanel(
+          'Escalating year on year',
+          'The only triggers that look beyond the current year. Every other one uses at most 100 '
+          +'school days, so a pupil who worsens gradually ACROSS years never fires: inside any '
+          +'single year they look flat. Both compare this year TO DATE against the SAME POINT '
+          +'last year, which controls for seasonality \u2014 December is heavy everywhere.',
+          'Concerns \u2192 Escalating year on year / Absence escalating year on year',
+          inputRow('Sanctions \u2014 escalation (\u00d7)','yoy-ratio',YOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s weighted sanction rate to date is this many times last year\u2019s rate at the same point.'})
+          +inputRow('Sanctions \u2014 minimum score','yoy-min',YOY_MIN,{min:5,max:200,step:5,hint:'Minimum weighted sanction score this year before the ratio is tested. A pupil going from 2 to 6 has tripled and means nothing.'})
+          +inputRow('Absence \u2014 escalation (\u00d7)','ayoy-ratio',AYOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s absence rate to date is this many times last year\u2019s at the same point. Set lower than the sanctions equivalent \u2014 absence moves in smaller steps. \u26a0\ufe0f At 1.4 this fires for around a third of pupils; try 1.8 to 2.0.'})
+          +inputRow('Absence \u2014 minimum periods','ayoy-min',AYOY_MIN,{min:5,max:200,step:5,hint:'Minimum absent periods this year before the ratio is tested.'})
+        )}
         ${groupPanel(
-          'Sanction Concentration',
+          'Entering the top decile',
+          'A LEVEL test rather than a change test, and it fires only on the CROSSING. A pupil who '
+          +'has sat in the worst decile since September is not news to their tutor; one who has '
+          +'just entered it is. Compares standing now against standing six weeks ago. '
+          +'\u26a0\ufe0f Tutor view only \u2014 a year leader with 240 pupils would see roughly 24 in the top '
+          +'decile by definition.',
+          'Concerns \u2192 Entered the top decile (Form Tutor view only)',
+          inputRow('Threshold (%)','dec-pct',DEC_PCT,{min:2,max:49,step:1,hint:'A pupil entering the worst N% of their YEAR GROUP for sanctions is flagged once, when they cross. The cut is per year group, so each cohort has its own bar.'})
+          +inputRow('Minimum sanctions','dec-min',DEC_MIN,{min:3,max:100,step:1,hint:'Minimum sanctions before the decile is tested. In a well-behaved year group the top 10% might be on four sanctions, which is not worth a flag.'})
+        )}
+        ${groupPanel(
+          'Concentration on a day or a period',
           'A pupil taking a large share of their sanctions on one day of the week, or in one period, '
           +'is usually pointing at something structural \u2014 the timetable, a transition, the lesson '
           +'before \u2014 rather than at general defiance. Nothing else looks at either: Sanctions '
-          +'Concentration is per teacher, and Absence Pattern covers slots but only for absence.',
-          'Concerns \u2192 Sanctions on one day / Sanctions in one period',
-          inputRow('Year on year \u2014 escalation (\u00d7)','yoy-ratio',YOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s weighted sanction rate TO DATE is this many times last year\u2019s rate at the same point. Compares like with like across years, which no other trigger does \u2014 the longest baseline elsewhere is 100 school days, so a pupil who worsens gradually across years looks flat inside any one of them.'})
-          +inputRow('Year on year \u2014 minimum score','yoy-min',YOY_MIN,{min:5,max:200,step:5,hint:'Minimum weighted sanction score this year before the ratio is tested. A pupil going from 2 to 6 has tripled and means nothing.'})
-          +inputRow('Year on year \u2014 absence escalation (\u00d7)','ayoy-ratio',AYOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s absence rate to date is this many times last year\u2019s at the same point. Set lower than the sanctions equivalent \u2014 absence moves in smaller steps, and a 40% rise is already substantial.'})
-          +inputRow('Year on year \u2014 minimum absent periods','ayoy-min',AYOY_MIN,{min:5,max:200,step:5,hint:'Minimum absent periods this year before the ratio is tested.'})
-          +inputRow('Top decile \u2014 threshold (%)','dec-pct',DEC_PCT,{min:2,max:49,step:1,hint:'A pupil entering the worst N% of their YEAR GROUP for sanctions is flagged, once, when they cross. Not while they stay there \u2014 a pupil who has been in the top decile all year is not news; one who has just entered it is. Tutor view only.'})
-          +inputRow('Top decile \u2014 minimum sanctions','dec-min',DEC_MIN,{min:3,max:100,step:1,hint:'Minimum sanctions before the decile is tested. In a well-behaved year group the top 10% might be on four sanctions, which is not worth a flag.'})
-          +inputRow('Absence \u2014 share on one day (%)','ab-dow-pct',AB_DOW_PCT,{min:25,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s absent periods fall on a single weekday. An even spread is 20%, so 50% is two and a half times the expected share. This catches a pupil who is otherwise a good attender but repeatedly misses one day \u2014 invisible to any rule based on overall attendance.'})
-          +inputRow('Absence \u2014 minimum periods','ab-dow-min',AB_DOW_MIN,{min:3,max:60,step:1,hint:'The floor before the share is tested. One whole day off is usually 5 periods, so 6 means at least two separate absences.'})
-          +inputRow('Sanctions \u2014 day of week share (%)','sc-dow-pct',SC_DOW_PCT,{min:20,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s sanctions fall on a single weekday. With five teaching days an even spread is 20%, so 40% is double the expected share.'})
-          +inputRow('Day of week \u2014 minimum sanctions','sc-dow-min',SC_DOW_MIN,{min:3,max:50,step:1,hint:'A share means nothing on small numbers \u2014 3 of 4 sanctions on a Monday is 75% and tells you nothing. This is the floor before the share is tested.'})
-          +inputRow('Period \u2014 share (%)','sc-per-pct',SC_PER_PCT,{min:10,max:100,step:5,hint:'Flag when this percentage or more fall in one period of the day. Set lower than the day threshold because there are usually more periods than days, so the expected share per period is smaller.'})
-          +inputRow('Period \u2014 minimum sanctions','sc-per-min',SC_PER_MIN,{min:3,max:50,step:1,hint:'The floor before the period share is tested.'})
+          +'Concentration is per TEACHER, and Absence Pattern covers slots but only for absence.',
+          'Concerns \u2192 Absence on one day / Sanctions on one day / Sanctions in one period',
+          inputRow('Absence \u2014 share on one day (%)','ab-dow-pct',AB_DOW_PCT,{min:25,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s absent periods fall on a single weekday. An even spread is 20%, so 50% is two and a half times expected. Catches a pupil who is otherwise a good attender but repeatedly misses one day.'})
+          +inputRow('Absence \u2014 minimum periods','ab-dow-min',AB_DOW_MIN,{min:3,max:60,step:1,hint:'The floor before the share is tested. One whole day off is usually 5 periods. \u26a0\ufe0f At 6 this fires for around 28% of pupils \u2014 try 10 or 11 so two separate absences are needed.'})
+          +inputRow('Sanctions \u2014 share on one day (%)','sc-dow-pct',SC_DOW_PCT,{min:20,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s sanctions fall on a single weekday. With five teaching days an even spread is 20%, so 40% is double.'})
+          +inputRow('Sanctions \u2014 day minimum','sc-dow-min',SC_DOW_MIN,{min:3,max:50,step:1,hint:'A share means nothing on small numbers \u2014 3 of 4 sanctions on a Monday is 75% and tells you nothing.'})
+          +inputRow('Sanctions \u2014 share in one period (%)','sc-per-pct',SC_PER_PCT,{min:10,max:100,step:5,hint:'Flag when this percentage or more fall in one period of the day. \u26a0\ufe0f At 30% this fires for around 43% of pupils: sanctions cluster by period school-wide, so 30% is barely above the natural rate. Try 40 to 45.'})
+          +inputRow('Sanctions \u2014 period minimum','sc-per-min',SC_PER_MIN,{min:3,max:50,step:1,hint:'The floor before the period share is tested.'})
         )}
         ${groupPanel(
           'Attendance Display',
