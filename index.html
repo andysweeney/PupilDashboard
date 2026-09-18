@@ -7378,9 +7378,15 @@ function _hmDate(r){
   if(typeof v==='number')return (DD.dateIndex||[])[v]||'';
   return v||'';
 }
+// ⚠️ MEMOISED. This scanned all 27,510 sanctions on EVERY call to find the latest date,
+// and three concern triggers call it PER PUPIL — 27% of the Year Leader render on its
+// own, and the single biggest cost on the tab. The answer cannot change during a page's
+// life: DD.sanctions is built once at load and never replaced.
+var _hmTodayCache=null;
 function _hmToday(){
+  if(_hmTodayCache)return _hmTodayCache;
   let m='';(DD.sanctions||[]).forEach(r=>{const d=_hmDate(r);if(d>m)m=d});
-  return m||new Date().toISOString().slice(0,10);
+  return (_hmTodayCache = m||new Date().toISOString().slice(0,10));
 }
 function _hmShift(iso,days){const d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
 function _hmSubj(k){
@@ -7689,7 +7695,18 @@ function _hmPerPerDay(){ _hmSchoolDays(); return _HM_PPD; }
 // current academic year AND to a five-day week (off < 5), which is the same assumption
 // the timetable grid work removed everywhere else — TT_ND is the real number.
 // Needed for year-on-year and rolling comparisons, neither of which fits inside one AY.
+// ⚠️ MEMOISED on the window. This builds and sorts ~745 Date objects per call, and the
+// two year-on-year triggers call it once per pupil with the SAME window every time.
+var _hmDaysCache=null;
 function _hmDaysBetween(fromISO, toISO){
+  if(!_hmDaysCache)_hmDaysCache={};
+  const _k=(fromISO||'')+'~'+(toISO||'');
+  if(_hmDaysCache[_k])return _hmDaysCache[_k];
+  const out=_hmDaysBuild(fromISO,toISO);
+  _hmDaysCache[_k]=out;
+  return out;
+}
+function _hmDaysBuild(fromISO, toISO){
   const WLK = DD.weekLessons || {}, out = [];
   const nd = (typeof TT_ND === 'number' && TT_ND > 0) ? TT_ND : 5;
   Object.keys(WLK).sort().forEach(wk => {
@@ -8510,6 +8527,13 @@ window.rPGCurrent = rPGCurrent; window.rPGHistoric = rPGHistoric;
 // Cleared by _hmRender() and by anything that changes a dismissal.
 var _hmItemsCache=null;
 function _hmItemsReset(){ _hmItemsCache=null; }
+// ⚠️ The page-lifetime caches added for performance. All are safe because DD is built
+// once at load and never replaced; call this if that ever stops being true (a data
+// reload without a page reload, or a school switch that rebuilds DD).
+function _hmPerfReset(){
+  _hmItemsCache=null; _hmTodayCache=null; _hmDaysCache=null;
+  try{ _cnInvalidate(); }catch(e){}
+}
 function _hmItems(p,scope){
   if(!_hmItemsCache)_hmItemsCache={};
   const _ck=p+'|'+(scope||'');
@@ -13846,11 +13870,11 @@ function rPeer(){
     if(!sd.length) return 0;
     const cutIdx=Math.max(0,sd.length-nSD);
     const cutISO=sd[cutIdx]||endDate;
-    const SAN_=DD.sanctions||[];
+    // was a full scan of DD.sanctions PER CALL; _sanFor() is the shared per-pupil index
+    const rows_=_sanFor(px);
     let score=0;
-    for(let i=0;i<SAN_.length;i++){
-      const r=SAN_[i];
-      if(r[0]!==px) continue;
+    for(let i=0;i<rows_.length;i++){
+      const r=rows_[i];
       if(r[2]<cutISO||r[2]>endDate) continue;
       score+=sancWeight(r[1]);
     }
@@ -13864,11 +13888,11 @@ function rPeer(){
     if(!sd.length) return 0;
     const cutIdx=Math.max(0,sd.length-nSD);
     const cutISO=sd[cutIdx]||endDate;
-    const SAN_=DD.sanctions||[];
+    // was a full scan of DD.sanctions PER CALL; _sanFor() is the shared per-pupil index
+    const rows_=_sanFor(px);
     let n=0;
-    for(let i=0;i<SAN_.length;i++){
-      const r=SAN_[i];
-      if(r[0]!==px) continue;
+    for(let i=0;i<rows_.length;i++){
+      const r=rows_[i];
       if(r[2]<cutISO||r[2]>endDate) continue;
       n++;
     }
