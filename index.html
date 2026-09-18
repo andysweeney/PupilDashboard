@@ -1418,24 +1418,20 @@ async function sbGet(id){
   const rows=await r.json(); return (rows&&rows.length)?rows[0].value:null;
 }
 async function sbSet(id,value){
-  // ⚠️ school_id MUST BE SENT. The app_settings RLS policies all test
-  //     school_id = current_school_id()
-  // against a REAL COLUMN, and that column is nullable with no default. This call
-  // omitted it, so every insert wrote school_id = null, the policy compared
-  // null = 'tws', and a null comparison is never true — a 403 on every settings save.
-  // Thresholds, subject mappings, incident categories and SEN codes therefore lived
-  // only in one browser's localStorage and vanished on a cache clear or a school
-  // switch. Dismissals kept working because their policy is ALL with its own
-  // id LIKE '%:dismissals' clause, so it never reached the school_id test.
+  // NOTE: school_id is NOT sent, and must not be. A BEFORE INSERT OR UPDATE trigger,
+  // app_settings_stamp_school(), derives it from the id prefix:
+  //     new.school_id := coalesce(nullif(split_part(new.id,':',1), new.id), current_school_id())
+  // So a row written as "tws:dataKeys" is stamped school_id = 'tws' whoever writes it,
+  // and the RLS policy then tests that against current_school_id() from the caller's
+  // app_metadata. Sending the column here would simply be overwritten.
   //
-  // ⚠️ current_school_id() reads app_metadata.school_id FROM THE TOKEN, not the
-  // platform-owner override. So a platform owner viewing another school can read it
-  // but cannot save settings for it — the write is refused server-side, which is the
-  // correct behaviour, and the banner from _cfgWarn() will say so.
-  const sid=(function(){ try{ return schoolId(); }catch(e){ return null; } })();
-  const row={id:_cfgKey(id),value,updated_at:new Date().toISOString()};
-  if(sid)row.school_id=sid;
-  const r=await fetch(SB_URL+'/rest/v1/app_settings',{method:'POST',headers:Object.assign(_SBHEAD(),{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify(row)});
+  // ⚠️ A 403 FROM THIS CALL IS USUALLY NOT A BUG. It means the signed-in account's
+  // app_metadata.school_id does not match the school the setting belongs to — a
+  // platform owner who has switched schools reads that school's DATA from storage but
+  // cannot read or write its SETTINGS, because app_settings has its own policy and
+  // current_school_id() knows nothing about the override. Signing in as that school's
+  // own admin is the intended route. The banner from _cfgWarn() says so.
+  const r=await fetch(SB_URL+'/rest/v1/app_settings',{method:'POST',headers:Object.assign(_SBHEAD(),{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({id:_cfgKey(id),value,updated_at:new Date().toISOString()})});
   if(!r.ok) throw new Error('sbSet '+id+' '+r.status); return true;
 }
 async function sbDel(id){
@@ -1970,11 +1966,22 @@ function _cfgWarn(what){
         +'background:var(--red);color:#fff;font-size:.78rem;line-height:1.35;box-shadow:0 -2px 8px rgba(0,0,0,.2)';
       document.body.appendChild(el);
     }
-    el.innerHTML='<strong>Settings are not being saved to the server.</strong> '
-      +'Your changes are held in this browser only and will be lost if you clear its data, '
-      +'sign in elsewhere, or switch school. '
-      +'<span style="opacity:.85">(app_settings write refused \u2014 the school\u2019s row-level '
-      +'security policy needs applying.)</span> '
+    // The usual cause is not a broken policy but a mismatched account: settings belong
+    // to a school, and only that school's own admin may read or write them. Say that,
+    // rather than sending someone to look at row-level security.
+    const _sid=(function(){ try{ return schoolId(); }catch(e){ return null; } })();
+    const _own=(function(){ try{ var u=authUser();
+      return (u&&u.app_metadata&&u.app_metadata.school_id)||null; }catch(e){ return null; } })();
+    const _mismatch=_sid&&_own&&_sid!==_own;
+    el.innerHTML='<strong>Settings are not being saved.</strong> '
+      +'Your changes are held in this browser only and will be lost if you clear its data '
+      +'or sign in elsewhere. '
+      +(_mismatch
+        ? 'You are signed in to <strong>'+_own+'</strong> but viewing <strong>'+_sid+'</strong>. '
+          +'A school\u2019s settings can only be changed by that school\u2019s own admin account \u2014 '
+          +'switch schools for data, but sign in as the '+_sid+' admin to change its configuration.'
+        : 'The server refused the write. If this persists, check that this account is an '
+          +'admin for this school.')+' '
       +'<button onclick="this.parentNode.remove()" style="margin-left:.5rem;background:rgba(255,255,255,.2);'
       +'border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:4px;padding:.1rem .45rem;cursor:pointer">Dismiss</button>';
   }catch(e){ try{ alert('Settings could not be saved to the server ('+what+'). They are held in this browser only.'); }catch(_){} }
