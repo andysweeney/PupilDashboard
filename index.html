@@ -9808,10 +9808,19 @@ function _hmSLT(){
       });
     }
 
+    // ⚠️ NAME THE BANDS HERE. "Fell a band" is meaningless unless the reader knows what a
+    // band is, and they were only defined in the spread panel further up — which a reader
+    // arriving at this panel has no reason to have read.
+    const _bandList=BANDS.map(b=>b[0]).join(' \u00b7 ');
     h+=_hmPanel('Which direction are pupils moving',
       'Where pupils are <em>going</em>, not where they are \u2014 attendance is recoverable '
       +'early and rarely late, so a pupil who has just crossed below '+ATT_LOW+'% is the one '
-      +'to act on. <strong>Year-on-year is the reliable read</strong>: attendance is strongly '
+      +'to act on. '
+      +'<strong>The bands are the attendance bands above</strong>: '+_bandList+'. '
+      +'\u201cFell a band\u201d means a pupil whose attendance in the later window sits in a lower '
+      +'band than in the earlier one \u2014 so a pupil moving from 96% to 94% has fallen from '
+      +'\u201c95 to 97%\u201d into \u201c90 to 95%\u201d. '
+      +'<strong>Year-on-year is the reliable read</strong>: attendance is strongly '
       +'seasonal, so any within-year comparison partly measures the calendar. The rolling '
       +'window shows what is happening now and should be read with that in mind.',
       cards('Against the same point last year',yoy,
