@@ -1994,7 +1994,73 @@ function pctColls(){
   const pp=(PER||[]).filter(k=>{ for(const ik in (PRG||{})) if(PRG[ik]&&PRG[ik][k])return true; return false; });
   return pp;
 }
-function _pctReset(){ _pctCache=null; }
+function _pctReset(){ _pctCache=null; _subjPctCache=null; }
+
+// ── POSITION WITHIN A SINGLE SUBJECT ──────────────────────────────────────────
+// Everyone taking a subject sits on the same scale, so the NATIVE grade can be ranked
+// directly — finer than the 7-band reference ladder and closer to what a teacher sees.
+// ⚠️ COHORT SIZE VARIES ENORMOUSLY: Maths has 233 pupils at TWS, Sculpture has 10.
+// A quartile of 10 pupils is 2 or 3, which says nothing, so below SUBJ_MIN_N this
+// returns a plain RANK ("4th of 12") instead. An honest small number beats a spurious
+// band.
+// ⚠️ TIES ARE LARGE AND MUST SHARE A POSITION. With 9 grades and 233 pupils, 45 pupils
+// hold the same grade in Double Science; giving them different percentiles would invent
+// a precision the data does not have.
+// ⚠️ WHERE A SUBJECT IS SET, this is position among everyone who takes it — which is
+// still the right question ("where is she in Maths"), but it is not a judgement of the
+// teaching she receives.
+const SUBJ_MIN_N=20;
+var _subjPctCache=null;
+function _subjPctAll(subj, pk, yg){
+  if(!_subjPctCache)_subjPctCache={};
+  const key=subj+'|'+pk+'|'+yg;
+  if(_subjPctCache[key])return _subjPctCache[key];
+  const vals=[];
+  let allNum=true;
+  for(const ik in (PRG||{})){
+    (PRG[ik] && PRG[ik][pk] || []).forEach(r=>{
+      const info=REG[String(r[0])]; if(!info||curYG(info.intake)!==yg)return;
+      const c=(progCol(r,'scores')||{})[subj]; if(!c)return;
+      const raw=c[0]==null?null:String(c[0]).trim();
+      const n=raw===null||raw===''?NaN:parseFloat(raw);
+      if(isNaN(n))allNum=false;
+      vals.push({px:r[0], raw:raw, num:isNaN(n)?null:n, rk:abRk(c)||0});
+    });
+  }
+  if(!vals.length)return (_subjPctCache[key]={});
+  // higher is better on a native numeric grade; abRk is 1 = best, so invert it
+  const score=v=>allNum&&v.num!=null ? v.num : (v.rk? -v.rk : null);
+  const usable=vals.filter(v=>score(v)!=null);
+  usable.sort((a,b)=>score(a)-score(b));          // worst first
+  const out={}, N=usable.length;
+  let i=0;
+  while(i<N){
+    let j=i; while(j+1<N && score(usable[j+1])===score(usable[i])) j++;
+    const mid=(i+j)/2;
+    const pc=100*(mid+0.5)/N;                     // 100 = best
+    for(let k=i;k<=j;k++) out[usable[k].px]={pct:pc, n:N, rank:N-Math.round(mid), tie:(j-i+1)};
+    i=j+1;
+  }
+  return (_subjPctCache[key]=out);
+}
+// {pct, n, rank, tie} or null. Callers decide how to render it.
+function subjPos(px, subj, pk){
+  const info=REG[String(px)]; if(!info)return null;
+  return _subjPctAll(subj, pk, curYG(info.intake))[px]||null;
+}
+// Compact label: a quartile when the cohort is big enough, a plain rank when it is not.
+function subjPosLabel(pos){
+  if(!pos)return '';
+  if(pos.n<SUBJ_MIN_N){
+    return '<span title="'+pos.n+' pupils take this subject \u2014 too few for a quartile to mean '
+      +'anything, so the rank is shown instead">'+pos.rank+'/'+pos.n+'</span>';
+  }
+  const q=Math.max(1,Math.min(4,4-Math.floor(pos.pct/25)));
+  const col=['var(--green)','var(--sky)','var(--gold)','var(--red)'][q-1];
+  return '<span style="color:'+col+';font-weight:600" title="'+Math.round(pos.pct)+'th percentile of '
+    +pos.n+' pupils taking this subject'+(pos.tie>1?', tied with '+(pos.tie-1)+' others on the same grade':'')
+    +'">Q'+q+'</span>';
+}
 
 // ── GROUP POSITION: median percentile and interquartile range ──────────────────
 // ⚠️ A GROUP CANNOT HAVE A PERCENTILE OF ITSELF. Comparing classes or forms needs the
@@ -2055,8 +2121,18 @@ function _pctLine(px, lp){
   if(now==null)return '';
   const colls=pctColls();
   const i=colls.indexOf(lp);
-  const prev=i>0?colls[i-1]:null;
-  const was=prev?pctOfPupil(px, prev):null;
+  // ⚠️ COMPARE WITH THE LAST COLLECTION THAT ACTUALLY DIFFERS, not blindly the previous
+  // one. At TWS, T2 and T3 are 98.8% identical — 19 of 1,609 subject cells — so comparing
+  // with the immediately preceding collection shows "0 change" for every pupil and the
+  // line looks broken. Walking back finds the last real movement, which for Eden Clark is
+  // T1 -> T2 and reads 100th to 11th.
+  let prev=null, was=null;
+  for(let j=i-1;j>=0;j--){
+    const v=pctOfPupil(px, colls[j]);
+    if(v==null)continue;
+    prev=colls[j]; was=v;
+    if(Math.abs(v-now)>=0.5)break;   // a real difference: stop here
+  }
   const ord=n=>{const v=Math.round(n),s=['th','st','nd','rd'],k=v%100;return v+(s[(k-20)%10]||s[k]||s[0]);};
   const qTxt=['top quarter','second quarter','third quarter','bottom quarter'][qtOfPct(now)-1];
   let mv='';
@@ -2064,7 +2140,9 @@ function _pctLine(px, lp){
     const d=now-was;
     const col=d<=-10?'var(--red)':(d>=10?'var(--green)':'var(--tx2)');
     const arrow=d<=-1?'\u25bc':(d>=1?'\u25b2':'\u2013');
-    mv='<span style="color:'+col+';margin-left:.45rem" title="was '+ord(was)+' in '+collLabel(prev)+'">'
+    const flat=Math.abs(d)<0.5 && prev!==colls[i-1];
+    mv='<span style="color:'+col+';margin-left:.45rem" title="was '+ord(was)+' in '+collLabel(prev)
+      +(flat?' \u2014 and unchanged in every collection since':'')+'">'
       +arrow+' '+(d>0?'+':'')+Math.round(d)+' since '+collLabel(prev)+'</span>';
   }
   return '<div style="margin-top:.3rem;font-size:.7rem;color:var(--tx2)">'
@@ -4556,7 +4634,16 @@ function rP(){
         if(!r||!r.sc[s])return'<td style="color:var(--mu);text-align:center;padding:.15rem .1rem;font-size:.6rem">—</td><td style="color:var(--mu);text-align:center;padding:.15rem .1rem;font-size:.6rem">—</td>';
         return`<td style="text-align:center;padding:.15rem .1rem">${bHo(r.sc[s])}</td><td style="text-align:center;padding:.15rem .1rem">${eHc(r.sc[s][1])}</td>`;
       }).join('');
-      rows.push(`<tr><td style="${st};font-size:.65rem;white-space:nowrap;position:sticky;left:0;background:var(--sf);z-index:1">${s}${dr?' <span style="font-size:.5rem;color:var(--bel)">✕</span>':''}</td>${cells}</tr>`);
+      rows.push(`<tr><td style="${st};font-size:.65rem;white-space:nowrap;position:sticky;left:0;background:var(--sf);z-index:1">${s}${dr?' <span style="font-size:.5rem;color:var(--bel)">✕</span>':''}${(()=>{
+        // ⚠️ Position WITHIN THIS SUBJECT, among everyone in the year group who takes it.
+        // Different from the overall percentile on the ability card: a pupil can sit in
+        // the top quarter for Maths and the bottom for Spanish, and that difference is
+        // the whole reason for showing it per subject.
+        // Falls back to a plain rank where too few pupils take the subject for a quartile
+        // to mean anything (Sculpture has 10 at TWS, Maths has 233).
+        const _pp=subjPos(x,s,lp);
+        return _pp?(' <span style="font-size:.55rem;margin-left:.25rem">'+subjPosLabel(_pp)+'</span>'):'';
+      })()}</td>${cells}</tr>`);
       // Triple Science sub-rows: only if this is Science AND the pupil has a triple breakdown
       // in any visible period.
       if(s==='Science'){
@@ -9831,53 +9918,6 @@ function _hmSLT(){
   // Until then the session row below is deliberately shown as unavailable rather than
   // silently filled with the lesson figure — a plausible wrong number is worse than a
   // visible gap, because nobody checks a number that looks right.
-  // ── ATTAINMENT POSITION BY GROUP ──
-  // ⚠️ QUARTILE COUNTS, NOT A MEAN. The SLT question is "how many of our FSM pupils sit
-  // in the bottom quarter of the year", not "what is their average rank". A mean hides
-  // the shape, and on a skewed group it describes nobody.
-  // ⚠️ RANKED WITHIN THE YEAR GROUP, so the quartiles are positions among peers rather
-  // than absolute standards. A cohort that all decline together shows no movement here —
-  // keep the absolute figures in the Ability section alongside it.
-  (function(){
-    const colls=pctColls();
-    if(!colls.length)return;
-    const lp=colls[colls.length-1];
-    const rows=[['__all','All pupils',all]].concat(order.filter(k=>grp[k].length).map(k=>[k,labels[k],grp[k]]));
-    const body=[];
-    let anyData=false;
-    const QC=['var(--green)','var(--sky)','var(--gold)','var(--red)'];
-    rows.forEach(([k,label,list],idx)=>{
-      const q=[0,0,0,0]; let n=0;
-      list.forEach(px=>{ const v=qtOfPupil(px,lp); if(v){q[v-1]++;n++;} });
-      if(!n)return;
-      anyData=true;
-      const segs=q.map((c,i)=>c?('<span title="'+label+' \u2014 '+['top','second','third','bottom'][i]
-        +' quarter: '+c+' pupils ('+Math.round(100*c/n)+'%)" style="display:block;float:left;height:13px;width:'
-        +(100*c/n)+'%;background:'+QC[i]+'"></span>'):'').join('');
-      body.push('<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem'
-        +(idx===0?';font-weight:600':'')+'">'
-        +'<span style="width:150px;color:var(--tx2);white-space:nowrap">'+label+'</span>'
-        +'<span style="width:34px;text-align:right;color:var(--mu);font-size:.66rem">'+n+'</span>'
-        +'<span style="flex:1;min-width:120px"><span style="display:block;overflow:hidden;border-radius:3px;background:var(--bd)">'
-          +segs+'<span style="display:block;clear:both"></span></span></span>'
-        +'<span style="width:58px;text-align:right;color:'+(q[3]/n>=0.4?'var(--red)':'var(--tx2)')+'">'
-          +Math.round(100*q[3]/n)+'% Q4</span></div>');
-      if(idx===0)body.push('<div style="border-top:1px solid var(--bd);margin:.35rem 0"></div>');
-    });
-    if(!anyData)return;
-    const legend='<div style="display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.66rem;color:var(--tx2)">'
-      +['top','second','third','bottom'].map((l,i)=>'<span><span style="display:inline-block;width:9px;height:9px;'
-        +'border-radius:2px;background:'+QC[i]+';margin-right:.25rem;vertical-align:middle"></span>'
-        +l+' quarter</span>').join('')+'</div>';
-    h+=_hmPanel('Where each group sits in the year, '+collLabel(lp),
-      'Attainment <strong>position</strong>, not grade. Each pupil is ranked against the whole year '
-      +'group and placed in a quarter; the bars show how each group is spread across those quarters. '
-      +'An even school would show four equal blocks on every row. '
-      +'\u26a0\ufe0f Position is relative, so a year group that declines together shows no change at all here '
-      +'\u2014 read it with the absolute figures in Ability. '
-      +'Groups are \u201cever\u201d, not \u201cnow\u201d, and no pupil is counted twice.',
-      legend+body.join(''));
-  })();
 
   h+=_hmSection('Attendance','lesson-based \u2014 session figures arrive with the API');
 
@@ -10668,6 +10708,54 @@ function _hmSLT(){
         +'<div style="border-top:1px solid var(--bd);margin:.35rem 0"></div>'
         +order.filter(k=>tally[k].n).map(k=>row(labels[k],tally[k])).join(''));
     }
+
+  // ── ATTAINMENT POSITION BY GROUP ──
+  // ⚠️ QUARTILE COUNTS, NOT A MEAN. The SLT question is "how many of our FSM pupils sit
+  // in the bottom quarter of the year", not "what is their average rank". A mean hides
+  // the shape, and on a skewed group it describes nobody.
+  // ⚠️ RANKED WITHIN THE YEAR GROUP, so the quartiles are positions among peers rather
+  // than absolute standards. A cohort that all decline together shows no movement here —
+  // keep the absolute figures in the Ability section alongside it.
+  (function(){
+    const colls=pctColls();
+    if(!colls.length)return;
+    const lp=colls[colls.length-1];
+    const rows=[['__all','All pupils',all]].concat(order.filter(k=>grp[k].length).map(k=>[k,labels[k],grp[k]]));
+    const body=[];
+    let anyData=false;
+    const QC=['var(--green)','var(--sky)','var(--gold)','var(--red)'];
+    rows.forEach(([k,label,list],idx)=>{
+      const q=[0,0,0,0]; let n=0;
+      list.forEach(px=>{ const v=qtOfPupil(px,lp); if(v){q[v-1]++;n++;} });
+      if(!n)return;
+      anyData=true;
+      const segs=q.map((c,i)=>c?('<span title="'+label+' \u2014 '+['top','second','third','bottom'][i]
+        +' quarter: '+c+' pupils ('+Math.round(100*c/n)+'%)" style="display:block;float:left;height:13px;width:'
+        +(100*c/n)+'%;background:'+QC[i]+'"></span>'):'').join('');
+      body.push('<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem'
+        +(idx===0?';font-weight:600':'')+'">'
+        +'<span style="width:150px;color:var(--tx2);white-space:nowrap">'+label+'</span>'
+        +'<span style="width:34px;text-align:right;color:var(--mu);font-size:.66rem">'+n+'</span>'
+        +'<span style="flex:1;min-width:120px"><span style="display:block;overflow:hidden;border-radius:3px;background:var(--bd)">'
+          +segs+'<span style="display:block;clear:both"></span></span></span>'
+        +'<span style="width:58px;text-align:right;color:'+(q[3]/n>=0.4?'var(--red)':'var(--tx2)')+'">'
+          +Math.round(100*q[3]/n)+'% Q4</span></div>');
+      if(idx===0)body.push('<div style="border-top:1px solid var(--bd);margin:.35rem 0"></div>');
+    });
+    if(!anyData)return;
+    const legend='<div style="display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.66rem;color:var(--tx2)">'
+      +['top','second','third','bottom'].map((l,i)=>'<span><span style="display:inline-block;width:9px;height:9px;'
+        +'border-radius:2px;background:'+QC[i]+';margin-right:.25rem;vertical-align:middle"></span>'
+        +l+' quarter</span>').join('')+'</div>';
+    h+=_hmPanel('Where each group sits in the year, '+collLabel(lp),
+      'Attainment <strong>position</strong>, not grade. Each pupil is ranked against the whole year '
+      +'group and placed in a quarter; the bars show how each group is spread across those quarters. '
+      +'An even school would show four equal blocks on every row. '
+      +'\u26a0\ufe0f Position is relative, so a year group that declines together shows no change at all here '
+      +'\u2014 read it with the absolute figures in Ability. '
+      +'Groups are \u201cever\u201d, not \u201cnow\u201d, and no pupil is counted twice.',
+      legend+body.join(''));
+  })();
   })();
 
 
