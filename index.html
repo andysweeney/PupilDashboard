@@ -2119,7 +2119,43 @@ function atSchool(ink){return ygInSchool(ink)}
 function inkKey(ink){return'I'+ink}
 
 // Lookups
-function getEn(ink,x){return(ENR[inkKey(ink)]||[]).filter(r=>r.x===x)}
+// ⚠️ INDEXED. This filtered an entire intake's enrolment list (thousands of records)
+// on every call, and it is called once per pupil per row by the Problem Groups and
+// class views — 24% of that tab's render. One pass per intake, cached for the page.
+// Returns the same row objects in the same order as the old filter.
+var _enIdx=null;
+function _enIdxFor(ink){
+  if(!_enIdx)_enIdx={};
+  const k=inkKey(ink);
+  if(!_enIdx[k]){
+    const m={};
+    (ENR[k]||[]).forEach(r=>{ (m[r.x]=m[r.x]||[]).push(r); });
+    _enIdx[k]=m;
+  }
+  return _enIdx[k];
+}
+function getEn(ink,x){return _enIdxFor(ink)[x]||[]}
+// ⚠️ INDEXED. The Problem Groups table walked EVERY intake and EVERY collection of the
+// progress structure for EVERY pupil cell, just to read one boolean. With several
+// hundred cells on screen that was a large part of a 5-second render.
+// ⚠️ Reads the flag by NAME via progCol(), not a fixed index: the loader inserts the
+// pupil name at position 1, so a stored 6-element row becomes 7 in memory. That
+// off-by-one is what made every pupil look SEND earlier in the month.
+var _fsmIdx=null;
+function _isFsm(px){
+  if(!_fsmIdx){
+    _fsmIdx={};
+    for(const ik in (PRG||{})){
+      const periods=PRG[ik]||{};
+      for(const p in periods){
+        (periods[p]||[]).forEach(r=>{
+          if(progCol(r,'fsm')===true)_fsmIdx[r[0]]=true;
+        });
+      }
+    }
+  }
+  return _fsmIdx[px]===true;
+}
 function curTG(en){const t=en.filter(r=>r.t==='tg'&&r.u===null);return t.length?t[t.length-1].v:en.filter(r=>r.t==='tg').pop()?.v||'—'}
 
 // Determine the full list of teachers actually delivering a given (pupil, subject, class).
@@ -6544,7 +6580,7 @@ function rPP(){
         const senLabel2=senCode?SEN_LABELS[senCode]||senCode:'';
         const senCol2=senCode?SEN_COLORS[senCode]||'':'';
         const senBadge=senCode?`<span style="display:inline-block;padding:.02rem .2rem;border-radius:3px;font-size:.5rem;background:${senCol2}18;border:1px solid ${senCol2}44;color:${senCol2};margin-left:.2rem">${senLabel2}</span>`:'';
-        const isFsm=REG[String(px)]&&(()=>{for(const[ik,periods]of Object.entries(PRG)){for(const[p,rows]of Object.entries(periods)){const r=rows.find(r2=>r2[0]===px);if(r&&r[5])return true;break}}return false})();
+        const isFsm=_isFsm(px);   // was a nested scan of the whole PRG structure per CELL
         const fsmBadge=isFsm?'<span style="display:inline-block;padding:.02rem .2rem;border-radius:3px;font-size:.5rem;background:#6488ff18;border:1px solid #6488ff44;color:var(--blue);margin-left:.2rem">FSM</span>':'';
         return`<td><span style="font-family:'IBM Plex Mono',monospace;font-weight:500">${pLink(px,g.names[j])}</span>${senBadge}${fsmBadge}<div style="font-size:.58rem;color:var(--mu)">${g.ygs[j]} · ${g.tgs[j]}</div></td>`;
       }).join('');
@@ -8532,6 +8568,8 @@ function _hmItemsReset(){ _hmItemsCache=null; }
 // reload without a page reload, or a school switch that rebuilds DD).
 function _hmPerfReset(){
   _hmItemsCache=null; _hmTodayCache=null; _hmDaysCache=null;
+  try{ _clsEnrolIdx=null; }catch(e){}
+  try{ _enIdx=null; _fsmIdx=null; }catch(e){}
   try{ _cnInvalidate(); }catch(e){}
 }
 function _hmItems(p,scope){
@@ -9675,9 +9713,16 @@ function _hmSLT(){
     // One pass per pupil rather than per week: 149 weeks x 478 pupils of
     // countAbsPeriodsWeek() would rescan each pupil's whole absence list every time.
     // Same dedupe and suppression rules as countAbsPeriodsWeek.
+    // memoised: one Date per distinct DATE, not per absence record. There are ~190
+    // school days and ~91,000 absence records, so the same handful of strings recur
+    // thousands of times.
+    const _monCache={};
     const mondayOf=iso=>{
+      let v=_monCache[iso];
+      if(v)return v;
       const d=new Date(iso+'T12:00:00'); d.setDate(d.getDate()-((d.getDay()+6)%7));
-      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+      v=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+      return (_monCache[iso]=v);
     };
     // reuse the deduped date lists built above rather than a second pass
     const absByWeek={};
@@ -13422,6 +13467,17 @@ function rPeer(){
   window.rTG=rTG;
   // ── SANCTIONS ANALYSIS ──
   // Compute disproportionate sanctions for a pupil
+  // pupil -> their class enrolments, built once
+  var _clsEnrolIdx=null;
+  function _clsEnrolFor(px){
+    if(!_clsEnrolIdx){
+      _clsEnrolIdx={};
+      for(const[ik,e]of Object.entries(ENR||{})){
+        (e||[]).forEach(r=>{ if(r.t==='cls')(_clsEnrolIdx[r.x]=_clsEnrolIdx[r.x]||[]).push(r); });
+      }
+    }
+    return _clsEnrolIdx[px]||[];
+  }
   function getSanctionsConcentration(px){
     const SAN=DD.sanctions||[];
     const _ayOf=iso=>{const y=+iso.slice(0,4),m=+iso.slice(5,7);return String(m>=9?y:y-1)};
@@ -13454,10 +13510,9 @@ function rPeer(){
 
     // Group sanctions by subject, then use enrolment to find teacher
     const teacherCodes={};// teacherId -> {count, subjects: Set}
-    const enrols=[];
-    for(const[ik,e]of Object.entries(ENR)){
-      enrols.push(...e.filter(r=>r.t==='cls'&&r.x===px));
-    }
+    // ⚠️ was walking every enrolment record (8,586) PER PUPIL to find that pupil's
+    // classes. Indexed once instead, the same pattern as _sanFor().
+    const enrols=_clsEnrolFor(px);
 
     pSan.forEach(s=>{
       const subj=s[3]||'Non-Lesson';
