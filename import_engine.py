@@ -548,12 +548,25 @@ def collection_label(c):
         return str(c)
 
 def collection_in_cohort(c, intake, cay):
-    """Inside the cohort's school career? Same bounds the term grid used."""
+    """Inside the cohort's school career?
+
+    ⚠️ DO NOT REINTRODUCE MIN_YG HERE. It used to read
+        return ay <= cay and MIN_YG <= yg <= 13
+    but MIN_YG is min(CAY - intake + 7) across the intakes ON ROLL — "the lowest year
+    group currently enrolled", NOT "the lowest year group the school teaches". With only
+    Y10 and Y11 in the data MIN_YG is 10, so the Year 10 cohort's own Year 9 collection
+    (yg = 9) was silently discarded: TWS's "Year 9 Summer" grades reached Reports.csv,
+    were counted in "Report collections (4)", and then produced no rows at all.
+    A collection is HISTORICAL DATA THAT EXISTS. The only sane bounds are that it falls
+    inside the cohort's time at the school and is not in the future. MIN_YG remains
+    correct in get_periods(), where it stops seven empty Reception years being GENERATED
+    for a secondary cohort — generating nothing is different from discarding something.
+    """
     ay = collection_ay(c)
     if ay is None:
         return False
     yg = ay - intake + 7
-    return ay <= cay and MIN_YG <= yg <= 13
+    return ay <= cay and 0 <= yg <= 13
 
 # ── LOAD DATA ──
 print("Loading data files...")
