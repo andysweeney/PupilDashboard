@@ -5337,7 +5337,7 @@ function rCmp(){
 
   sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',plugins:[_ksDrawPlugin(_ksStageBoundaryIdx(stageLabels))].filter(Boolean),data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets,true)},scales:{y:{min:abMin,max:abMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
 
-  sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
+  sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
 }
 
 // ── YEAR PROGRESSION VIEW ──
@@ -5587,13 +5587,18 @@ function rPrg(){
     ...(hasFsm?[mkSubDs('FSM',fsmEfPts,PAL.sky,efMeta.map(m=>m&&m.fsmN?{n:m.fsmN}:null))]: []),
   ];
 
-  const chartOpts2=(yMin,yMax,isAb)=>({responsive:true,maintainAspectRatio:false,
+  // ⚠⚠ ABILITY AND EFFORT ARE BOTH 1 = BEST, so these axes MUST be reversed to put
+  // the best at the top. chartOpts2 had no `reverse` at all, so the Year Progression
+  // charts plotted 1 at the BOTTOM and read as though the worst pupils were doing best.
+  // The third argument is isAb (tick FORMAT only) and was mistaken for direction —
+  // hence the fourth, which is explicit.
+  const chartOpts2=(yMin,yMax,isAb,rev)=>({responsive:true,maintainAspectRatio:false,
     plugins:{
       legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},
       tooltip:subgroupTip()
     },
     scales:{
-      y:{min:yMin,max:yMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1,
+      y:{reverse:!!rev,min:yMin,max:yMax,ticks:{color:'#6e7686',font:{size:11},stepSize:1,
         callback:isAb?abTick:undefined},
         grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},
       x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}
@@ -5602,11 +5607,11 @@ function rPrg(){
 
   sc2('prgab',new Chart(document.getElementById('c-prgab'),{type:'line',
     data:{labels:termLabels,datasets:abDatasets},
-    options:chartOpts2(abMin2,abMax2,true),plugins:[bandPlugin]}));
+    options:chartOpts2(abMin2,abMax2,true,true),plugins:[bandPlugin]}));   // reversed: rank 1 = best
 
   sc2('prgef',new Chart(document.getElementById('c-prgef'),{type:'line',
     data:{labels:termLabels,datasets:efDatasets},
-    options:chartOpts2(efMin2,efMax2,false),plugins:[bandPlugin]}));
+    options:chartOpts2(efMin2,efMax2,false,true),plugins:[bandPlugin]}));  // reversed: effort 1 = best
 
   // ── Stacked grade distribution bar chart ──
   dc('prggrade');
@@ -16345,9 +16350,10 @@ function rPeer(){
       const cutIdx=Math.max(0,sd.length-nSD);
       const cutISO=sd[cutIdx]||endDate;
       let score=0;
-      for(let i=0;i<SAN.length;i++){
-        const r=SAN[i];
-        if(r[0]!==px) continue;
+      // was a full scan of SAN per call; _sanFor() is the shared per-pupil index
+      const rows_=_sanFor(px);
+      for(let i=0;i<rows_.length;i++){
+        const r=rows_[i];
         if(r[2]<cutISO||r[2]>endDate) continue;
         score+=sancWeight(r[1]);
       }
@@ -16361,9 +16367,10 @@ function rPeer(){
       const cutIdx=Math.max(0,sd.length-nSD);
       const cutISO=sd[cutIdx]||endDate;
       let n=0;
-      for(let i=0;i<SAN.length;i++){
-        const r=SAN[i];
-        if(r[0]!==px) continue;
+      // was a full scan of SAN per call; _sanFor() is the shared per-pupil index
+      const rows_=_sanFor(px);
+      for(let i=0;i<rows_.length;i++){
+        const r=rows_[i];
         if(r[2]<cutISO||r[2]>endDate) continue;
         n++;
       }
@@ -16607,8 +16614,11 @@ function rPeer(){
           if(subjClasses.length<2) continue;
 
           // Pre-compute codes per class
+          // ⚠️ was a full scan of SAN per CLASS, inside a loop over every subject in the
+          // year group. Narrow to this subject's rows once, then test class membership.
+          const _subjSan=SAN.filter(s=>s[3]===subj&&s[1]===0&&s[2]>=ayStart&&s[2]<=todayISO);
           subjClasses.forEach(c=>{
-            const clsSan=SAN.filter(s=>c.pupils.has(s[0])&&s[3]===subj&&s[2]>=ayStart&&s[2]<=todayISO&&s[1]===0);
+            const clsSan=_subjSan.filter(s=>c.pupils.has(s[0]));
             c._codes=clsSan.length;
             c._codesPerPupil=clsSan.length/c.pupils.size;
           });
@@ -16667,7 +16677,11 @@ function rPeer(){
         lr.forEach(r=>{yrTotalAbs+=countAbsPeriods(r[0],ayStart,todayISO).total});
         const yrAbsRate=ytdTotalL>0?(yrTotalAbs/(ytdTotalL*lr.length)*100):0;
 
-        const yrSan=SAN.filter(s=>new Set(lr.map(r=>r[0])).has(s[0])&&s[1]===0&&s[2]>=ayStart&&s[2]<=todayISO);
+        // ⚠️ `new Set(lr.map(...))` was INSIDE the predicate, so a Set of the whole year
+    // group was rebuilt for every one of the 27,510 sanctions — 28% of this tab's
+    // render on one line. Build it once.
+    const _lrSet=new Set(lr.map(r=>r[0]));
+    const yrSan=SAN.filter(s=>_lrSet.has(s[0])&&s[1]===0&&s[2]>=ayStart&&s[2]<=todayISO);
         const yrSanPP=yrSan.length/lr.length;
 
         for(const[tg,info]of Object.entries(tgs)){
