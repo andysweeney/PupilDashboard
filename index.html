@@ -13873,7 +13873,16 @@ function rPeer(){
   // (which rewrites r[1] in place) is visible through it either way.
   // _cnInvalidate() exists for the case where that stops being true — a data reload
   // without a page reload, or a school switch that replaces DD. Call it there.
-  var _sanByPupil=null, _pupilsByYg=null, _decCache={};
+  //
+  // ⚠️ EVERY ONE OF THESE IS INITIALISED LAZILY, NOT AT DECLARATION.
+  // The whole script lives inside `(async function(){ ... })()` at line 436, and there
+  // are awaits before this point. Execution suspends at one of them, a promise callback
+  // renders a pupil, and pupilOtherConcernItems() runs BEFORE this line has executed.
+  // `var _decCache={}` therefore hoists the NAME but not the VALUE, and the first render
+  // of the page died on `_decCache[key]` of undefined — which also stopped the tab
+  // dropdowns populating, so the whole page looked broken.
+  // Never rely on declaration order for state this function needs.
+  var _sanByPupil, _pupilsByYg, _decCache;
   function _sanIdx(){
     if(_sanByPupil)return _sanByPupil;
     _sanByPupil={};
@@ -13891,7 +13900,7 @@ function rPeer(){
     }
     return _pupilsByYg[yg]||[];
   }
-  function _cnInvalidate(){ _sanByPupil=null; _pupilsByYg=null; _decCache={}; }
+  function _cnInvalidate(){ _sanByPupil=null; _pupilsByYg=null; _decCache=null; }
 
   function pupilOtherConcernItems(px){
     const yg=curYG(REG[String(px)]?.intake);
@@ -14170,6 +14179,7 @@ function rPeer(){
       // seconds. The answer is identical for every pupil in the year group, so compute
       // it once.
       const _dk=yg+'|'+ayS+'|'+end+'|'+DEC_PCT;
+      if(!_decCache)_decCache={};          // lazy: see the note at the declaration
       if(!_decCache[_dk]){
         const now={},was={};
         peers.forEach(p=>{
