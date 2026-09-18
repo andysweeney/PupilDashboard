@@ -13860,6 +13860,39 @@ function rPeer(){
   }
   // The item list on its own, so other views can reuse the same triggers,
   // severities and dismissal keys. Returns [] when nothing fires.
+  // ── PER-PUPIL INDEXES, BUILT ONCE ──────────────────────────────────────────
+  // ⚠️ SEVERAL TRIGGERS USED TO SCAN THE WHOLE SANCTION LIST PER PUPIL.
+  // 478 pupils x 27,510 sanctions is 13 million iterations for ONE trigger, and five of
+  // them did it — plus _hmItems() is called more than once per pupil by the year leader
+  // and SLT panels. That took the Year Leader tab to 12 seconds.
+  // One pass builds a pupil -> rows map; every trigger then reads its own pupil's rows.
+  // Cost drops from O(pupils x sanctions) to O(sanctions).
+  // ⚠️ PAGE-LIFETIME CACHE, like _cnSDMod below it, and safe for the same reason:
+  // DD.sanctions is built once during load and never replaced afterwards. The index
+  // holds REFERENCES to the same row arrays, so the on-call reclassification at load
+  // (which rewrites r[1] in place) is visible through it either way.
+  // _cnInvalidate() exists for the case where that stops being true — a data reload
+  // without a page reload, or a school switch that replaces DD. Call it there.
+  var _sanByPupil=null, _pupilsByYg=null, _decCache={};
+  function _sanIdx(){
+    if(_sanByPupil)return _sanByPupil;
+    _sanByPupil={};
+    (DD.sanctions||[]).forEach(r=>{ (_sanByPupil[r[0]]=_sanByPupil[r[0]]||[]).push(r); });
+    return _sanByPupil;
+  }
+  function _sanFor(px){ return _sanIdx()[px]||[]; }
+  function _ygPeers(yg){
+    if(!_pupilsByYg){
+      _pupilsByYg={};
+      Object.keys(REG||{}).forEach(k=>{
+        const y=curYG(REG[k]&&REG[k].intake);
+        if(y)(_pupilsByYg[y]=_pupilsByYg[y]||[]).push(+k);
+      });
+    }
+    return _pupilsByYg[yg]||[];
+  }
+  function _cnInvalidate(){ _sanByPupil=null; _pupilsByYg=null; _decCache={}; }
+
   function pupilOtherConcernItems(px){
     const yg=curYG(REG[String(px)]?.intake);
     if(!yg) return[];
@@ -13916,7 +13949,7 @@ function rPeer(){
       const _sd=_cnYgSDMod&&_cnYgSDMod[yg]?_cnYgSDMod[yg]:_cnSDMod;
       const _end=(_cnYgLatestMod&&_cnYgLatestMod[yg])||(_sd.length?_sd[_sd.length-1]:'');
       const _cut=_sd.length>10?_sd[_sd.length-10]:(_sd[0]||'');
-      const _recent=(DD.sanctions||[]).filter(r=>r[0]===px&&r[2]>=_cut&&r[2]<=_end);
+      const _recent=_sanFor(px).filter(r=>r[2]>=_cut&&r[2]<=_end);
       const _bySub={};
       _recent.forEach(r=>{const k=r[3]||'Non-Lesson';_bySub[k]=(_bySub[k]||0)+1;});
       const _top=Object.keys(_bySub).sort((a,b)=>_bySub[b]-_bySub[a])[0];
@@ -14056,8 +14089,7 @@ function rPeer(){
       const lastEnd=(+end.slice(0,4)-1)+end.slice(4);
       const ayStartNow=ayStartISO(String(ay)), ayStartPrev=ayStartISO(String(ay-1));
       let wNow=0,wPrev=0,cNow=0,cPrev=0;
-      (DD.sanctions||[]).forEach(r=>{
-        if(r[0]!==px)return;
+      _sanFor(px).forEach(r=>{
         const t=r[2], w=sancWeight(r[1]);
         if(t>=ayStartNow&&t<=end){wNow+=w;cNow++;}
         else if(t>=ayStartPrev&&t<=lastEnd){wPrev+=w;cPrev++;}
@@ -14130,18 +14162,31 @@ function rPeer(){
       if(!sdY||sdY.length<40)return;
       const backTo=sdY[Math.max(0,sdY.length-30)];      // ~6 weeks ago
       const peers=[];
-      Object.keys(REG||{}).forEach(k=>{ if(curYG(REG[k]&&REG[k].intake)===yg)peers.push(+k); });
+      peers.push.apply(peers,_ygPeers(yg));
       if(peers.length<20)return;
-      const now={},was={};
-      (DD.sanctions||[]).forEach(r=>{
-        if(r[2]<ayS||r[2]>end)return;
-        now[r[0]]=(now[r[0]]||0)+1;
-        if(r[2]<=backTo)was[r[0]]=(was[r[0]]||0)+1;
-      });
-      const cut=arr=>{ const v=arr.slice().sort((a,b)=>b-a);
-        const i=Math.max(0,Math.floor(v.length*(DEC_PCT/100))-1);
-        return v.length?v[i]:Infinity; };
-      const cutNow=cut(peers.map(p=>now[p]||0)), cutWas=cut(peers.map(p=>was[p]||0));
+      // ⚠️ MEMOISED PER YEAR GROUP. This built the whole cohort's counts and both decile
+      // cutoffs from a full scan of DD.sanctions FOR EVERY PUPIL — 240 pupils each
+      // scanning 27,510 rows, then sorting the cohort twice. On its own it was several
+      // seconds. The answer is identical for every pupil in the year group, so compute
+      // it once.
+      const _dk=yg+'|'+ayS+'|'+end+'|'+DEC_PCT;
+      if(!_decCache[_dk]){
+        const now={},was={};
+        peers.forEach(p=>{
+          _sanFor(p).forEach(r=>{
+            if(r[2]<ayS||r[2]>end)return;
+            now[p]=(now[p]||0)+1;
+            if(r[2]<=backTo)was[p]=(was[p]||0)+1;
+          });
+        });
+        const cut=arr=>{ const v=arr.slice().sort((a,b)=>b-a);
+          const i=Math.max(0,Math.floor(v.length*(DEC_PCT/100))-1);
+          return v.length?v[i]:Infinity; };
+        _decCache[_dk]={now:now,was:was,
+          cutNow:cut(peers.map(p=>now[p]||0)), cutWas:cut(peers.map(p=>was[p]||0))};
+      }
+      const _dc=_decCache[_dk];
+      const now=_dc.now, was=_dc.was, cutNow=_dc.cutNow, cutWas=_dc.cutWas;
       const mine=now[px]||0, mineWas=was[px]||0;
       if(mine<DEC_MIN)return;
       const inNow=mine>=cutNow, inWas=mineWas>=cutWas&&mineWas>=DEC_MIN;
@@ -14215,7 +14260,7 @@ function rPeer(){
       const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       const sd=_cnYgSDMod&&_cnYgSDMod[yg]?_cnYgSDMod[yg]:_cnSDMod;
       const from=sd.length?sd[0]:'';
-      const rows=(DD.sanctions||[]).filter(r=>r[0]===px&&r[1]!==2&&(!from||r[2]>=from));
+      const rows=_sanFor(px).filter(r=>r[1]!==2&&(!from||r[2]>=from));
       if(!rows.length)return;
       const subjOf=r=>r[3]||null;
       const tally=(keyFn)=>{
