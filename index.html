@@ -1418,7 +1418,24 @@ async function sbGet(id){
   const rows=await r.json(); return (rows&&rows.length)?rows[0].value:null;
 }
 async function sbSet(id,value){
-  const r=await fetch(SB_URL+'/rest/v1/app_settings',{method:'POST',headers:Object.assign(_SBHEAD(),{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify({id:_cfgKey(id),value,updated_at:new Date().toISOString()})});
+  // ⚠️ school_id MUST BE SENT. The app_settings RLS policies all test
+  //     school_id = current_school_id()
+  // against a REAL COLUMN, and that column is nullable with no default. This call
+  // omitted it, so every insert wrote school_id = null, the policy compared
+  // null = 'tws', and a null comparison is never true — a 403 on every settings save.
+  // Thresholds, subject mappings, incident categories and SEN codes therefore lived
+  // only in one browser's localStorage and vanished on a cache clear or a school
+  // switch. Dismissals kept working because their policy is ALL with its own
+  // id LIKE '%:dismissals' clause, so it never reached the school_id test.
+  //
+  // ⚠️ current_school_id() reads app_metadata.school_id FROM THE TOKEN, not the
+  // platform-owner override. So a platform owner viewing another school can read it
+  // but cannot save settings for it — the write is refused server-side, which is the
+  // correct behaviour, and the banner from _cfgWarn() will say so.
+  const sid=(function(){ try{ return schoolId(); }catch(e){ return null; } })();
+  const row={id:_cfgKey(id),value,updated_at:new Date().toISOString()};
+  if(sid)row.school_id=sid;
+  const r=await fetch(SB_URL+'/rest/v1/app_settings',{method:'POST',headers:Object.assign(_SBHEAD(),{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'}),body:JSON.stringify(row)});
   if(!r.ok) throw new Error('sbSet '+id+' '+r.status); return true;
 }
 async function sbDel(id){
@@ -1928,7 +1945,40 @@ async function _resolveDataKeys(){
   try{const ls=loadCfg('dataKeys',DATAKEYS_LS_KEY);if(ls)apply(ls);}catch(e){}
   return out;
 }
-function _persistDataKeys(){saveCfg('dataKeys',DATAKEYS_LS_KEY,{att_codes:DD.config.att_codes,sen_codes:DD.config.sen_codes,incident_codes:DD.config.incident_codes,subject_map:DD.config.subject_map});}
+// ⚠️ THIS SAVE CAN FAIL SILENTLY, AND DID.
+// saveCfg() is async and returns false when the server rejects the write, but every
+// caller here was fire-and-forget: an edit wrote to localStorage, failed server-side
+// with a 403 from the app_settings RLS policy, logged a console warning nobody reads,
+// and the UI showed success. Subject mappings therefore existed only in one browser's
+// localStorage — and because _cfgKey() namespaces on schoolId(), which moves when a
+// platform owner switches school, they then appeared to "unmap".
+// Now awaited, with the failure shown. A setting that cannot be kept must say so.
+async function _persistDataKeys(){
+  const ok=await saveCfg('dataKeys',DATAKEYS_LS_KEY,{att_codes:DD.config.att_codes,sen_codes:DD.config.sen_codes,incident_codes:DD.config.incident_codes,subject_map:DD.config.subject_map});
+  if(!ok)_cfgWarn('dataKeys');
+  return ok;
+}
+// One visible, persistent banner rather than a toast: this is data loss, and the user
+// needs to know before they spend an hour mapping subjects that will not survive.
+function _cfgWarn(what){
+  try{
+    let el=document.getElementById('cfg-save-warn');
+    if(!el){
+      el=document.createElement('div');
+      el.id='cfg-save-warn';
+      el.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;padding:.6rem 1rem;'
+        +'background:var(--red);color:#fff;font-size:.78rem;line-height:1.35;box-shadow:0 -2px 8px rgba(0,0,0,.2)';
+      document.body.appendChild(el);
+    }
+    el.innerHTML='<strong>Settings are not being saved to the server.</strong> '
+      +'Your changes are held in this browser only and will be lost if you clear its data, '
+      +'sign in elsewhere, or switch school. '
+      +'<span style="opacity:.85">(app_settings write refused \u2014 the school\u2019s row-level '
+      +'security policy needs applying.)</span> '
+      +'<button onclick="this.parentNode.remove()" style="margin-left:.5rem;background:rgba(255,255,255,.2);'
+      +'border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:4px;padding:.1rem .45rem;cursor:pointer">Dismiss</button>';
+  }catch(e){ try{ alert('Settings could not be saved to the server ('+what+'). They are held in this browser only.'); }catch(_){} }
+}
 const _DKcfg=await _resolveDataKeys();
 DD.config.att_codes=_DKcfg.att_codes;
 DD.config.sen_codes=_DKcfg.sen_codes;
@@ -15429,7 +15479,7 @@ function rPeer(){
     // Update runtime sets
     UNAUTH_MARKS.clear();(ac.unauthorised_absent||[]).forEach(c=>UNAUTH_MARKS.add(c));
     NOT_COUNTED_MARKS.clear();(ac.not_counted||[]).forEach(c=>NOT_COUNTED_MARKS.add(c));
-    _persistDataKeys();
+    _persistDataKeys();   // async: reports its own failure
     rAdmin();
   };
   window._adminSetSen=function(code,label){
@@ -15437,7 +15487,7 @@ function rPeer(){
       DD.config.sen_codes[code]=label;
       SEN_LABELS[code]=label;
     }
-    _persistDataKeys();
+    _persistDataKeys();   // async: reports its own failure
     rAdmin();
   };
   window._scaleUnmapped=function(cfg){
@@ -15514,7 +15564,7 @@ function rPeer(){
     (DD.sanctionDetails||[]).forEach((d)=>{
       if(d&&d[0]===code) d[1]=_newCat;
     });
-    _persistDataKeys();
+    _persistDataKeys();   // async: reports its own failure
     rAdmin();
   };
 
@@ -15568,7 +15618,7 @@ function rPeer(){
       Object.keys(A).forEach(r=>{if(A[r]===key)delete A[r];});  // defensive: clear any stray aliases to it
     }
     SUBJ=_buildSUBJ(DD.config.subject_map);
-    _persistDataKeys();
+    _persistDataKeys();   // async: reports its own failure
     rAdmin();
   };
 
