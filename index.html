@@ -1920,6 +1920,110 @@ if(_USE_REF){
 // group and stored it at cell[3], so cross-key-stage lines are collision-free — use it. Pre-rebuild
 // data has no cell[3], so fall back to the legacy single-scale lookup (identical to before).
 function abRk(c){ if(c==null)return 0; if(_USE_REF)return (c[3]!=null?c[3]:0); var _l=AM[c[0]]; return AS[_l]||0; }
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  RELATIVE POSITION — one definition, used by every tab
+// ══════════════════════════════════════════════════════════════════════════════
+// ⚠️ ALWAYS RANKED WITHIN THE YEAR GROUP, never within a form or a class.
+// A pupil's position among 29 form-mates is nearly meaningless: one place is 3.4
+// percentile points and the form's composition decides the answer as much as the pupil
+// does. Rank against the year (234 at TWS), then DISPLAY it wherever the reader is.
+//
+// ⚠️ PERCENTILE IS THE STORED NUMBER. Quartiles and deciles are renderings of it, so
+// granularity is a presentation choice per tab, not a storage one. Computing it ad hoc
+// in each tab is how two readers of the same thing end up disagreeing — which has
+// already happened twice in this file (the progress row, and the duplicated grids).
+//
+// ⚠️ 100 = BEST. abRk() is 1 = best, so the ordering is inverted here once and nowhere
+// else. Every caller can assume higher is better.
+//
+// ⚠️ WHAT THIS CANNOT SEE: a cohort that declines together shows no movement at all,
+// because rank is relative by construction. Keep an absolute measure alongside it.
+var _pctCache=null;
+function _pctBuild(pk, yg){
+  // mean ability rank per pupil in this year group for this collection
+  const vals=[];
+  for(const ik in (PRG||{})){
+    (PRG[ik] && PRG[ik][pk] || []).forEach(r=>{
+      const px=r[0];
+      const info=REG[String(px)]; if(!info)return;
+      if(curYG(info.intake)!==yg)return;
+      const sc=progCol(r,'scores')||{};
+      let sum=0,n=0;
+      Object.values(sc).forEach(c=>{ const rk=abRk(c); if(rk){sum+=rk;n++;} });
+      if(n)vals.push({px:px, m:sum/n});
+    });
+  }
+  if(!vals.length)return {};
+  // best first: abRk 1 = best, so ascending mean rank is descending quality
+  vals.sort((a,b)=>a.m-b.m);
+  const out={}, N=vals.length;
+  // ties share a position, so two identical pupils get identical percentiles
+  let i=0;
+  while(i<N){
+    let j=i; while(j+1<N && vals[j+1].m===vals[i].m) j++;
+    const mid=(i+j)/2;
+    const pc=100*(1-(mid+0.5)/N);      // 100 = best
+    for(let k=i;k<=j;k++) out[vals[k].px]={pct:pc, mean:vals[k].m, n:N};
+    i=j+1;
+  }
+  return out;
+}
+function _pctAll(pk, yg){
+  if(!_pctCache)_pctCache={};
+  const k=pk+'|'+yg;
+  if(!_pctCache[k])_pctCache[k]=_pctBuild(pk,yg);
+  return _pctCache[k];
+}
+// Percentile for one pupil in one collection. null when they have no graded subjects.
+function pctOfPupil(px, pk){
+  const info=REG[String(px)]; if(!info)return null;
+  const rec=_pctAll(pk, curYG(info.intake))[px];
+  return rec?rec.pct:null;
+}
+// Quartile: 1 = top quarter ... 4 = bottom quarter. The rendering used for alerts and
+// for any group small enough that a percentile would be spurious.
+function qtOfPct(pct){ if(pct==null)return null;
+  // ⚠️ clamp: a pupil at exactly 100 gives 4-4 = 0 without it
+  return Math.max(1, Math.min(4, 4-Math.floor(pct/25))); }
+function qtOfPupil(px, pk){ return qtOfPct(pctOfPupil(px,pk)); }
+// Decile, for a threshold test only ("entered the worst 10%"), never as a band.
+function decOfPct(pct){ if(pct==null)return null; return Math.max(1, Math.min(10, 10-Math.floor(pct/10))); }
+// The collections a pupil actually has grades in, oldest first.
+function pctColls(){
+  const pp=(PER||[]).filter(k=>{ for(const ik in (PRG||{})) if(PRG[ik]&&PRG[ik][k])return true; return false; });
+  return pp;
+}
+function _pctReset(){ _pctCache=null; }
+
+// ── Pupil card: position in the year group, and how it has moved ──
+// ⚠️ PERCENTILE HERE, NOT A BAND. One pupil against 234 is where fine resolution is
+// justified, and "99th to 11th" says far more than "Q1 to Q4".
+// ⚠️ THE MOVEMENT IS THE POINT, and it is immune to a whole cohort being marked up or
+// down between collections — which a raw grade change is not. At TWS the T1 collection
+// records no grade below 5 and its cohort mean sits 0.72 above T2, so every pupil's raw
+// grade falls; almost nobody's POSITION does.
+function _pctLine(px, lp){
+  const now=pctOfPupil(px, lp);
+  if(now==null)return '';
+  const colls=pctColls();
+  const i=colls.indexOf(lp);
+  const prev=i>0?colls[i-1]:null;
+  const was=prev?pctOfPupil(px, prev):null;
+  const ord=n=>{const v=Math.round(n),s=['th','st','nd','rd'],k=v%100;return v+(s[(k-20)%10]||s[k]||s[0]);};
+  const qTxt=['top quarter','second quarter','third quarter','bottom quarter'][qtOfPct(now)-1];
+  let mv='';
+  if(was!=null){
+    const d=now-was;
+    const col=d<=-10?'var(--red)':(d>=10?'var(--green)':'var(--tx2)');
+    const arrow=d<=-1?'\u25bc':(d>=1?'\u25b2':'\u2013');
+    mv='<span style="color:'+col+';margin-left:.45rem" title="was '+ord(was)+' in '+collLabel(prev)+'">'
+      +arrow+' '+(d>0?'+':'')+Math.round(d)+' since '+collLabel(prev)+'</span>';
+  }
+  return '<div style="margin-top:.3rem;font-size:.7rem;color:var(--tx2)">'
+    +'<strong style="color:var(--tx)">'+ord(now)+' percentile</strong> in the year group '
+    +'<span style="color:var(--mu)">('+qTxt+')</span>'+mv+'</div>';
+}
 // ── Admin "data-key" settings (att/sen/incident) live OUTSIDE the export. Resolution:
 //    code default <- legacy data.json.config <- ./data_key_config.json <- localStorage.
 //    Edits persist immediately via _persistDataKeys(); the export can carry none of these. ──
@@ -2420,7 +2524,7 @@ function saveThresholds(){
       SAV_RATIO, SAV_MIN,
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
-      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN, AB_DOW_PCT, AB_DOW_MIN, YOY_RATIO, YOY_MIN, AYOY_RATIO, AYOY_MIN, DEC_PCT, DEC_MIN,
+      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN, AB_DOW_PCT, AB_DOW_MIN, YOY_RATIO, YOY_MIN, AYOY_RATIO, AYOY_MIN, DEC_PCT, DEC_MIN, POS_QT, POS_PTS,
       HM_UNPREP, HM_AMBER_TG, HM_AMBER_YL
     };
     saveCfg('thresholds', _LS_KEY, obj);
@@ -2476,6 +2580,8 @@ function applyThresholdValues(v){
   if((n=safeI(v.SW_DET))!=null) SW_DET=n;
   if((n=safeF(v.AYOY_RATIO))!=null&&n>1) AYOY_RATIO=n;
   if((n=safeI(v.AYOY_MIN))!=null&&n>0) AYOY_MIN=n;
+  if((n=safeI(v.POS_QT))!=null&&n>0&&n<=3) POS_QT=n;
+  if((n=safeF(v.POS_PTS))!=null&&n>0&&n<=100) POS_PTS=n;
   if((n=safeF(v.DEC_PCT))!=null&&n>0&&n<50) DEC_PCT=n;
   if((n=safeI(v.DEC_MIN))!=null&&n>0) DEC_MIN=n;
   if((n=safeF(v.YOY_RATIO))!=null&&n>1) YOY_RATIO=n;
@@ -2501,7 +2607,7 @@ const _THRESHOLD_DEFAULTS = {
   SAV_RATIO:2.0, SAV_MIN:3,
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
   TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
-  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8, AB_DOW_PCT:50, AB_DOW_MIN:6, YOY_RATIO:1.5, YOY_MIN:20, AYOY_RATIO:1.4, AYOY_MIN:15, DEC_PCT:10, DEC_MIN:15,
+  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8, AB_DOW_PCT:50, AB_DOW_MIN:6, YOY_RATIO:1.5, YOY_MIN:20, AYOY_RATIO:1.4, AYOY_MIN:15, DEC_PCT:10, DEC_MIN:15, POS_QT:1, POS_PTS:25,
   HM_UNPREP:15, HM_AMBER_TG:4, HM_AMBER_YL:10
 };
 
@@ -2519,7 +2625,7 @@ const _THRESHOLD_INPUTS = {
   TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
   SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det',
   SC_DOW_PCT:'sc-dow-pct', SC_DOW_MIN:'sc-dow-min', SC_PER_PCT:'sc-per-pct', SC_PER_MIN:'sc-per-min',
-  AB_DOW_PCT:'ab-dow-pct', AB_DOW_MIN:'ab-dow-min', YOY_RATIO:'yoy-ratio', YOY_MIN:'yoy-min', AYOY_RATIO:'ayoy-ratio', AYOY_MIN:'ayoy-min', DEC_PCT:'dec-pct', DEC_MIN:'dec-min',
+  AB_DOW_PCT:'ab-dow-pct', AB_DOW_MIN:'ab-dow-min', YOY_RATIO:'yoy-ratio', YOY_MIN:'yoy-min', AYOY_RATIO:'ayoy-ratio', AYOY_MIN:'ayoy-min', DEC_PCT:'dec-pct', DEC_MIN:'dec-min', POS_QT:'pos-qt', POS_PTS:'pos-pts',
   HM_UNPREP:'hm-unprep', HM_AMBER_TG:'hm-amber-tg', HM_AMBER_YL:'hm-amber-yl'
 };
 
@@ -2585,6 +2691,8 @@ function applyCT(){
   ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
   AYOY_RATIO=parseFloat(document.getElementById('ayoy-ratio').value)||1.4;
   AYOY_MIN=parseInt(document.getElementById('ayoy-min').value)||15;
+  POS_QT=parseInt(document.getElementById('pos-qt').value)||1;
+  POS_PTS=parseFloat(document.getElementById('pos-pts').value)||25;
   DEC_PCT=parseFloat(document.getElementById('dec-pct').value)||10;
   DEC_MIN=parseInt(document.getElementById('dec-min').value)||15;
   YOY_RATIO=parseFloat(document.getElementById('yoy-ratio').value)||1.5;
@@ -2665,6 +2773,14 @@ let AYOY_RATIO=1.4, AYOY_MIN=15;      // same, for ABSENCE: x last year's rate, 
 // test, and it fires on the CROSSING rather than continuously — a pupil who has been in
 // the top decile all year is not news, but one who has just entered it is.
 let DEC_PCT=10, DEC_MIN=15;           // top N% of the year group, min sanctions to qualify
+// Attainment POSITION falling. Neither test works alone: a quartile fall on its own fires
+// for 35% of a cohort and its smallest crossing moved only 7 percentile points — a
+// boundary flip, not a change. A percentile threshold alone has no natural cut-off.
+// ⚠️ THESE DEFAULTS ARE A GUESS AND CANNOT BE TUNED ON TWS's DATA. Neither collection
+// pair is representative: T1->T2 is chaotic (24% of pupils fell 2+ grades, because T1 is
+// an optimistic prediction floored at grade 5) and T2->T3 is frozen (98.8% identical).
+// Validate against a school with genuine movement between collections.
+let POS_QT=1, POS_PTS=25;             // quartiles fallen, and minimum percentile points
 let SC_PER_PCT=30, SC_PER_MIN=8;      // period number
 // GCSE 1-9 → ability letter mapping (used to render OTA grades in dashboard).
 // Loaded from config.gcse_to_letter; falls back to the default below.
@@ -2815,6 +2931,26 @@ function efDesc(v){if(v==null||isNaN(v))return'';const r=Math.min(EFFORT.n,Math.
 // the descriptor ladder (KS3 bands). a6 (avg reference rank) is the position on the descriptor bar.
 function _posNumeric(levels,value){const labs=levels.map(l=>parseFloat(l.label));if(value>=labs[0])return 1;if(value<=labs[labs.length-1])return labs.length;for(let i=0;i<labs.length-1;i++){if(value<=labs[i]&&value>=labs[i+1]){const span=(labs[i]-labs[i+1])||1;return (i+1)+(labs[i]-value)/span;}}return labs.length;}
 function _levelColourAt(levels,pos){if(pos==null||isNaN(pos)||!levels||!levels.length)return 'var(--mu)';const i=Math.min(levels.length,Math.max(1,Math.round(pos)))-1;return (levels[i]&&levels[i].colour)||'var(--mu)';}
+// ⚠️ TWO SCALES, RUNNING IN OPPOSITE DIRECTIONS, AND THE CARD MUST SAY WHICH.
+// When the native grades are numeric (GCSE 9-1) the headline is the mean NATIVE grade,
+// where 9 is BEST. Everywhere else in the app the figure is the reference RANK, where
+// 1 is best. So "6.6" is a strong class on the first and a weak one on the second, and
+// the card showed the number with no units at all.
+// _abScaleNote() returns the caption to print beside it.
+function _abScaleNote(cells){
+  const valid=(cells||[]).filter(c=>c&&c[0]!=null&&String(c[0]).trim()!=='');
+  if(!valid.length)return '';
+  const lvls=_USE_REF?_builtinAbilityLevels(new Set(valid.map(c=>String(c[0]).trim()))):[];
+  if(!lvls.length)return '';
+  const nums=valid.map(c=>{const t=String(c[0]).trim().toUpperCase();return t==='U'?0:parseFloat(t);});
+  if(nums.every(v=>!isNaN(v))){
+    const lo=Math.min(...lvls.map(l=>parseFloat(l.label)).filter(v=>!isNaN(v)));
+    const hi=Math.max(...lvls.map(l=>parseFloat(l.label)).filter(v=>!isNaN(v)));
+    if(!isNaN(lo)&&!isNaN(hi))return 'mean grade, '+hi+'\u2013'+lo+' scale ('+hi+' best)';
+    return 'mean grade';
+  }
+  return 'mean band';
+}
 function _abHeadline(cells,a6){
   const valid=(cells||[]).filter(c=>c&&c[0]!=null&&String(c[0]).trim()!=='');
   let lvls=[];
@@ -4241,6 +4377,7 @@ function rP(){
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(a6)}">${_abH.valueLabel}</span>${abClsRkStr?`<span style="font-size:.72rem;color:var(--mu)">Ranked <b style="color:var(--tx)">${abClsRkStr}</b> in class</span>`:''}</div>
           ${clsInfo?`<div style="margin-top:.15rem">${clsInfo}</div>`:''}
+          ${_pctLine(x,lp)}
           <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
           <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
         </div>
@@ -8573,6 +8710,7 @@ function _hmItemsReset(){ _hmItemsCache=null; }
 // reload without a page reload, or a school switch that rebuilds DD).
 function _hmPerfReset(){
   _hmItemsCache=null; _hmTodayCache=null; _hmDaysCache=null;
+  try{ _collRangeCache=null; }catch(e){}
   try{ _clsEnrolIdx=null; }catch(e){}
   try{ _enIdx=null; _fsmIdx=null; }catch(e){}
   try{ _cnInvalidate(); }catch(e){}
@@ -8778,6 +8916,55 @@ function _hmTutor(){
     +_hmCard('Already considered',handled.length,'')
     +'</div>';
 
+  // ── WHERE THIS FORM SITS IN THE YEAR ──
+  // ⚠️ QUARTILE OF THE YEAR GROUP, NOT OF THE FORM. A pupil's position among 29
+  // form-mates is close to meaningless — one place is 3.4 percentile points and the
+  // form's composition decides the answer as much as the pupil does. Ranked against the
+  // year (234 at TWS), displayed here.
+  // ⚠️ Named pupils, because a tutor acts on individuals. The percentile itself is on
+  // each pupil's own page; a tutor needs the group, not the rank order.
+  (function(){
+    const colls=pctColls();
+    if(!colls.length)return;
+    const lp=colls[colls.length-1];
+    const prev=colls.length>1?colls[colls.length-2]:null;
+    const buckets=[[],[],[],[]];
+    let n=0;
+    px.forEach(p=>{
+      const q=qtOfPupil(p,lp); if(!q)return;
+      n++;
+      const now=pctOfPupil(p,lp), was=prev?pctOfPupil(p,prev):null;
+      buckets[q-1].push({px:p, pct:now, d:(was==null?null:now-was)});
+    });
+    if(!n)return;
+    const QC=['var(--green)','var(--sky)','var(--gold)','var(--red)'];
+    const QL=['Top quarter','Second quarter','Third quarter','Bottom quarter'];
+    const body=buckets.map((b,i)=>{
+      if(!b.length)return '';
+      b.sort((a,c)=>(a.d==null?0:a.d)-(c.d==null?0:c.d));
+      const names=b.map(o=>{
+        const moved=o.d!=null&&Math.abs(o.d)>=10;
+        const col=o.d<=-10?'var(--red)':(o.d>=10?'var(--green)':'var(--tx2)');
+        return '<span style="display:inline-block;margin-right:.5rem;white-space:nowrap">'
+          +_hmName(o.px)
+          +(moved?'<span style="color:'+col+';font-size:.64rem"> '+(o.d<0?'\u25bc':'\u25b2')+Math.abs(Math.round(o.d))+'</span>':'')
+          +'</span>';
+      }).join('');
+      return '<div style="display:flex;gap:.5rem;margin-bottom:.4rem;font-size:.72rem">'
+        +'<span style="width:118px;flex:0 0 auto;color:var(--tx2)">'
+          +'<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+QC[i]
+          +';margin-right:.3rem;vertical-align:middle"></span>'+QL[i]
+          +' <span style="color:var(--mu)">'+b.length+'</span></span>'
+        +'<span style="flex:1">'+names+'</span></div>';
+    }).join('');
+    h+=_hmPanel('Where your form sits in the year, '+collLabel(lp),
+      'Each pupil ranked against the <strong>whole year group</strong>, not against your form \u2014 '
+      +'a position among 29 says more about who else is in the room than about the pupil. '
+      +(prev?'A \u25bc or \u25b2 marks a move of 10 percentile points or more since '+collLabel(prev)+'. ':'')
+      +'\u26a0\ufe0f This is position, not grade: if the whole year declines together nobody moves.',
+      body);
+  })();
+
   // The change feed goes FIRST: the lists below are what a tutor already knows, this is
   // what they do not. If nothing moved, say so rather than rendering an empty panel.
   if(_chg){
@@ -8918,6 +9105,51 @@ function _hmYearLeader(){
         +'<span style="width:32px;text-align:right">'+v+'</span></div>').join(''));
   }
 
+  // ── ATTAINMENT POSITION ACROSS THE YEAR GROUP ──
+  // ⚠️ QUARTILE, NOT PERCENTILE. 240 pupils is too many to read as a rank order; the
+  // quartile gives the shape and the individual number is on the pupil's own page.
+  // ⚠️ Ranked within the YEAR GROUP, which for this tab IS the reference group — so
+  // these quarters are by definition roughly equal across the whole year. The value is
+  // in the FORM-BY-FORM split below it, where an even spread is the expectation and an
+  // uneven one is the finding.
+  (function(){
+    const colls=pctColls();
+    if(!colls.length)return;
+    const lp=colls[colls.length-1];
+    const forms={};
+    px.forEach(p=>{ const q=qtOfPupil(p,lp); if(!q)return;
+      const f=_hmReg(p)||'\u2014'; (forms[f]=forms[f]||[0,0,0,0])[q-1]++; });
+    const fkeys=Object.keys(forms).sort();
+    if(fkeys.length<2)return;
+    const QC=['var(--green)','var(--sky)','var(--gold)','var(--red)'];
+    const row=(label,q)=>{
+      const n=q.reduce((a,b)=>a+b,0); if(!n)return '';
+      const segs=q.map((c,i)=>c?('<span title="'+label+' \u2014 '+['top','second','third','bottom'][i]
+        +' quarter: '+c+'" style="display:block;float:left;height:13px;width:'+(100*c/n)+'%;background:'+QC[i]+'"></span>'):'').join('');
+      return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
+        +'<span style="width:80px;color:var(--tx2)">'+label+'</span>'
+        +'<span style="width:30px;text-align:right;color:var(--mu);font-size:.66rem">'+n+'</span>'
+        +'<span style="flex:1;min-width:120px"><span style="display:block;overflow:hidden;border-radius:3px;background:var(--bd)">'
+          +segs+'<span style="display:block;clear:both"></span></span></span>'
+        +'<span style="width:54px;text-align:right;color:'+(q[3]/n>=0.4?'var(--red)':'var(--tx2)')+'">'
+          +Math.round(100*q[3]/n)+'% Q4</span></div>';
+    };
+    const tot=[0,0,0,0]; fkeys.forEach(f=>forms[f].forEach((c,i)=>tot[i]+=c));
+    h+=_hmPanel('Attainment position by form, '+collLabel(lp),
+      'Each pupil ranked against the whole <strong>year group</strong> and placed in a quarter. '
+      +'Forms are usually mixed-ability, so an even spread is the expectation and an uneven one '
+      +'is worth a look \u2014 though a form built around a setted subject, or one carrying more '
+      +'additional needs, will legitimately differ. '
+      +'\u26a0\ufe0f This is position, not grade: a year group that declines together shows no change.',
+      '<div style="display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.66rem;color:var(--tx2)">'
+      +['top','second','third','bottom'].map((l,i)=>'<span><span style="display:inline-block;width:9px;height:9px;'
+        +'border-radius:2px;background:'+QC[i]+';margin-right:.25rem;vertical-align:middle"></span>'+l+' quarter</span>').join('')
+      +'</div>'
+      +row('Year group',tot)
+      +'<div style="border-top:1px solid var(--bd);margin:.35rem 0"></div>'
+      +fkeys.map(f=>row(f,forms[f])).join(''));
+  })();
+
   // ══════════════════════════════════════════════════════════════════════════
   //  WHO IS THIS FALLING ON — the same five groups as the SLT tab
   // ══════════════════════════════════════════════════════════════════════════
@@ -9010,7 +9242,8 @@ function _hmYearLeader(){
                 'sanc-dow':'Behaviour','sanc-period':'Behaviour','yoy-escalate':'Behaviour',
                 'yoy-absence':'Attendance',
                 'subj-avoid':'Subject',
-                'attain-drop':'Attainment','effort-drop':'Attainment' };
+                'attain-drop':'Attainment','effort-drop':'Attainment',
+                'pos-drop':'Attainment' };
     const rows=[];
     px.forEach(p=>{
       const live=_hmItems(p,'wide').live;
@@ -9551,6 +9784,54 @@ function _hmSLT(){
   // Until then the session row below is deliberately shown as unavailable rather than
   // silently filled with the lesson figure — a plausible wrong number is worse than a
   // visible gap, because nobody checks a number that looks right.
+  // ── ATTAINMENT POSITION BY GROUP ──
+  // ⚠️ QUARTILE COUNTS, NOT A MEAN. The SLT question is "how many of our FSM pupils sit
+  // in the bottom quarter of the year", not "what is their average rank". A mean hides
+  // the shape, and on a skewed group it describes nobody.
+  // ⚠️ RANKED WITHIN THE YEAR GROUP, so the quartiles are positions among peers rather
+  // than absolute standards. A cohort that all decline together shows no movement here —
+  // keep the absolute figures in the Ability section alongside it.
+  (function(){
+    const colls=pctColls();
+    if(!colls.length)return;
+    const lp=colls[colls.length-1];
+    const rows=[['__all','All pupils',all]].concat(order.filter(k=>grp[k].length).map(k=>[k,labels[k],grp[k]]));
+    const body=[];
+    let anyData=false;
+    const QC=['var(--green)','var(--sky)','var(--gold)','var(--red)'];
+    rows.forEach(([k,label,list],idx)=>{
+      const q=[0,0,0,0]; let n=0;
+      list.forEach(px=>{ const v=qtOfPupil(px,lp); if(v){q[v-1]++;n++;} });
+      if(!n)return;
+      anyData=true;
+      const segs=q.map((c,i)=>c?('<span title="'+label+' \u2014 '+['top','second','third','bottom'][i]
+        +' quarter: '+c+' pupils ('+Math.round(100*c/n)+'%)" style="display:block;float:left;height:13px;width:'
+        +(100*c/n)+'%;background:'+QC[i]+'"></span>'):'').join('');
+      body.push('<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem'
+        +(idx===0?';font-weight:600':'')+'">'
+        +'<span style="width:150px;color:var(--tx2);white-space:nowrap">'+label+'</span>'
+        +'<span style="width:34px;text-align:right;color:var(--mu);font-size:.66rem">'+n+'</span>'
+        +'<span style="flex:1;min-width:120px"><span style="display:block;overflow:hidden;border-radius:3px;background:var(--bd)">'
+          +segs+'<span style="display:block;clear:both"></span></span></span>'
+        +'<span style="width:58px;text-align:right;color:'+(q[3]/n>=0.4?'var(--red)':'var(--tx2)')+'">'
+          +Math.round(100*q[3]/n)+'% Q4</span></div>');
+      if(idx===0)body.push('<div style="border-top:1px solid var(--bd);margin:.35rem 0"></div>');
+    });
+    if(!anyData)return;
+    const legend='<div style="display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.66rem;color:var(--tx2)">'
+      +['top','second','third','bottom'].map((l,i)=>'<span><span style="display:inline-block;width:9px;height:9px;'
+        +'border-radius:2px;background:'+QC[i]+';margin-right:.25rem;vertical-align:middle"></span>'
+        +l+' quarter</span>').join('')+'</div>';
+    h+=_hmPanel('Where each group sits in the year, '+collLabel(lp),
+      'Attainment <strong>position</strong>, not grade. Each pupil is ranked against the whole year '
+      +'group and placed in a quarter; the bars show how each group is spread across those quarters. '
+      +'An even school would show four equal blocks on every row. '
+      +'\u26a0\ufe0f Position is relative, so a year group that declines together shows no change at all here '
+      +'\u2014 read it with the absolute figures in Ability. '
+      +'Groups are \u201cever\u201d, not \u201cnow\u201d, and no pupil is counted twice.',
+      legend+body.join(''));
+  })();
+
   h+=_hmSection('Attendance','lesson-based \u2014 session figures arrive with the API');
 
   // ── SHARED ATTENDANCE INDEX ──
@@ -12285,7 +12566,7 @@ function rCL(){
   if(hasGradesCL){
   document.getElementById('cl-cards').innerHTML=`
     <div class="crd"><div class="ct2">${sub} Class ${cl} Ability (Y${yearGroup} · ${collLabel(lp)})</div>
-      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${_abAvgLabel(_abCells(lr,[sub]),avg)}</span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
+      <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap"><span class="cv2" style="color:${aC(avg)}">${_abAvgLabel(_abCells(lr,[sub]),avg)}</span><span style="font-size:.6rem;color:var(--mu)">${_abScaleNote(_abCells(lr,[sub]))}</span><span style="font-size:.72rem;color:var(--mu)">${classPups.size} pupils · ${teacherDisplay}</span></div>
       <div style="display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.4rem">${chB(aY,'Year-on-Year')}${chB(aT,'This Term')}</div>
       <div class="prev2" style="margin-top:.4rem">${abPrv}</div>
       ${sgBlockAb}
@@ -14020,6 +14301,25 @@ function rPeer(){
   }
   function _cnInvalidate(){ _sanByPupil=null; _pupilsByYg=null; _decCache=null; }
 
+  // Observed native-grade range of a whole collection, across every pupil and subject.
+  // Memoised: the answer is a property of the collection, not the pupil.
+  var _collRangeCache=null;
+  function _collRange(pk){
+    if(!_collRangeCache)_collRangeCache={};
+    if(_collRangeCache[pk]!==undefined)return _collRangeCache[pk];
+    const v=[];
+    for(const ik in (PRG||{})){
+      (PRG[ik]&&PRG[ik][pk]||[]).forEach(r=>{
+        const sc=progCol(r,'scores')||{};
+        Object.values(sc).forEach(c=>{
+          const n=parseFloat(String(c&&c[0]).trim());
+          if(!isNaN(n))v.push(n);
+        });
+      });
+    }
+    return (_collRangeCache[pk]= v.length?{min:Math.min(...v),max:Math.max(...v)}:null);
+  }
+
   function pupilOtherConcernItems(px){
     const yg=curYG(REG[String(px)]?.intake);
     if(!yg) return[];
@@ -14328,6 +14628,37 @@ function rPeer(){
           +`while they stay there.`});
     })();
 
+    // ── 6f. ATTAINMENT POSITION FALLING ──
+    // ⚠️ POSITION, NOT GRADE — and that is the whole point of it.
+    // "Attainment Dropped" (below) compares a pupil's grades between collections, which
+    // is only meaningful when the two collections measure the same thing. At TWS they do
+    // not: T1 records no grade below 5 and its cohort mean sits 0.72 above T2, so every
+    // pupil's raw grade falls and the trigger is guarded against comparing them at all.
+    // RANK is immune to that. If a whole cohort is marked down, everyone moves together
+    // and nobody's position changes — so what is left is real.
+    // ⚠️ The converse is the limitation: a cohort that genuinely declines together shows
+    // nothing here. This trigger and Attainment Dropped answer different questions and
+    // both are needed.
+    (function(){
+      const colls=pctColls();
+      if(colls.length<2)return;
+      const lp=colls[colls.length-1], p5=colls[colls.length-2];
+      const now=pctOfPupil(px,lp), was=pctOfPupil(px,p5);
+      if(now==null||was==null)return;
+      const qn=qtOfPct(now), qw=qtOfPct(was);
+      const fell=qn-qw;                       // quartile numbers run 1 (top) .. 4 (bottom)
+      const moved=was-now;                    // percentile points lost
+      if(fell<POS_QT||moved<POS_PTS)return;
+      const ord=n=>{const v=Math.round(n),t=['th','st','nd','rd'],k=v%100;return v+(t[(k-20)%10]||t[k]||t[0]);};
+      const QL=['top','second','third','bottom'];
+      items.push({type:'pos-drop',subkey:'',label:'Attainment position falling',
+        severity:(fell>=2||moved>=50)?'red':'amber',
+        detail:`${fn} has moved from the ${QL[qw-1]} quarter of the year group to the `
+          +`${QL[qn-1]} \u2014 ${ord(was)} percentile in ${collLabel(p5)}, ${ord(now)} in ${collLabel(lp)}. `
+          +`\u26a0\ufe0f This is position against peers, not a grade: it counts only because the rest `
+          +`of the cohort did not move the same way.`});
+    })();
+
     // ── 7a. ABSENCE ON ONE DAY OF THE WEEK ──
     // Absence Pattern (above) works on SLOTS — "always misses period 5 PE". A pupil who
     // misses the WHOLE of one weekday is invisible to it, and invisible to every
@@ -14466,6 +14797,22 @@ function rPeer(){
         });
         return out.sort((x,y)=>y.by-x.by);
       };
+      // ⚠️ A COLLECTION WITH A RESTRICTED GRADE RANGE CANNOT BE COMPARED WITH A FULL ONE.
+      // TWS's Year 10 WINTER collection contains only grades 5-9 — no 4, 3, 2 or 1 — while
+      // Spring and Summer span 1-9 and U. It is an aspirational "on track for" prediction,
+      // not an attainment judgement: its cohort mean is 6.97 against Spring's 6.25.
+      // Comparing the two produced 442 "dropped 2+ bands" out of 1,611 subject pairs.
+      // Spring against Summer, both full range, produces SIX.
+      // So: if the earlier collection never recorded a grade materially below the later
+      // one's floor, the two measure different things and the drop is an artefact.
+      // ⚠️ This is a property of the DATA, not of the pupil, so it is detected from the
+      // observed values rather than declared anywhere.
+      const _rPrev=_collRange(p5), _rCur=_collRange(lp);
+      if(_rPrev&&_rCur&&(_rPrev.min-_rCur.min)>=2){
+        // the earlier collection's floor sits two or more grades above the later one's:
+        // every pupil genuinely below that floor must appear to fall. Say nothing.
+        return;
+      }
       const ab=drops('ab',CT_AB), ef=drops('ef',CT_EF);
       // period keys are expanded to their labels by the loader as well
       const lbl=k=>k;
@@ -15700,6 +16047,16 @@ ${groupPanel(
           +inputRow('Absence \u2014 minimum periods','ayoy-min',AYOY_MIN,{min:5,max:200,step:5,hint:'Minimum absent periods this year before the ratio is tested.'})
         )}
         ${groupPanel(
+          'Attainment position falling',
+          'Position in the YEAR GROUP, not grade. A pupil whose grades fall with everyone '
+          +'else\u2019s has not lost ground; one who falls while the cohort holds steady has. '
+          +'Both tests must pass: a quartile fall alone fires for about a third of a cohort, '
+          +'because a pupil sitting on a boundary crosses it on almost nothing.',
+          'Concerns \u2192 Attainment position falling',
+          inputRow('Quartiles fallen','pos-qt',POS_QT,{min:1,max:3,step:1,hint:'How many quarters of the year group a pupil must drop. 1 is any quartile fall; 2 means something like top-half to bottom-quarter. At TWS every one of the ten largest falls was top quarter to bottom quarter, so 2 may be the more honest setting.'})
+          +inputRow('Minimum percentile points','pos-pts',POS_PTS,{min:5,max:60,step:5,hint:'How far they must actually move, so a boundary flip does not count. \u26a0\ufe0f This default is a guess: TWS has no collection pair that can tune it \u2014 one is chaotic, the other identical. Validate elsewhere.'})
+        )}
+        ${groupPanel(
           'Entering the top decile',
           'A LEVEL test rather than a change test, and it fires only on the CROSSING. A pupil who '
           +'has sat in the worst decile since September is not news to their tutor; one who has '
@@ -16236,6 +16593,7 @@ ${groupPanel(
     {id:'seasonal-abs', label:'Recurring Seasonal Absence'},
     {id:'yoy-escalate', label:'Escalating year on year'},
     {id:'yoy-absence',  label:'Absence escalating year on year'},
+    {id:'pos-drop',     label:'Attainment position falling'},
     {id:'decile',       label:'Entered the top decile'}   // tutor view only
     // NOTE 'subj-engage' above is pushed ONLY by the class-concerns builder, so its
     // chip will always be empty in pupil-level views. Left in place deliberately.
