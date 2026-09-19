@@ -6408,7 +6408,12 @@ function rSEND(){
           if(ef2>0) clsEfRanks[key].push({px:px2,score:ef2});
         });
       });
-      for(const k of Object.keys(clsAbRanks)) clsAbRanks[k].sort((a,b)=>b.score-a.score);
+      // ⚠️ ASCENDING. abRk() is 1 = BEST, so the best pupil has the LOWEST score and must
+      // sort first. This was descending, which put the strongest pupils last: a pupil on
+      // 1.0 in Computing showed as 19/19 while one on 3.0 showed as 16/19.
+      // Note the effort line below was already ascending and correct — the two were
+      // inconsistent with each other, which is what made it visible.
+      for(const k of Object.keys(clsAbRanks)) clsAbRanks[k].sort((a,b)=>a.score-b.score);
       for(const k of Object.keys(clsEfRanks)) clsEfRanks[k].sort((a,b)=>a.score-b.score);
 
       // Current term date range for TTD attendance — data-driven from getTerms
@@ -6501,7 +6506,18 @@ function rSEND(){
         const subjAbsSubj=(DD.attAbsSubj||{})[String(px)]||[];
         const subjRows=SUBS.map(s=>{
           const cur=r[3][s];
-          const curA=cur?abRk(cur)||null:null;
+          // ⚠️ NATIVE GRADE, NOT THE REFERENCE RANK.
+          // These columns used abRk(), which is the 1-7 reference band with 1 = BEST. The
+          // SUMMARY row above uses the mean native grade (9-1, 9 = best), so one pupil
+          // showed "7.4" in the summary and "1.0" in the expanded rows for the same
+          // subject. Aaron Bailey's Computing prediction is a 9; the table said 1.0.
+          // _sendAbVal() prefers the native grade when it parses as a number and falls
+          // back to the reference rank for a descriptor scale, matching _abHeadline().
+          const curA=_sendAbVal(cur);
+          // ⚠️ aC() colours on the REFERENCE RANK (green <=4, red >=6). The displayed value
+          // is now the native grade, where 9 is BEST — feeding that to aC() would paint the
+          // strongest pupil red. Colour from the rank, show the grade.
+          const curRk=cur?abRk(cur)||null:null;
           const curE=cur?cur[1]:null;
 
           // Class ranking for this subject
@@ -6539,14 +6555,14 @@ function rSEND(){
           if(prevTermP){
             const ltRows2=(PRG[ik]||{})[prevTermP]||[];
             const ltR2=ltRows2.find(row=>row[0]===px);
-            if(ltR2&&ltR2[3][s]){ltA=abRk(ltR2[3][s])||null;ltE2=ltR2[3][s][1]||null}
+            if(ltR2&&ltR2[3][s]){ltA=_sendAbVal(ltR2[3][s]);ltE2=ltR2[3][s][1]||null}
           }
           if(prevYearP){
             const lyRows2=(PRG[ik]||{})[prevYearP]||[];
             const lyR2=lyRows2.find(row=>row[0]===px);
-            if(lyR2&&lyR2[3][s]){lyA=abRk(lyR2[3][s])||null;lyE2=lyR2[3][s][1]||null}
+            if(lyR2&&lyR2[3][s]){lyA=_sendAbVal(lyR2[3][s]);lyE2=lyR2[3][s][1]||null}
           }
-          return{s,curA,curE,ltA,ltE:ltE2,lyA,lyE:lyE2,clsAbRk,clsEfRk,sYtdAtt,sTtdAtt};
+          return{s,curA,curRk,curE,ltA,ltE:ltE2,lyA,lyE:lyE2,clsAbRk,clsEfRk,sYtdAtt,sTtdAtt};
         }).filter(s=>s.curA!=null||s.curE!=null||s.sYtdAtt!=='—'||s.sTtdAtt!=='—');
 
         pupils.push({px,pid,yg,tg,tgAbRkStr,tgEfRkStr,flagDateStr,ytdCodes,ytdOnCalls,ytdDets,ytdAttPct,ttdAttPct,avgAb,avgEf,avgAbLT,avgEfLT,avgAbLY,avgEfLY,subjRows,cells:_abCells([r],SUBS)});
@@ -6557,6 +6573,16 @@ function rSEND(){
   }
 
   function vf(v){return v!=null?v.toFixed(1):'—'}
+// Native grade where it is numeric (GCSE 9-1, 9 = best), else the reference rank.
+// ⚠️ The two run in OPPOSITE directions, so anything ranking or colouring these values
+// must know which it has. Callers here show the grade, which is what the summary row and
+// the pupil page both use.
+function _sendAbVal(c){
+  if(!c)return null;
+  const n=(c[0]==null||String(c[0]).trim()==='')?NaN:parseFloat(String(c[0]).trim());
+  if(!isNaN(n))return n;
+  return abRk(c)||null;
+}
   function abCol(v){return v!=null?`color:${aC(v)}`:'color:var(--mu)'}
   function efCol(v){return v!=null?`color:${eC(v)}`:'color:var(--mu)'}
   function chgArrow(cur,prev){
@@ -6601,7 +6627,7 @@ function rSEND(){
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:.72rem;${efCol(s.curE)}">${vf(s.curE)}${efRkHtml}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--mu)">${vf(s.ltE)}${efChgArrow(s.curE,s.ltE)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--mu)">${vf(s.lyE)}${efChgArrow(s.curE,s.lyE)}</td>
-        <td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:.72rem;${abCol(s.curA)}">${vf(s.curA)}${abRkHtml}</td>
+        <td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:.72rem;${abCol(s.curRk)}">${vf(s.curA)}${abRkHtml}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--mu)">${vf(s.ltA)}${chgArrow(s.curA,s.ltA)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--mu)">${vf(s.lyA)}${chgArrow(s.curA,s.lyA)}</td>
         <td style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:.72rem;${attCol(sYtd)}">${sYtd}</td>
