@@ -14542,10 +14542,30 @@ function rPeer(){
       const sev=a20.rate>_pAbs*2?'red':'amber';
       items.push({type:'att-rising',subkey:'',label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} Periods in the last 20 school days (${a20.rate.toFixed(1)}% of Periods) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average).`});
     }
-    // 2. Persistent Absence
-    const aPA=attRAMod(px,CT_PA_WIN);
-    if(aPA.rate>=CT_PA_PCT){
-      items.push({type:'att-pa',subkey:'',label:'Persistent Absence',severity:'red',detail:`${fn} has been absent for ${aPA.absent} Periods in the last ${CT_PA_WIN} school days (${aPA.rate.toFixed(1)}% absence rate).`});
+    // ── 2. PERSISTENT ABSENCE ──
+    // ⚠️ YEAR TO DATE, THE DfE DEFINITION — NOT A ROLLING WINDOW.
+    // This used attRAMod(px, CT_PA_WIN), a rolling 20 school days. At 15% that is 15
+    // missed periods out of 100 — three days — so one bout of flu fired it however good
+    // the pupil's year was. It caught 40% of TWS while only 13% sit below the DfE line of
+    // 90%, and it is what flagged Isla Phillips, the best-improving pupil in the school.
+    // ⚠️ CHANGE IS ALREADY COVERED by Attendance Declining above, which compares the last
+    // 20 school days against the prior 40. The two triggers now answer different
+    // questions: that one asks "is this getting worse", this one asks "is this pupil
+    // persistently absent by the national measure".
+    // CT_PA_WIN is repurposed as the MINIMUM SCHOOL DAYS ELAPSED before the year-to-date
+    // figure is trusted — without it, one absence in the first week reads as 20%.
+    const _ayStartPA=ayStartISO(_hmAyOf(_hmToday()));
+    const _sdPA=_hmDaysBetween(_ayStartPA,_hmToday()).length;
+    if(_sdPA>=CT_PA_WIN){
+      const aPA=attRAMod(px,_sdPA);
+      if(aPA.rate>=CT_PA_PCT){
+        items.push({type:'att-pa',subkey:'',label:'Persistent Absence',severity:'red',
+          detail:`${fn} has attended ${(100-aPA.rate).toFixed(1)}% of periods so far this year `
+            +`\u2014 ${aPA.absent} missed of ${_sdPA*(_hmPerPerDay()||5)}. `
+            +`The DfE counts a pupil as persistently absent below ${100-CT_PA_PCT}%. `
+            +`This is a LEVEL, measured across the whole year; Attendance Declining covers `
+            +`recent change separately.`});
+      }
     }
     // 3. Sanctions Increase — Sudden / Recent / Long-Term, by baseline window
     // Absorbs what the separate Behavioural Concerns tab used to do. That tab
