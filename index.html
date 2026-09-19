@@ -2635,6 +2635,13 @@ let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=5, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
 let AP_MULT=2.0, AP_HIGH_ABS=40;
 let CT_AT=1.3, CT_AM=3;
 let CT_PA_WIN=20, CT_PA_PCT=10;
+// ⚠️ ABSENCE EPISODES, NOT JUST PERIODS. Three days of flu is 15 missed periods in a
+// 20-day window — 15% — so any rate test fires on a single illness however good the
+// pupil's year is. What separates illness from a developing problem is not the amount
+// but the SHAPE: illness is one continuous block, a problem is scattered.
+// An episode is a maximal run of consecutive SCHOOL days with any absence, so a Friday
+// and the following Monday count as one.
+let CT_AB_EPI=2;                      // distinct absence episodes before a decline counts
 // Attendance "low" threshold. Was hardcoded at 90 in the engine, which pre-counted
 // pupils into fixed bands and discarded the values — so it could not be changed
 // without a rebuild. The engine now ships the values (peerStats *.attVals) and the
@@ -2670,7 +2677,7 @@ const _LS_KEY = 'pupilDashboard.thresholds.v1';
 function saveThresholds(){
   try {
     const obj = {
-      CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, ATT_LOW,
+      CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, ATT_LOW,
       CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT,
       AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
@@ -2701,6 +2708,7 @@ function applyThresholdValues(v){
   if((n=safeI(v.CT_MN))!=null) CT_MN=n;
   if((n=safeF(v.CT_AT))!=null) CT_AT=n;
   if((n=safeI(v.CT_AM))!=null) CT_AM=n;
+  if((n=safeI(v.CT_AB_EPI))!=null&&n>0) CT_AB_EPI=n;
   if((n=safeI(v.CT_PA_WIN))!=null) CT_PA_WIN=n;
   if((n=safeF(v.CT_PA_PCT))!=null) CT_PA_PCT=n;
   if((n=safeF(v.CG_AT))!=null) CG_AT=n;
@@ -2755,7 +2763,7 @@ function applyThresholdValues(v){
 
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
-  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, ATT_LOW:90,
+  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, ATT_LOW:90,
   SA_YRS:2, SA_MIN:5, SA_SHARE:40, SA_LEAD:2,
   CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
@@ -2771,7 +2779,7 @@ const _THRESHOLD_DEFAULTS = {
 const _THRESHOLD_INPUTS = {
   ATT_LOW:'att-low',
   CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
-  CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct',
+  CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct', CT_AB_EPI:'ct-ab-epi',
   SA_YRS:'sa-yrs', SA_MIN:'sa-abs-min', SA_SHARE:'sa-share', SA_LEAD:'sa-lead',
   CG_AT:'cg-at', CG_PA_PCT:'cg-pa-pct', CG_SC:'cg-sc', CG_MN:'cg-mn', CG_EX_PCT:'cg-ex-pct',
   AP_MIN:'ct-ap-min', AP_PCT:'ct-ap-pct', AP_SLOT:'ct-ap-slot', AP_MULT:'ap-mult', AP_HIGH_ABS:'ap-high-abs',
@@ -2842,6 +2850,7 @@ function applyCT(){
   if(isNaN(SA_LEAD))SA_LEAD=2;
   CT_AT=parseFloat(document.getElementById('ct-at').value)||1.3;
   CT_AM=parseInt(document.getElementById('ct-am').value)||3;
+  CT_AB_EPI=parseInt(document.getElementById('ct-ab-epi').value)||2;
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
   CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
   ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
@@ -7767,6 +7776,37 @@ function _hmDate(r){
 // own, and the single biggest cost on the tab. The answer cannot change during a page's
 // life: DD.sanctions is built once at load and never replaced.
 var _hmTodayCache=null;
+// ⚠️ DISTINCT ABSENCE EPISODES in a window. A maximal run of consecutive SCHOOL days
+// with any absence counts as ONE, so Friday + Monday is a single episode and a week off
+// sick is a single episode. Scattered absence produces several.
+// This is what separates "was ill" from "is slipping", and no rate test can do it.
+// ⚠️ ONE DEFINITION OF PERSISTENT ABSENCE, used by every view.
+// There were THREE implementations — the pupil path, the class-concerns builder and the
+// tutor-group panel — and changing one left the pupil page and the class view disagreeing
+// about the same pupil. Same class of bug as the duplicated grids and the three-way
+// sanctions test.
+// LEVEL, year to date. Recent CHANGE is Attendance Declining's job.
+function paYTD(px){
+  const start=ayStartISO(_hmAyOf(_hmToday()));
+  const sd=_hmDaysBetween(start,_hmToday()).length;
+  if(sd<CT_PA_WIN)return null;                 // too early in the year to judge
+  const a=attRAMod(px,sd);
+  return {rate:a.rate, absent:a.absent, days:sd, fires:a.rate>=CT_PA_PCT};
+}
+function absEpisodes(px, fromISO, toISO){
+  const rows=(DD.attAbsSubj||{})[String(px)]||[];
+  const supp=getSuppressed(px);
+  const dayset=new Set();
+  rows.forEach(r=>{ if(r[0]<fromISO||r[0]>toISO)return;
+    if(supp.has(r[0]+'|'+r[2]))return; dayset.add(r[0]); });
+  if(!dayset.size)return {episodes:0,days:0};
+  const sd=_hmDaysBetween(fromISO,toISO);
+  const pos={}; sd.forEach((t,i)=>pos[t]=i);
+  const hit=[...dayset].filter(t=>pos[t]!=null).map(t=>pos[t]).sort((a,b)=>a-b);
+  let ep=0, prev=-99;
+  hit.forEach(i=>{ if(i!==prev+1)ep++; prev=i; });
+  return {episodes:ep, days:hit.length};
+}
 function _hmToday(){
   if(_hmTodayCache)return _hmTodayCache;
   let m='';(DD.sanctions||[]).forEach(r=>{const d=_hmDate(r);if(d>m)m=d});
@@ -14537,10 +14577,16 @@ function rPeer(){
     const a20=attRAMod(px,20),a60=attRAMod(px,60);
     const _pAbs=_priorWin(a20.rate,20,a60.rate,60);   // days 21-60
     let _attDecl=false;                               // fed to Possible Disengagement below
-    if(_pAbs>0 && a20.rate>_pAbs*CT_AT && a20.absent>=CT_AM){
+    // ⚠️ MULTIPLE EPISODES REQUIRED. Three days of flu is 15 periods in a 20-day window,
+    // which passes any rate test — and it is not a developing attendance problem.
+    // Requiring the absence to be SPREAD removes exactly those cases: on TWS it excluded
+    // 9 pupils, every one a single continuous block (one was 26 periods in a single run,
+    // i.e. a week off sick).
+    const _ep20=absEpisodes(px, _hmDaysBetween(ayStartISO(_hmAyOf(_hmToday())),_hmToday()).slice(-20)[0]||ayStartISO(_hmAyOf(_hmToday())), _hmToday()).episodes;
+    if(_pAbs>0 && a20.rate>_pAbs*CT_AT && a20.absent>=CT_AM && _ep20>=CT_AB_EPI){
       _attDecl=true;
       const sev=a20.rate>_pAbs*2?'red':'amber';
-      items.push({type:'att-rising',subkey:'',label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} Periods in the last 20 school days (${a20.rate.toFixed(1)}% of Periods) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average).`});
+      items.push({type:'att-rising',subkey:'',label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} Periods in the last 20 school days (${a20.rate.toFixed(1)}% of Periods) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average). Spread across ${_ep20} separate absences, so not a single illness.`});
     }
     // ── 2. PERSISTENT ABSENCE ──
     // ⚠️ YEAR TO DATE, THE DfE DEFINITION — NOT A ROLLING WINDOW.
@@ -16394,7 +16440,8 @@ ${groupPanel(
           'Persistent Absence',
           'Rolling-window flag for pupils whose absence is currently above a threshold. This is a leading indicator — separate from the official statutory year-to-date PA figure.',
           'Concerns tab → Pupil Concerns; Tutor Group concern; Pupil tab',
-          inputRow('Window length (school days)','ct-pa-win',CT_PA_WIN,{min:5,max:100,step:1,hint:'Number of recent school days the rolling absence rate is calculated over. Default 20.'})+
+          inputRow('Minimum school days before judging','ct-pa-win',CT_PA_WIN,{min:5,max:100,step:1,hint:'Persistent Absence is measured YEAR TO DATE, not over a rolling window. This is simply how many school days must have elapsed before that figure is trusted \u2014 without it, one absence in the first week of September reads as 20%.'})
+          +inputRow('Separate absences before a decline counts','ct-ab-epi',CT_AB_EPI,{min:1,max:6,step:1,hint:'Attendance Declining requires the absence to be SPREAD, not one block. Three days of flu is 15 missed periods and passes any rate test, but it is not a developing problem. A run of consecutive school days counts as ONE absence. 2 removes single illnesses; 3 is tighter.'})+
           inputRow('Absence rate threshold (%)','ct-pa-pct',CT_PA_PCT,{min:1,max:50,step:0.5,hint:'Pupils whose absence rate over the window meets or exceeds this percentage are flagged. Default 10%.'})
         )}
         ${groupPanel(
@@ -17177,10 +17224,13 @@ ${groupPanel(
       }
 
       // 2. Persistent Absence — rolling window absence rate ≥ threshold
-      const aPA=attRA(px,CT_PA_WIN);
-      if(aPA.rate>=CT_PA_PCT){
-        concerns.push({type:'att-pa', subkey:'',severity:'red',label:'Persistent Absence',detail:`${CT_PA_WIN}sd absence ${aPA.rate.toFixed(1)}% (${aPA.absent} absent periods)`});
-      }
+      // ⚠️ year to date, via the shared paYTD() — was a rolling CT_PA_WIN window here while
+  // the pupil page used year-to-date, so the two views disagreed about the same pupil.
+  const _pa=paYTD(px);
+  if(_pa&&_pa.fires){
+    concerns.push({type:'att-pa', subkey:'',severity:'red',label:'Persistent Absence',
+      detail:`${(100-_pa.rate).toFixed(1)}% attendance so far this year (${_pa.absent} periods missed)`});
+  }
 
       // 3. Sanctions Increase — the SAME three-way test as pupilOtherConcernItems().
       // This path used to run only the 20-vs-60 comparison, so the same pupil on the
@@ -17387,11 +17437,13 @@ ${groupPanel(
           if(tgAbsRate>yrAbsRate+TG_ABS_DELTA) concerns.push(`Absence ${tgAbsRate.toFixed(1)}% vs year avg ${yrAbsRate.toFixed(1)}%`);
           if(tgSanPP>yrSanPP*TG_SAN_RATIO&&tgSan.length>=TG_SAN_MIN) concerns.push(`Sanctions ${tgSanPP.toFixed(1)}/pupil vs year avg ${yrSanPP.toFixed(1)}`);
 
-          // Identify PA pupils — uses same rolling-window rule as the pupil PA flag
+          // ⚠️ THE SAME paYTD() AS EVERY OTHER VIEW. This comment used to claim it matched
+          // the pupil flag — true only until that flag changed. A comment asserting two things
+          // agree is not a mechanism; calling the same function is.
           const paPupilList=info.pupils.map(px2=>{
-            const a=attRA(px2,CT_PA_WIN);
-            return{px:px2,rate:a.rate,absent:a.absent};
-          }).filter(p=>p.rate>=CT_PA_PCT)
+            const a=paYTD(px2);
+            return a?{px:px2,rate:a.rate,absent:a.absent,fires:a.fires}:null;
+          }).filter(p=>p&&p.fires)
             .sort((a,b)=>b.rate-a.rate);
           const paPupils=paPupilList.length;
           if(paPupils>=TG_PA_MIN) concerns.push(`${paPupils} persistently absent pupils`);
