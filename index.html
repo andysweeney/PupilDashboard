@@ -2677,7 +2677,7 @@ function saveThresholds(){
       SAV_RATIO, SAV_MIN,
       CL_MIN_PUPILS, CL_MIN_CODES, CL_RATIO_AMBER, CL_RATIO_RED,
       TG_MIN_SIZE, TG_ABS_DELTA, TG_SAN_RATIO, TG_SAN_MIN, TG_PA_MIN,
-      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN, AB_DOW_PCT, AB_DOW_MIN, YOY_RATIO, YOY_MIN, AYOY_RATIO, AYOY_MIN, DEC_PCT, DEC_MIN, POS_QT, POS_PTS,
+      SW_CODE, SW_ONCALL, SW_DET, SC_DOW_PCT, SC_DOW_MIN, SC_PER_PCT, SC_PER_MIN, AB_DOW_PCT, AB_DOW_MIN, YOY_RATIO, YOY_MIN, AYOY_RATIO, AYOY_MIN, DEC_PCT, DEC_MIN, POS_QT, POS_PTS, CG_EF, CG_YOY, CG_YOY_MIN,
       HM_UNPREP, HM_AMBER_TG, HM_AMBER_YL
     };
     saveCfg('thresholds', _LS_KEY, obj);
@@ -2733,6 +2733,9 @@ function applyThresholdValues(v){
   if((n=safeI(v.SW_DET))!=null) SW_DET=n;
   if((n=safeF(v.AYOY_RATIO))!=null&&n>1) AYOY_RATIO=n;
   if((n=safeI(v.AYOY_MIN))!=null&&n>0) AYOY_MIN=n;
+  if((n=safeI(v.CG_EF))!=null&&n>0) CG_EF=n;
+  if((n=safeF(v.CG_YOY))!=null&&n>0&&n<1) CG_YOY=n;
+  if((n=safeI(v.CG_YOY_MIN))!=null&&n>0) CG_YOY_MIN=n;
   if((n=safeI(v.POS_QT))!=null&&n>0&&n<=3) POS_QT=n;
   if((n=safeF(v.POS_PTS))!=null&&n>0&&n<=100) POS_PTS=n;
   if((n=safeF(v.DEC_PCT))!=null&&n>0&&n<50) DEC_PCT=n;
@@ -2760,7 +2763,7 @@ const _THRESHOLD_DEFAULTS = {
   SAV_RATIO:2.0, SAV_MIN:3,
   CL_MIN_PUPILS:5, CL_MIN_CODES:5, CL_RATIO_AMBER:2.0, CL_RATIO_RED:3.0,
   TG_MIN_SIZE:5, TG_ABS_DELTA:2, TG_SAN_RATIO:1.5, TG_SAN_MIN:5, TG_PA_MIN:3,
-  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8, AB_DOW_PCT:50, AB_DOW_MIN:6, YOY_RATIO:1.5, YOY_MIN:20, AYOY_RATIO:1.4, AYOY_MIN:15, DEC_PCT:10, DEC_MIN:15, POS_QT:1, POS_PTS:25,
+  SW_CODE:1, SW_ONCALL:3, SW_DET:5, SC_DOW_PCT:40, SC_DOW_MIN:8, SC_PER_PCT:30, SC_PER_MIN:8, AB_DOW_PCT:50, AB_DOW_MIN:6, YOY_RATIO:1.5, YOY_MIN:20, AYOY_RATIO:1.4, AYOY_MIN:15, DEC_PCT:10, DEC_MIN:15, POS_QT:1, POS_PTS:25, CG_EF:1, CG_YOY:0.6, CG_YOY_MIN:15,
   HM_UNPREP:15, HM_AMBER_TG:4, HM_AMBER_YL:10
 };
 
@@ -2778,7 +2781,7 @@ const _THRESHOLD_INPUTS = {
   TG_MIN_SIZE:'tg-min-size', TG_ABS_DELTA:'tg-abs-delta', TG_SAN_RATIO:'tg-san-ratio', TG_SAN_MIN:'tg-san-min', TG_PA_MIN:'tg-pa-min',
   SW_CODE:'sw-code', SW_ONCALL:'sw-oncall', SW_DET:'sw-det',
   SC_DOW_PCT:'sc-dow-pct', SC_DOW_MIN:'sc-dow-min', SC_PER_PCT:'sc-per-pct', SC_PER_MIN:'sc-per-min',
-  AB_DOW_PCT:'ab-dow-pct', AB_DOW_MIN:'ab-dow-min', YOY_RATIO:'yoy-ratio', YOY_MIN:'yoy-min', AYOY_RATIO:'ayoy-ratio', AYOY_MIN:'ayoy-min', DEC_PCT:'dec-pct', DEC_MIN:'dec-min', POS_QT:'pos-qt', POS_PTS:'pos-pts',
+  AB_DOW_PCT:'ab-dow-pct', AB_DOW_MIN:'ab-dow-min', YOY_RATIO:'yoy-ratio', YOY_MIN:'yoy-min', AYOY_RATIO:'ayoy-ratio', AYOY_MIN:'ayoy-min', DEC_PCT:'dec-pct', DEC_MIN:'dec-min', POS_QT:'pos-qt', POS_PTS:'pos-pts', CG_EF:'cg-ef', CG_YOY:'cg-yoy', CG_YOY_MIN:'cg-yoy-min',
   HM_UNPREP:'hm-unprep', HM_AMBER_TG:'hm-amber-tg', HM_AMBER_YL:'hm-amber-yl'
 };
 
@@ -2844,6 +2847,9 @@ function applyCT(){
   ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
   AYOY_RATIO=parseFloat(document.getElementById('ayoy-ratio').value)||1.4;
   AYOY_MIN=parseInt(document.getElementById('ayoy-min').value)||15;
+  CG_EF=parseInt(document.getElementById('cg-ef').value)||1;
+  CG_YOY=parseFloat(document.getElementById('cg-yoy').value)||0.6;
+  CG_YOY_MIN=parseInt(document.getElementById('cg-yoy-min').value)||15;
   POS_QT=parseInt(document.getElementById('pos-qt').value)||1;
   POS_PTS=parseFloat(document.getElementById('pos-pts').value)||25;
   DEC_PCT=parseFloat(document.getElementById('dec-pct').value)||10;
@@ -2934,6 +2940,14 @@ let DEC_PCT=10, DEC_MIN=15;           // top N% of the year group, min sanctions
 // an optimistic prediction floored at grade 5) and T2->T3 is frozen (98.8% identical).
 // Validate against a school with genuine movement between collections.
 let POS_QT=1, POS_PTS=25;             // quartiles fallen, and minimum percentile points
+// ⚠️ THE POSITIVES WERE ONE-DIRECTIONAL. Effort Dropped existed with no mirror, and
+// Escalating year on year fired only on worsening. A pupil whose effort improved by
+// nearly a grade, or whose sanctions fell from 20 a year to 1, got nothing — because
+// Sanctions Reducing needs the earlier sanctions INSIDE a 100-school-day window and
+// Attendance Improving needs prior absence to improve from.
+// A school that only ever hears about problems stops opening the dashboard.
+let CG_EF=1;                          // effort grades improved, to praise a subject
+let CG_YOY=0.6, CG_YOY_MIN=15;        // year-on-year: this year <= x last year's rate, min prior
 let SC_PER_PCT=30, SC_PER_MIN=8;      // period number
 // GCSE 1-9 → ability letter mapping (used to render OTA grades in dashboard).
 // Loaded from config.gcse_to_letter; falls back to the default below.
@@ -15113,6 +15127,71 @@ function rPeer(){
           detail:`${fn} has ${_pct.toFixed(1)}% attendance this year — only ${_abs} period${_abs===1?'':'s'} missed since September.`});
       }
     }
+
+    // ── EFFORT IMPROVING ──
+    // ⚠️ THE MIRROR OF "Effort Dropped", WHICH HAD NONE. Same collections, same threshold
+    // shape, opposite direction. Effort is 1 = BEST, so an improvement is a FALL.
+    // ⚠️ Uses the same range guard as the attainment triggers: TWS's T1 collection cannot
+    // record a grade below 5 and its cohort mean sits well above T2, and the effort grades
+    // shift with it — a whole tutor group moved from a mean of 2.41 to 1.71 between two
+    // collections. Praising a pupil for a cohort-wide shift would be worse than silence.
+    (function(){
+      const ink=REG[String(px)]?.intake; if(!ink)return;
+      const rows=PRG[inkKey(ink)]||{};
+      const pp=(PER||[]).filter(k=>rows[k]);
+      const scOf=k=>{ const r=(rows[k]||[]).find(x=>x[0]===px); return r?(progCol(r,'scores')||{}):null; };
+      let lp=null; for(let i=pp.length-1;i>=0;i--){ const sc=scOf(pp[i]); if(sc&&Object.keys(sc).length){lp=pp[i];break;} }
+      if(!lp)return;
+      const i=pp.indexOf(lp), p5=i>=1?pp[i-1]:null; if(!p5)return;
+      const cur=scOf(lp), prv=scOf(p5); if(!cur||!prv)return;
+      const rPrev=_collRange(p5), rCur=_collRange(lp);
+      if(rPrev&&rCur&&(rPrev.min-rCur.min)>=2)return;   // not like for like
+      const up=[];
+      Object.keys(cur).forEach(sk=>{
+        const a=prv[sk], b=cur[sk]; if(!a||!b)return;
+        const x=a[1], y=b[1];
+        if(x==null||y==null||!x||!y)return;
+        if(x-y>=CG_EF)up.push({s:sk,by:x-y});          // effort 1 = best, so a FALL is better
+      });
+      if(!up.length)return;
+      up.sort((a,b)=>b.by-a.by);
+      const name=l=>l.length>1?l.slice(0,-1).map(x=>x.s).join(', ')+' and '+l[l.length-1].s:l[0].s;
+      items.push({label:'Effort Improving',severity:up.length>=3?'green-strong':'green',
+        detail:`${fn}'s effort grade has improved in ${up.length} subject${up.length===1?'':'s'} `
+          +`between ${p5} and ${lp} \u2014 ${name(up)}.`});
+    })();
+
+    // ── IMPROVING YEAR ON YEAR ──
+    // ⚠️ THE MIRROR OF "Escalating year on year". Every other positive is change-based
+    // WITHIN this year, so a pupil whose sanctions fell from 20 a year to 1 was invisible:
+    // Sanctions Reducing needs the earlier sanctions inside a 100-school-day window, and
+    // hers were two years ago.
+    // Same point last year, so seasonality cancels.
+    (function(){
+      const end=_hmToday(), ay=+_hmAyOf(end);
+      const lastEnd=(+end.slice(0,4)-1)+end.slice(4);
+      const startNow=ayStartISO(String(ay)), startPrev=ayStartISO(String(ay-1));
+      let wNow=0,wPrev=0,cNow=0,cPrev=0;
+      _sanFor(px).forEach(r=>{
+        const t=r[2], w=sancWeight(r[1]);
+        if(t>=startNow&&t<=end){wNow+=w;cNow++;}
+        else if(t>=startPrev&&t<=lastEnd){wPrev+=w;cPrev++;}
+      });
+      if(wPrev<CG_YOY_MIN)return;                       // nothing meaningful to improve from
+      const sdAll=_hmDaysBetween(startPrev,end);
+      const dNow=sdAll.filter(t=>t>=startNow&&t<=end).length;
+      const dPrev=sdAll.filter(t=>t>=startPrev&&t<=lastEnd).length;
+      if(!dNow||!dPrev)return;
+      const rNow=wNow/dNow, rPrev=wPrev/dPrev;
+      if(rNow>rPrev*CG_YOY)return;
+      const cut=Math.round((1-rNow/rPrev)*100);
+      items.push({label:'Improving year on year',severity:cut>=70?'green-strong':'green',
+        detail:`${fn} has had ${cNow} sanction${cNow===1?'':'s'} so far this year against `
+          +`${cPrev} by the same point last year \u2014 a ${cut}% reduction. `
+          +`Nothing else would show this: every other measure compares at most the last 100 `
+          +`school days, and the improvement happened across years.`});
+    })();
+
     return items;
   }
   function _pcgRender(px,items){
@@ -16238,6 +16317,17 @@ ${groupPanel(
           +inputRow('Sanctions \u2014 minimum score','yoy-min',YOY_MIN,{min:5,max:200,step:5,hint:'Minimum weighted sanction score this year before the ratio is tested. A pupil going from 2 to 6 has tripled and means nothing.'})
           +inputRow('Absence \u2014 escalation (\u00d7)','ayoy-ratio',AYOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s absence rate to date is this many times last year\u2019s at the same point. Set lower than the sanctions equivalent \u2014 absence moves in smaller steps. \u26a0\ufe0f At 1.4 this fires for around a third of pupils; try 1.8 to 2.0.'})
           +inputRow('Absence \u2014 minimum periods','ayoy-min',AYOY_MIN,{min:5,max:200,step:5,hint:'Minimum absent periods this year before the ratio is tested.'})
+        )}
+        ${groupPanel(
+          'Positives \u2014 improvement',
+          'Mirrors of the concern triggers. Without these the dashboard only ever reports '
+          +'problems: a pupil whose effort improves by nearly a grade, or whose sanctions fall '
+          +'from 20 a year to 1, is invisible because the existing positives need the earlier '
+          +'behaviour INSIDE a 100-school-day window.',
+          'Congrats \u2192 Effort Improving / Improving year on year',
+          inputRow('Effort \u2014 grades improved','cg-ef',CG_EF,{min:1,max:3,step:1,hint:'How many effort grades better a subject must be, latest collection against the previous one, to be praised. The mirror of Effort Dropped.'})
+          +inputRow('Year on year \u2014 improvement (\u00d7)','cg-yoy',CG_YOY,{min:.1,max:.9,step:.05,hint:'Flag when this year\u2019s sanction rate to date is this fraction OR LESS of last year\u2019s at the same point. 0.6 means at least a 40% reduction. The mirror of Escalating year on year.'})
+          +inputRow('Year on year \u2014 minimum last year','cg-yoy-min',CG_YOY_MIN,{min:5,max:200,step:5,hint:'Minimum weighted sanction score LAST year before the improvement is judged. A pupil going from 3 to 1 has improved by two thirds and means nothing.'})
         )}
         ${groupPanel(
           'Attainment position falling',
