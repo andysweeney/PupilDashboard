@@ -7807,6 +7807,17 @@ function absEpisodes(px, fromISO, toISO){
   hit.forEach(i=>{ if(i!==prev+1)ep++; prev=i; });
   return {episodes:ep, days:hit.length};
 }
+// Toggle the pupil list under a "which concerns are firing" row.
+// ⚠️ Global and attribute-driven on purpose: the panel is built as an HTML string, and
+// an inline handler carrying a quoted id needs three levels of escaping that are easy to
+// get wrong and impossible to read.
+window._cfToggle=function(tr){
+  try{
+    var id=tr&&tr.getAttribute('data-cf'); if(!id)return;
+    var b=document.getElementById(id); if(!b)return;
+    b.style.display=(b.style.display==='none'?'table-row':'none');
+  }catch(e){}
+};
 function _hmToday(){
   if(_hmTodayCache)return _hmTodayCache;
   let m='';(DD.sanctions||[]).forEach(r=>{const d=_hmDate(r);if(d>m)m=d});
@@ -9910,9 +9921,9 @@ function _hmSLT(){
     const seen=new Set();
     live.forEach(it=>{
       const k=it.label||it.type||'(unlabelled)';
-      if(!mix[k])mix[k]={pupils:0,items:0};
+      if(!mix[k])mix[k]={pupils:0,items:0,who:[]};
       mix[k].items++;
-      if(!seen.has(k)){mix[k].pupils++;seen.add(k);}
+      if(!seen.has(k)){mix[k].pupils++;seen.add(k);mix[k].who.push({px:p,red:(it.severity||'').indexOf('red')>=0});}
       const sv=(it.severity||'').indexOf('red')>=0?'red':'amber';
       if(!sevMix[k])sevMix[k]={red:0,amber:0};
       sevMix[k][sv]++;
@@ -9931,14 +9942,24 @@ function _hmSLT(){
       +'<th style="font-weight:500;text-align:right;padding-left:.5rem">Red</th></tr>'
       +mixRows.map(([k,v])=>{
         const pct=100*v.pupils/(all.length||1);
-        return '<tr><td style="padding:.25rem 0;white-space:nowrap">'+k+'</td>'
+        // ⚠️ NAMES, NOT JUST COUNTS. A count you cannot drill into is untunable: you can
+        // see a trigger fire for 43 pupils and have no way to judge whether they are the
+        // right 43. Clicking a row lists them, reds first.
+        const _rid='cf-'+k.replace(/[^a-z0-9]/gi,'');
+        const _who=(v.who||[]).slice().sort((a,b)=>(b.red?1:0)-(a.red?1:0));
+        const _names=_who.map(o=>'<span style="display:inline-block;margin:0 .45rem .2rem 0;white-space:nowrap'
+          +(o.red?';color:var(--red)':'')+'">'+_hmName(o.px)+'</span>').join('');
+        return '<tr style="cursor:pointer" data-cf="'+_rid+'" onclick=_cfToggle(this)>'
+          +'<td style="padding:.25rem 0;white-space:nowrap"><span style="color:var(--mu);font-size:.6rem;margin-right:.3rem">&#9656;</span>'+k+'</td>'
           +'<td style="text-align:right;color:var(--tx2);padding:0 .5rem;width:48px">'+v.pupils+'</td>'
           +'<td style="padding-left:.4rem"><div style="max-width:220px">'
             +_hmBar(100*v.pupils/mxM,pct>50?'bad':pct>25?'warn':'ok')+'</div></td>'
           +'<td style="text-align:right;width:48px">'+Math.round(pct)+'%</td>'
           +'<td style="text-align:right;color:var(--tx2);width:62px">'+v.items+'</td>'
           +'<td style="text-align:right;width:48px;color:'+((sevMix[k]||{}).red?'var(--red)':'var(--tx2)')+'">'
-            +((sevMix[k]||{}).red||0)+'</td></tr>';
+            +((sevMix[k]||{}).red||0)+'</td></tr>'
+            +'<tr id="'+_rid+'" style="display:none"><td colspan="6" style="padding:.15rem 0 .5rem 1rem;'
+            +'font-size:.68rem;line-height:1.7;border-bottom:1px solid var(--bd)">'+_names+'</td></tr>';
       }).join('')+'</table>';
     h+=_hmPanel('Which concerns are firing',
       Math.round(100*anyLive/(all.length||1))+'% of pupils ('+anyLive+' of '+all.length+') have at least one live concern. '
