@@ -2632,6 +2632,27 @@ function firstName(px){
 // red at three or more.
 let SA_YRS=2, SA_MIN=5, SA_SHARE=40, SA_LEAD=2;
 let CT_AB=2, CT_EF=2, CT_SC=1.5, CT_MN=5, AP_MIN=3, AP_PCT=40, AP_SLOT=30;
+// ⚠️ CT_SC AND CT_MN NO LONGER DRIVE THE SANCTION TRIGGERS. They are kept only so that
+// saved configs load without error, and CT_MN now seeds CT_LIST_MIN (below) so that the
+// top-5 lists and Sanctions Reducing keep the behaviour a school already has.
+// The change triggers were a fixed ratio (CT_SC) plus an absolute count floor (CT_MN).
+// Three things were wrong with that pairing:
+//   1. A ratio needs a non-zero baseline, so `_priorWin(...)>0` discarded the pupil who
+//      went from NOTHING to three sanctions in a fortnight — the single case a tutor most
+//      wants — before any threshold was consulted.
+//   2. One count floor gated a 10-day window in two triggers and a 20-day window in the
+//      third. At CT_MN 8, six pupils in the school cleared it on 10 days and 44 on 20.
+//   3. The floor was doing severity's job. Rolled across the year, no pupil with fewer
+//      than 27 sanctions was EVER flagged; the change family could only see pupils who
+//      were already heavily sanctioned.
+// The replacement asks one question instead — how surprising is this count, given this
+// pupil's own baseline — which is scale-free and so behaves the same at a school issuing
+// a tenth as many codes. See sanAccelTest().
+let CT_EV_MIN=3;           // events needed in the recent window before any test runs
+let CT_P_AMB=0.05, CT_P_RED=0.01;   // Poisson tail probability: amber / red
+let CT_LAM_MIN=0.2;        // floor on the expected rate, so a spotless pupil does not
+                           // flag on a single code (p would otherwise be 0 for any k≥1)
+let CT_LIST_MIN=5;         // the OLD CT_MN role: a floor for list membership, not a test
 let AP_MULT=2.0, AP_HIGH_ABS=40;
 let CT_AT=1.3, CT_AM=3;
 let CT_PA_WIN=20, CT_PA_PCT=10;
@@ -2692,7 +2713,7 @@ const _LS_KEY = 'pupilDashboard.thresholds.v1';
 function saveThresholds(){
   try {
     const obj = {
-      CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, RED_AB_DOW, RED_SC_DOW, RED_SC_PER, RED_YOY, RED_AYOY, RED_SA, RED_AP, ATT_LOW,
+      CT_AB, CT_EF, CT_SC, CT_MN, CT_EV_MIN, CT_P_AMB, CT_P_RED, CT_LIST_MIN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, RED_AB_DOW, RED_SC_DOW, RED_SC_PER, RED_YOY, RED_AYOY, RED_SA, RED_AP, ATT_LOW,
       CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT,
       AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
@@ -2721,6 +2742,16 @@ function applyThresholdValues(v){
   if((n=safeF(v.CT_EF))!=null) CT_EF=n;
   if((n=safeF(v.CT_SC))!=null) CT_SC=n;
   if((n=safeI(v.CT_MN))!=null) CT_MN=n;
+  // ⚠️ MIGRATION, NOT A NEW DEFAULT. A school that already saved CT_MN keeps that value
+  // for the list floors, so the top-5 lists and Sanctions Reducing do not silently change
+  // under them. CT_LIST_MIN wins if it has been saved in its own right.
+  if((n=safeI(v.CT_MN))!=null) CT_LIST_MIN=n;
+  if((n=safeI(v.CT_LIST_MIN))!=null&&n>=0) CT_LIST_MIN=n;
+  if((n=safeI(v.CT_EV_MIN))!=null&&n>0) CT_EV_MIN=n;
+  if((n=safeF(v.CT_P_AMB))!=null&&n>0&&n<1) CT_P_AMB=n;
+  if((n=safeF(v.CT_P_RED))!=null&&n>0&&n<1) CT_P_RED=n;
+  // red must be at least as strict as amber, or every amber reads red
+  if(CT_P_RED>CT_P_AMB) CT_P_RED=CT_P_AMB;
   if((n=safeF(v.CT_AT))!=null) CT_AT=n;
   if((n=safeI(v.CT_AM))!=null) CT_AM=n;
   if((n=safeI(v.CT_AB_EPI))!=null&&n>0) CT_AB_EPI=n;
@@ -2785,7 +2816,7 @@ function applyThresholdValues(v){
 
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
-  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, RED_AB_DOW:70, RED_SC_DOW:75, RED_SC_PER:70, RED_YOY:3, RED_AYOY:3, RED_SA:6, RED_AP:60, ATT_LOW:90,
+  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_EV_MIN:3, CT_P_AMB:0.05, CT_P_RED:0.01, CT_LIST_MIN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, RED_AB_DOW:70, RED_SC_DOW:75, RED_SC_PER:70, RED_YOY:3, RED_AYOY:3, RED_SA:6, RED_AP:60, ATT_LOW:90,
   SA_YRS:2, SA_MIN:5, SA_SHARE:40, SA_LEAD:2,
   CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
@@ -2801,6 +2832,7 @@ const _THRESHOLD_DEFAULTS = {
 const _THRESHOLD_INPUTS = {
   ATT_LOW:'att-low',
   CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
+  CT_EV_MIN:'ct-ev-min', CT_P_AMB:'ct-p-amb', CT_P_RED:'ct-p-red', CT_LIST_MIN:'ct-list-min',
   CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct', CT_AB_EPI:'ct-ab-epi',
   RED_AB_DOW:'red-ab-dow', RED_SC_DOW:'red-sc-dow', RED_SC_PER:'red-sc-per', RED_YOY:'red-yoy', RED_AYOY:'red-ayoy', RED_SA:'red-sa', RED_AP:'red-ap',
   SA_YRS:'sa-yrs', SA_MIN:'sa-abs-min', SA_SHARE:'sa-share', SA_LEAD:'sa-lead',
@@ -2818,7 +2850,7 @@ const _THRESHOLD_INPUTS = {
 
 // Refresh all header display spans from current globals.
 function _refreshThresholdDisplays(){
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">p${CT_P_AMB}/${CT_P_RED}</b> · Min ev: <b style="color:#fff">${CT_EV_MIN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
@@ -2864,8 +2896,18 @@ function applyCT(){
   HM_AMBER_YL=parseInt(document.getElementById('hm-amber-yl').value)||10;
   CT_AB=parseFloat(document.getElementById('ct-ab').value)||2;
   CT_EF=parseFloat(document.getElementById('ct-ef').value)||2;
-  CT_SC=parseFloat(document.getElementById('ct-sc').value)||1.5;
-  CT_MN=parseInt(document.getElementById('ct-mn').value)||5;
+  // ⚠️ getElementById can be null here: these inputs only exist once the Admin panel has
+  // rendered, and applyCT() is also reachable from reset before that. Guard every read.
+  const _gv=(id,d)=>{const e=document.getElementById(id);if(!e)return d;const n=parseFloat(e.value);return isNaN(n)?d:n;};
+  // ⚠️ 'ct-sc' and 'ct-mn' NO LONGER EXIST IN THE PANEL. Reading them unguarded threw on
+  // every Apply. They are still carried so an older saved config round-trips unchanged.
+  CT_SC=_gv('ct-sc',CT_SC);
+  CT_MN=_gv('ct-mn',CT_MN);
+  CT_EV_MIN=Math.max(1,Math.round(_gv('ct-ev-min',CT_EV_MIN)));
+  CT_P_AMB=_gv('ct-p-amb',CT_P_AMB);
+  CT_P_RED=_gv('ct-p-red',CT_P_RED);
+  if(CT_P_RED>CT_P_AMB) CT_P_RED=CT_P_AMB;
+  CT_LIST_MIN=Math.max(0,Math.round(_gv('ct-list-min',CT_LIST_MIN)));
   SA_YRS=parseInt(document.getElementById('sa-yrs').value)||2;
   SA_MIN=parseInt(document.getElementById('sa-abs-min').value)||5;
   SA_SHARE=parseFloat(document.getElementById('sa-share').value)||40;
@@ -2926,7 +2968,7 @@ function applyCT(){
   TG_SAN_RATIO=parseFloat(document.getElementById('tg-san-ratio').value)||1.5;
   TG_SAN_MIN=parseInt(document.getElementById('tg-san-min').value)||5;
   TG_PA_MIN=parseInt(document.getElementById('tg-pa-min').value)||3;
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">p${CT_P_AMB}/${CT_P_RED}</b> · Min ev: <b style="color:#fff">${CT_EV_MIN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
   document.getElementById('cl-display').innerHTML=`Cls: <b style="color:#fff">${CL_MIN_PUPILS}p/${CL_MIN_CODES}c/${CL_RATIO_AMBER}×/${CL_RATIO_RED}×</b>`;
@@ -3013,6 +3055,95 @@ function _priorWin(shortVal, shortN, longVal, longN){
   if(!(longN > shortN)) return 0;
   const v = (longVal * longN - shortVal * shortN) / (longN - shortN);
   return v > 0 ? v : 0;
+}
+
+// ── SANCTION ACCELERATION ─────────────────────────────────────────────────────
+// ⚠️ ONE INSTRUMENT, THREE LABELS. This test lived in six places, twice in full
+// (pupilOtherConcernItems and the class-concerns builder) and four times in part.
+// Each copy rebuilt the same three comparisons by hand, so a change to any of them
+// produced a dashboard that disagreed with itself: the same pupil on the same day
+// could read "Sudden Sanctions Increase" on their own page and nothing at all in the
+// year leader's list. Everything now routes through sanAccelTest().
+//
+// The labels are unchanged and still mean what they meant — they are a real
+// distinction for a tutor, and only the instrument beneath them has changed:
+//   Sudden    : last 10sd against days 11-20   — something happened this fortnight
+//   Long-Term : last 10sd against days 11-100  — the fortnight sits above the term
+//   Recent    : last 20sd against days 21-60   — the original, slower signal
+// Precedence, not exclusivity: a pupil may satisfy all three and sees the most urgent.
+
+// P(X >= k) for a Poisson with mean lam. Sums the lower tail and subtracts, which is
+// exact for the small k this deals with and needs no library. Iterative term update
+// (t *= lam/i) avoids factorial overflow entirely.
+function _pTail(k, lam){
+  if(k <= 0) return 1;
+  if(!(lam > 0)) lam = CT_LAM_MIN;
+  let c = 0, t = Math.exp(-lam);
+  for(let i = 0; i < k; i++){ c += t; t *= lam / (i + 1); }
+  const p = 1 - c;
+  return p > 0 ? p : 0;
+}
+
+// How surprising is kObs events over nObs school days, for a pupil whose earlier
+// kPrior events over nPrior school days set their own baseline?
+// ⚠️ COUNTS, NOT WEIGHTED SCORES. sanRA() weights a detention as five codes, and a
+// weighted score is not a count — the variance of a Poisson equals its mean, and that
+// stops being true the moment you multiply the events by anything. The weights are
+// still right for ranking and for display; they are simply not what the test runs on.
+function _sanSurprise(kObs, nObs, kPrior, nPrior){
+  const lam = Math.max((kPrior * nObs) / nPrior, CT_LAM_MIN);
+  return { p: _pTail(kObs, lam), expected: lam };
+}
+
+// c10/c20/c60/c100 are RAW COUNTS over the last 10/20/60/100 school days, each window
+// ending at the same date. Returns null when nothing fires.
+// ⚠️ The caller passes cumulative counts; the prior periods are derived here by
+// subtraction, for the same reason _priorWin() exists — the 20-day count CONTAINS the
+// 10-day count, so comparing against it directly lets a pupil's own spike inflate the
+// baseline it is being measured against, and the test gets harder the worse things get.
+function sanAccelTest(c10, c20, c60, c100){
+  const tests = [
+    { key:'imm',  label:'Sudden Sanctions Increase',    obs:c10, n:10,
+      prior:c20 - c10,  pn:10, win:'the 10 school days before that' },
+    { key:'bld',  label:'Long-Term Sanctions Increase', obs:c10, n:10,
+      prior:c100 - c10, pn:90, win:'the preceding 90 school days' },
+    // ⚠️ c60 == null means "this caller has no 60-day window", not "the window is empty".
+    // The distinction matters: a missing count would make prior 0, the expected rate fall
+    // to CT_LAM_MIN, and the test fire on almost anything. Skip it instead.
+    (c60 == null ? null :
+    { key:'rise', label:'Recent Sanctions Increase',    obs:c20, n:20,
+      prior:c60 - c20,  pn:40, win:'the 40 school days before that' })
+  ].filter(Boolean);
+  for(const t of tests){
+    // ⚠️ THE FLOOR SCALES WITH THE WINDOW. CT_EV_MIN is expressed per 10 school days,
+    // so the 20-day test needs twice as many events as the 10-day one. A flat number
+    // here would repeat the exact defect this replaced — the retired CT_MN applied one
+    // absolute count to both a 10-day and a 20-day window — only inverted: three events
+    // in a fortnight is a burst, three spread across four weeks is not, and on the TWS
+    // data half of the slow trigger's fires rested on fewer than six events.
+    if(t.obs < Math.max(1, Math.round(CT_EV_MIN * t.n / 10))) continue;
+    if(t.prior < 0) continue;                   // defensive: windows out of order
+    const r = _sanSurprise(t.obs, t.n, t.prior, t.pn);
+    if(r.p >= CT_P_AMB) continue;
+    return {
+      key: t.key, label: t.label,
+      severity: r.p < CT_P_RED ? 'red' : 'amber',
+      p: r.p, observed: t.obs, expected: r.expected, days: t.n, win: t.win
+    };
+  }
+  return null;
+}
+
+// Plain-English sentence for a fired test. Written round the two numbers a reader
+// actually needs — what happened, and what this pupil normally does — rather than a
+// multiplier, which meant nothing to anyone when the baseline was 0.4.
+function sanAccelDetail(a, who, where){
+  const exp = a.expected < 1 ? a.expected.toFixed(1) : Math.round(a.expected);
+  const odds = a.p < 0.001 ? 'far outside' : (a.p < CT_P_RED ? 'well outside' : 'outside');
+  return `${who} has had ${a.observed} sanction${a.observed===1?'':'s'} in the last `
+    + `${a.days} school days. Against ${where==='subject'?'their own record in this subject':'their own record'} `
+    + `— ${exp} would be typical for them over ${a.win.replace(/^the /,'')} — that is ${odds} `
+    + `their normal pattern (p=${a.p<0.001?'<0.001':a.p.toFixed(3)}).`;
 }
 function applySW(){
   SW_CODE=parseInt(document.getElementById('sw-code').value)||1;
@@ -4475,9 +4606,10 @@ function rP(){
     const gradConcerns=[];
     _bcSubjs.forEach(subj=>{
       const subjSan=_bcAllSan.filter(r=>(r[3]||'Non-Lesson')===subj);
-      const s10=_bcRA(10,subjSan),s20=_bcRA(20,subjSan),s100=_bcRA(100,subjSan);
-      if(s10>_priorWin(s10,10,s20,20)*CT_SC&&_priorWin(s10,10,s20,20)>0&&subjSan.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-10)]&&r[2]<=_bcISO).length>=CT_MN) immConcerns.push(subj);
-      if(s10>_priorWin(s10,10,s100,100)*CT_SC&&_priorWin(s10,10,s100,100)>0&&subjSan.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-10)]&&r[2]<=_bcISO).length>=CT_MN) gradConcerns.push(subj);
+      const _n=(rows,n)=>rows.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-n)]&&r[2]<=_bcISO).length;
+      const _a=sanAccelTest(_n(subjSan,10),_n(subjSan,20),null,_n(subjSan,100));
+      if(_a&&_a.key==='imm') immConcerns.push(subj);
+      if(_a&&_a.key==='bld') gradConcerns.push(subj);
     });
     if(immConcerns.length) bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(181,72,59,.12);border:1px solid rgba(181,72,59,.4);font-size:.7rem;font-weight:600;color:var(--red)">⚠ Immediate Behavioural Concern: ${immConcerns.join(', ')}</span>`;
     if(gradConcerns.length) bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(187,107,26,.12);border:1px solid rgba(187,107,26,.4);font-size:.7rem;font-weight:600;color:var(--orange)">⚠ Graduated Behavioural Concern: ${gradConcerns.join(', ')}</span>`;
@@ -4485,9 +4617,16 @@ function rP(){
     // Single subject
     const _bcSan=_bcAllSan.filter(r=>r[3]===sf);
     const _bc10=_bcRA(10,_bcSan),_bc20=_bcRA(20,_bcSan),_bc100=_bcRA(100,_bcSan);
-    const _bcSanCount10=_bcSan.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-10)]&&r[2]<=_bcISO).length;
-    if(_bc10>_bc20*CT_SC&&_bc20>0&&_bcSanCount10>=CT_MN) bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(181,72,59,.12);border:1px solid rgba(181,72,59,.4);font-size:.7rem;font-weight:600;color:var(--red)">⚠ Immediate Behavioural Concern</span>`;
-    if(_bc10>_bc100*CT_SC&&_bc100>0&&_bcSanCount10>=CT_MN) bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(187,107,26,.12);border:1px solid rgba(187,107,26,.4);font-size:.7rem;font-weight:600;color:var(--orange)">⚠ Graduated Behavioural Concern</span>`;
+    // ⚠️ THIS BRANCH NEVER GOT THE _priorWin() FIX. It compared the 10sd score against
+    // the 20sd score directly — and the 20sd window CONTAINS the 10sd one, so a pupil's
+    // own spike inflated the baseline it was measured against. The all-subject branch
+    // above was corrected; this one was missed, so the same pupil could show a badge on
+    // the all-subject view and none on the single-subject view. Now both call one test.
+    const _n1=(n)=>_bcSan.filter(r=>r[2]>=_bcSD[Math.max(0,_bcSD.length-n)]&&r[2]<=_bcISO).length;
+    const _bcSanCount10=_n1(10);
+    const _bcAcc=sanAccelTest(_bcSanCount10,_n1(20),null,_n1(100));
+    if(_bcAcc&&_bcAcc.key==='imm') bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(181,72,59,.12);border:1px solid rgba(181,72,59,.4);font-size:.7rem;font-weight:600;color:var(--red)">⚠ Immediate Behavioural Concern</span>`;
+    if(_bcAcc&&_bcAcc.key==='bld') bcBadges+=`<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:5px;background:rgba(187,107,26,.12);border:1px solid rgba(187,107,26,.4);font-size:.7rem;font-weight:600;color:var(--orange)">⚠ Graduated Behavioural Concern</span>`;
   }
   const bcLine=bcBadges?`<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem">${bcBadges}</div>`:'';
   const otherConcernsAlert=pupilOtherConcernsAlert(x);
@@ -6258,9 +6397,13 @@ function rBC(){
     const s10=bcRA(10,pSan,yg),s20=bcRA(20,pSan,yg),s100=bcRA(100,pSan,yg);
     const _ygSD=ygSD[yg]||bcSD;
     const _ygEnd=ygLatest[yg]||allLatest;
-    const sanCount10=pSan.filter(r=>r[2]>=_ygSD[Math.max(0,_ygSD.length-10)]&&r[2]<=_ygEnd).length;
-    const _pi=_priorWin(s10,10,s20,20);const imm=_pi>0&&s10>_pi*CT_SC&&sanCount10>=CT_MN;
-    const _pg=_priorWin(s10,10,s100,100);const grad=_pg>0&&s10>_pg*CT_SC&&sanCount10>=CT_MN;
+    // ⚠️ SAME INSTRUMENT AS THE CONCERNS TABS. This block used to carry its own copy of
+    // the ratio test, so the BC tab could disagree with a pupil's own page about the same
+    // fortnight. There is no 60sd window here, so the slow ("Recent") test is skipped.
+    const _bcN=(n)=>pSan.filter(r=>r[2]>=_ygSD[Math.max(0,_ygSD.length-n)]&&r[2]<=_ygEnd).length;
+    const sanCount10=_bcN(10);
+    const _acc=sanAccelTest(sanCount10,_bcN(20),null,_bcN(100));
+    const imm=!!_acc&&_acc.key==='imm', grad=!!_acc&&_acc.key==='bld';
     if(imm||grad){
       const pct10v20=s20>0?((s10-s20)/s20*100):0;
       const pct10v100=s100>0?((s10-s100)/s100*100):0;
@@ -6334,9 +6477,13 @@ function rBC(){
       const s10=bcRA(10,sSan,yg),s20=bcRA(20,sSan,yg),s100=bcRA(100,sSan,yg);
       const _ygSD2=ygSD[yg]||bcSD;
       const _ygEnd2=ygLatest[yg]||allLatest;
-      const sSanCount10=sSan.filter(r=>r[2]>=_ygSD2[Math.max(0,_ygSD2.length-10)]&&r[2]<=_ygEnd2).length;
-      const _pi2=_priorWin(s10,10,s20,20);const imm=_pi2>0&&s10>_pi2*CT_SC&&sSanCount10>=CT_MN;
-      const _pg2=_priorWin(s10,10,s100,100);const grad=_pg2>0&&s10>_pg2*CT_SC&&sSanCount10>=CT_MN;
+      // Per SUBJECT, so the counts are small and the expected rate is often at the
+      // CT_LAM_MIN floor. That is deliberate: three sanctions in one subject in a
+      // fortnight, from a pupil with none there before, is exactly the signal wanted.
+      const _bcN2=(n)=>sSan.filter(r=>r[2]>=_ygSD2[Math.max(0,_ygSD2.length-n)]&&r[2]<=_ygEnd2).length;
+      const sSanCount10=_bcN2(10);
+      const _acc2=sanAccelTest(sSanCount10,_bcN2(20),null,_bcN2(100));
+      const imm=!!_acc2&&_acc2.key==='imm', grad=!!_acc2&&_acc2.key==='bld';
       if(imm||grad){
         const ci=getClsInfo(px,subj);
         const pct10v20=s20>0?((s10-s20)/s20*100):0;
@@ -9525,6 +9672,11 @@ function _hmYearLeader(){
     // of exactly the pupils this panel is meant to rank.
     const DOM={ 'att-rising':'Attendance','att-pa':'Attendance','abs-pattern':'Attendance',
                 'seasonal-abs':'Attendance','abs-dow':'Attendance',
+                // ⚠️ 'sanc-level' IS DELIBERATELY ABSENT, for the same reason as 'disengage'
+                // and 'decile'. It is a STANDING position, true of ~10% of every year group
+                // all year, so counting it as a Behaviour domain would give a tenth of the
+                // cohort a permanent domain and inflate the cross-domain spread this panel
+                // ranks on. Only things that CHANGED belong here.
                 'sanc-accel':'Behaviour','sanc-conc':'Behaviour',
                 'sanc-dow':'Behaviour','sanc-period':'Behaviour','yoy-escalate':'Behaviour',
                 'yoy-absence':'Attendance',
@@ -12280,7 +12432,7 @@ function rSV(){
   const sancRawCounts={};
   termSancs.forEach(s=>{sancCounts[s[0]]=(sancCounts[s[0]]||0)+sancWeight(s[1]);sancRawCounts[s[0]]=(sancRawCounts[s[0]]||0)+1});
   const _svSanAll=DD.sanctions||[];
-  const top5Sanc=Object.entries(sancCounts).filter(([idx])=>(sancRawCounts[idx]||0)>=CT_MN).map(([idx,n])=>{
+  const top5Sanc=Object.entries(sancCounts).filter(([idx])=>(sancRawCounts[idx]||0)>=CT_LIST_MIN).map(([idx,n])=>{
     const r=lr.find(r=>r[0]===parseInt(idx));
     const pid=r?r[1]:(REG[idx]?REG[idx].id:`#${idx}`);
     const pS=termSancs.filter(s=>s[0]===parseInt(idx));
@@ -12597,7 +12749,7 @@ function rCL(){
   const termSancs=(DD.sanctions||[]).filter(s=>s[3]===sub&&s[2]>=clAySancStart&&s[2]<=todayCLISO&&lrIdxSet.has(s[0]));
   const sancCounts={};const sancRawCounts2={};termSancs.forEach(s=>{sancCounts[s[0]]=(sancCounts[s[0]]||0)+sancWeight(s[1]);sancRawCounts2[s[0]]=(sancRawCounts2[s[0]]||0)+1});
   const _clSanAll=DD.sanctions||[];
-  const top5Sanc=Object.entries(sancCounts).filter(([idx])=>(sancRawCounts2[idx]||0)>=CT_MN).map(([idx,n])=>{
+  const top5Sanc=Object.entries(sancCounts).filter(([idx])=>(sancRawCounts2[idx]||0)>=CT_LIST_MIN).map(([idx,n])=>{
     const r=lr.find(r=>r[0]===parseInt(idx));
     const pid=r?r[1]:(REG[idx]?REG[idx].id:`#${idx}`);
     const pS=termSancs.filter(s=>s[0]===parseInt(idx));
@@ -13134,7 +13286,7 @@ function rTGC(){
     else if(_v==='tutor') popTG();
   }catch(e){ console.warn('[boot] initial view render',e); }
   // Initialise concern threshold display
-  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">×${CT_SC}</b> · Min: <b style="color:#fff">${CT_MN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
+  document.getElementById('ct-display').innerHTML=`Ab: <b style="color:#fff">${CT_AB}</b> · Ef: <b style="color:#fff">${CT_EF}</b> · Sanc: <b style="color:#fff">p${CT_P_AMB}/${CT_P_RED}</b> · Min ev: <b style="color:#fff">${CT_EV_MIN}</b> · Att: <b style="color:#fff">×${CT_AT}/${CT_AM}</b> · PA: <b style="color:#fff">${CT_PA_WIN}sd/${CT_PA_PCT}%</b> · Seas: <b style="color:#fff">${SA_YRS}yr/${SA_MIN}/${SA_SHARE}%/${SA_LEAD}m</b>`;
   document.getElementById('sw-display').innerHTML=`C:<b style="color:#fff">${SW_CODE}</b> O:<b style="color:#fff">${SW_ONCALL}</b> D:<b style="color:#fff">${SW_DET}</b>`;
   document.getElementById('ap-display').innerHTML=`Abs: <b style="color:#fff">${AP_MIN}/${AP_PCT}%/${AP_SLOT}%/×${AP_MULT}/${AP_HIGH_ABS}%</b>`;
   document.getElementById('sa-display').innerHTML=`SC: <b style="color:#fff">${SA_MIN_TOTAL}/${SA_MIN_TEACHER}/${SA_RATIO}×/${SA_ENGAGE}</b> · Avoid: <b style="color:#fff">${SAV_RATIO}×/${SAV_MIN}</b>`;
@@ -14599,6 +14751,44 @@ function rPeer(){
   }
   function _cnInvalidate(){ _sanByPupil=null; _pupilsByYg=null; _decCache=null; }
 
+  // Cohort sanction standing for a year group: every peer's count this year, the same
+  // counts as they stood ~6 weeks ago, and the top-DEC_PCT cut for each.
+  // ⚠️ EXTRACTED SO TWO TRIGGERS CAN SHARE IT. "Entered the top decile" (the crossing)
+  // and "Persistently high sanctions" (the standing) need identical numbers; when this
+  // lived inside the first of them, the second depended on the first having run and on
+  // not having returned early — a side-effect dependency that would have broken silently
+  // the moment either guard changed.
+  // Memoised per year group: it was a full scan of DD.sanctions for EVERY pupil, 240
+  // pupils each scanning 27,510 rows and sorting the cohort twice, and the answer is
+  // identical for everyone in the year group.
+  function _decStats(yg, sdY){
+    if(!sdY||sdY.length<40) return null;
+    const peers=_ygPeers(yg);
+    if(peers.length<20) return null;
+    const end=_hmToday(), ayS=ayStartISO(_hmAyOf(end));
+    const backTo=sdY[Math.max(0,sdY.length-30)];      // ~6 weeks ago
+    const _dk=yg+'|'+ayS+'|'+end+'|'+DEC_PCT;
+    if(!_decCache)_decCache={};          // lazy: see the note at the declaration
+    if(!_decCache[_dk]){
+      const now={},was={};
+      peers.forEach(p=>{
+        _sanFor(p).forEach(r=>{
+          if(r[2]<ayS||r[2]>end)return;
+          now[p]=(now[p]||0)+1;
+          if(r[2]<=backTo)was[p]=(was[p]||0)+1;
+        });
+      });
+      const cut=arr=>{ const v=arr.slice().sort((a,b)=>b-a);
+        const i=Math.max(0,Math.floor(v.length*(DEC_PCT/100))-1);
+        return v.length?v[i]:Infinity; };
+      const all=peers.map(p=>now[p]||0).sort((a,b)=>a-b);
+      _decCache[_dk]={now:now,was:was,peers:peers,
+        median: all.length?all[Math.floor(all.length/2)]:0,
+        cutNow:cut(peers.map(p=>now[p]||0)), cutWas:cut(peers.map(p=>was[p]||0))};
+    }
+    return _decCache[_dk];
+  }
+
   // Observed native-grade range of a whole collection, across every pupil and subject.
   // Memoised: the answer is a property of the collection, not the pupil.
   var _collRangeCache=null;
@@ -14617,6 +14807,54 @@ function rPeer(){
     }
     return (_collRangeCache[pk]= v.length?{min:Math.min(...v),max:Math.max(...v)}:null);
   }
+
+  // ── SHADOW COMPARISON ─────────────────────────────────────────────────────
+  // Run _sanShadow() from the console. Computes BOTH the retired ratio test and the
+  // current one for every pupil, and reports where they disagree.
+  // ⚠️ THIS IS THE STEP THAT ARITHMETIC CANNOT DO. Tuning to a firing rate tests
+  // nothing — the question is whether the pupils on the list are the right pupils, and
+  // only the school can answer that. Take the two disagreement lists to a head of year
+  // and ask which they would rather have had. Admission numbers only, no names.
+  // Reads CT_SC/CT_MN as the school had them set, so "old" is that school's old list.
+  window._sanShadow=function(opts){
+    _ensureCnContext();
+    const o=Object.assign({verbose:false},opts||{});
+    const out={oldOnly:[],newOnly:[],both:[],oldN:0,newN:0};
+    Object.keys(REG||{}).forEach(k=>{
+      const px=+k, yg=curYG(REG[k]&&REG[k].intake);
+      if(!yg)return;
+      const c10=sanCountInMod(px,yg,10), c20=sanCountInMod(px,yg,20),
+            c60=sanCountInMod(px,yg,60), c100=sanCountInMod(px,yg,100);
+      const s10=sanRAMod(px,yg,10), s20=sanRAMod(px,yg,20),
+            s60=sanRAMod(px,yg,60), s100=sanRAMod(px,yg,100);
+      const p1=_priorWin(s10,10,s20,20), p2=_priorWin(s10,10,s100,100), p3=_priorWin(s20,20,s60,60);
+      const oldFire=(p1>0&&s10>p1*CT_SC&&c10>=CT_MN)||(p2>0&&s10>p2*CT_SC&&c10>=CT_MN)
+                  ||(p3>0&&s20>p3*CT_SC&&c20>=CT_MN);
+      const nw=sanAccelTest(c10,c20,c60,c100);
+      const row={pid:(REG[k]&&REG[k].id)||px, yg:yg, last10:c10, last20:c20,
+                 newLabel:nw?nw.label:'', p:nw?+nw.p.toFixed(4):null,
+                 expected:nw?+nw.expected.toFixed(2):null};
+      if(oldFire)out.oldN++;
+      if(nw)out.newN++;
+      if(oldFire&&nw)out.both.push(row);
+      else if(oldFire)out.oldOnly.push(row);
+      else if(nw)out.newOnly.push(row);
+    });
+    const by=(a,b)=>(a.p==null?1:b.p==null?-1:a.p-b.p);
+    out.newOnly.sort(by); out.oldOnly.sort((a,b)=>b.last10-a.last10);
+    console.log(`Sanctions Increase — old rule (\u00d7${CT_SC}, min ${CT_MN}): ${out.oldN} pupils`);
+    console.log(`Sanctions Increase — current rule (min ${CT_EV_MIN} events, p<${CT_P_AMB}): ${out.newN} pupils`);
+    console.log(`agree on ${out.both.length}; ${out.oldOnly.length} old-only; ${out.newOnly.length} new-only`);
+    if(o.verbose){
+      console.log('%cNEW ONLY \u2014 would not have been flagged before','font-weight:bold');
+      console.table(out.newOnly);
+      console.log('%cOLD ONLY \u2014 flagged before, silent now','font-weight:bold');
+      console.table(out.oldOnly);
+    } else {
+      console.log('call _sanShadow({verbose:true}) for the two lists');
+    }
+    return out;
+  };
 
   function pupilOtherConcernItems(px){
     const yg=curYG(REG[String(px)]?.intake);
@@ -14683,7 +14921,9 @@ function rPeer(){
     // only ever sees the most urgent.
     const s10=sanRAMod(px,yg,10),s20=sanRAMod(px,yg,20),
           s60=sanRAMod(px,yg,60),s100=sanRAMod(px,yg,100);
-    const sCount10=sanCountInMod(px,yg,10),sCount20=sanCountInMod(px,yg,20);
+    const sCount10=sanCountInMod(px,yg,10),sCount20=sanCountInMod(px,yg,20),
+          sCount60=sanCountInMod(px,yg,60),sCount100=sanCountInMod(px,yg,100);
+    const _accel=sanAccelTest(sCount10,sCount20,sCount60,sCount100);
     // ⚠️ COMPARE AGAINST THE EARLIER PERIOD, NOT AN OVERLAPPING AVERAGE.
     // These used to test s10 > s20 * 1.5 — but the 20-day figure CONTAINS the 10, so a
     // pupil's own spike inflated the baseline it was measured against and the test got
@@ -14691,10 +14931,13 @@ function rPeer(){
     const _p10v20 =_priorWin(s10,10,s20,20);    // days 11-20
     const _p10v100=_priorWin(s10,10,s100,100);  // days 11-100
     const _p20v60 =_priorWin(s20,20,s60,60);    // days 21-60
-    const _imm =_p10v20 >0 && s10>_p10v20 *CT_SC && sCount10>=CT_MN;
-    const _bld =_p10v100>0 && s10>_p10v100*CT_SC && sCount10>=CT_MN;
-    const _rise=_p20v60 >0 && s20>_p20v60 *CT_SC && sCount20>=CT_MN;
-    if(_imm||_bld||_rise){
+    // ⚠️ s10/s20/s60/s100 and the _priorWin values below are still computed, but they are
+    // now DISPLAY figures only — the test itself runs on raw counts in sanAccelTest().
+    // See the note there on why a weighted score cannot carry a Poisson test.
+    const _imm =!!_accel&&_accel.key==='imm';
+    const _bld =!!_accel&&_accel.key==='bld';
+    const _rise=!!_accel&&_accel.key==='rise';
+    if(_accel){
       // Which subject the recent sanctions are in. Named only when one subject
       // holds most of them — otherwise it is spread and saying "Maths" misleads.
       const _sd=_cnYgSDMod&&_cnYgSDMod[yg]?_cnYgSDMod[yg]:_cnSDMod;
@@ -14713,14 +14956,9 @@ function rPeer(){
       // Was Immediate / Building / Rising, which did not convey that "Building" meant
       // "against months" and "Rising" meant "against weeks"; most people guessed the
       // wrong way round.
-      const _kind=_imm?'Sudden Sanctions Increase'
-                 :(_bld?'Long-Term Sanctions Increase':'Recent Sanctions Increase');
-      const _sev=(_imm&&s10>_p10v20*2)||(_bld&&s10>_p10v100*2)||(_rise&&s20>_p20v60*2)?'red':'amber';
-      const _detail=_imm
-        ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against ${_p10v20.toFixed(1)} in the 10 school days before that, ${(s10/_p10v20).toFixed(1)}\u00d7 the earlier rate.${_where}`
-        : _bld
-        ? `${fn} has had ${sCount10} sanctions in the last 10 school days \u2014 a weighted score of ${s10.toFixed(1)} against ${_p10v100.toFixed(1)} over the preceding 90 school days, ${(s10/_p10v100).toFixed(1)}\u00d7 the term baseline.${_where}`
-        : `${fn} has had ${sCount20} sanctions in the last 20 school days \u2014 a weighted score of ${s20.toFixed(1)} against ${_p20v60.toFixed(1)} in the 40 school days before that, ${(s20/_p20v60).toFixed(1)}\u00d7 the earlier rate.${_where}`;
+      const _kind=_accel.label;
+      const _sev=_accel.severity;
+      const _detail=sanAccelDetail(_accel,fn)+_where;
       items.push({type:'sanc-accel',subkey:'',label:_kind,severity:_sev,detail:_detail});
     }
     // 4. Absence Pattern (slot-level)
@@ -14816,13 +15054,13 @@ function rPeer(){
     // Both inputs are already computed above, so this is genuinely derived — it cannot
     // disagree with the two concerns it is built from.
     if(_attDecl && (_imm||_bld||_rise)){
-      const _sTxt=_imm?`${s10.toFixed(1)} vs ${_p10v20.toFixed(1)} over the previous 10`
-                :(_bld?`${s10.toFixed(1)} vs ${_p10v100.toFixed(1)} over the term`
-                      :`${s20.toFixed(1)} vs ${_p20v60.toFixed(1)} over the previous 40`);
+      const _sTxt=`${_accel.observed} sanctions in the last ${_accel.days} school days `
+                 +`against ${_accel.expected<1?_accel.expected.toFixed(1):Math.round(_accel.expected)} `
+                 +`typical for them`;
       items.push({type:'disengage',subkey:'',label:'Possible Disengagement',severity:'red',
         detail:`${fn} is absent more AND being sanctioned more at the same time \u2014 absence `
           +`${a20.rate.toFixed(0)}% over the last 20 school days against ${_pAbs.toFixed(0)}% before that, `
-          +`and a weighted sanction score of ${_sTxt}. Either on its own is common; together they are `
+          +`and ${_sTxt}. Either on its own is common; together they are `
           +`the pattern that usually comes before a pupil withdraws from school life.`});
     }
 
@@ -14908,36 +15146,10 @@ function rPeer(){
     // roughly 24 of them in the top decile by definition, which is noise at that level.
     // A tutor with 29 pupils seeing one cross is a conversation.
     (function(){
-      const end=_hmToday(), ayS=ayStartISO(_hmAyOf(end));
       const sdY=(_cnYgSDMod&&_cnYgSDMod[yg])?_cnYgSDMod[yg]:_cnSDMod;
-      if(!sdY||sdY.length<40)return;
-      const backTo=sdY[Math.max(0,sdY.length-30)];      // ~6 weeks ago
-      const peers=[];
-      peers.push.apply(peers,_ygPeers(yg));
-      if(peers.length<20)return;
-      // ⚠️ MEMOISED PER YEAR GROUP. This built the whole cohort's counts and both decile
-      // cutoffs from a full scan of DD.sanctions FOR EVERY PUPIL — 240 pupils each
-      // scanning 27,510 rows, then sorting the cohort twice. On its own it was several
-      // seconds. The answer is identical for every pupil in the year group, so compute
-      // it once.
-      const _dk=yg+'|'+ayS+'|'+end+'|'+DEC_PCT;
-      if(!_decCache)_decCache={};          // lazy: see the note at the declaration
-      if(!_decCache[_dk]){
-        const now={},was={};
-        peers.forEach(p=>{
-          _sanFor(p).forEach(r=>{
-            if(r[2]<ayS||r[2]>end)return;
-            now[p]=(now[p]||0)+1;
-            if(r[2]<=backTo)was[p]=(was[p]||0)+1;
-          });
-        });
-        const cut=arr=>{ const v=arr.slice().sort((a,b)=>b-a);
-          const i=Math.max(0,Math.floor(v.length*(DEC_PCT/100))-1);
-          return v.length?v[i]:Infinity; };
-        _decCache[_dk]={now:now,was:was,
-          cutNow:cut(peers.map(p=>now[p]||0)), cutWas:cut(peers.map(p=>was[p]||0))};
-      }
-      const _dc=_decCache[_dk];
+      const _dc=_decStats(yg,sdY);
+      if(!_dc)return;
+      const peers=_dc.peers;
       const now=_dc.now, was=_dc.was, cutNow=_dc.cutNow, cutWas=_dc.cutWas;
       const mine=now[px]||0, mineWas=was[px]||0;
       if(mine<DEC_MIN)return;
@@ -14950,6 +15162,39 @@ function rPeer(){
           +`${mine} sanctions, ranking ${rank} of ${peers.length}. Six weeks ago they were `
           +`outside it. This flags the crossing, not the standing: it will not fire again `
           +`while they stay there.`});
+    })();
+
+    // ── 6e-ii. PERSISTENTLY HIGH SANCTIONS (STANDING, NOT CROSSING) ──
+    // ⚠️ THE OTHER HALF OF 6e, AND THE REASON THE CHANGE TRIGGERS CAN BE NARROWED.
+    // Every sanctions trigger above measures CHANGE against the pupil's own baseline. A
+    // pupil running at twenty codes a fortnight who runs at twenty again is, correctly,
+    // invisible to all of them — nothing has changed. 6e catches the moment they enter
+    // the top decile and then goes quiet by design, because a tutor does not need telling
+    // every week about a pupil they already know.
+    // A year leader does. Rolled across the year, the change family and this one overlap
+    // by a single pupil at TWS: they are near-disjoint populations answering different
+    // questions, and without this one the heaviest-sanctioned children in the school
+    // appear on no list at all.
+    // ⚠️ NOT tutorOnly. 6e is tutor-only because ~10% of a year group sits in the top
+    // decile by definition and that is noise in a list of 240. This is the same 10% — so
+    // it must be read as a CASELOAD, ordered by rank, not as 24 separate alerts. It is
+    // emitted amber, never red, for exactly that reason: it is a standing fact about a
+    // pupil, not news about today.
+    (function(){
+      const sdY=(_cnYgSDMod&&_cnYgSDMod[yg])?_cnYgSDMod[yg]:_cnSDMod;
+      const _dc=_decStats(yg,sdY);
+      if(!_dc)return;
+      const peers=_dc.peers;
+      const mine=_dc.now[px]||0;
+      if(mine<DEC_MIN||mine<_dc.cutNow)return;
+      const rank=peers.map(p=>_dc.now[p]||0).filter(v=>v>mine).length+1;
+      const med=_dc.median;
+      items.push({type:'sanc-level',subkey:'',severity:'amber',
+        label:'Persistently high sanctions',
+        detail:`${fn} is in the worst ${DEC_PCT}% of ${yg} for sanctions this year \u2014 `
+          +`${mine} so far, ranking ${rank} of ${peers.length}, against a year-group median `
+          +`of ${med}. This is a standing position rather than a change: it will not appear `
+          +`as an increase, because nothing has increased.`});
     })();
 
     // ── 6f. ATTAINMENT POSITION FALLING ──
@@ -16502,10 +16747,31 @@ ${groupPanel(
         )}
         ${groupPanel(
           'Sanctions Acceleration',
-          'A pupil is flagged when their recent (10sd) weighted sanction score is significantly higher than their previous pattern (20sd or 100sd).',
-          'Concerns tab → Pupil Concerns; Behavioural Concerns tab; Pupil tab',
-          inputRow('Acceleration multiplier','ct-sc',CT_SC,{min:0.5,max:5,step:0.1,hint:'Recent sanction score must exceed the older score by this multiplier to fire. Default 1.5×.'})+
-          inputRow('Minimum recent sanctions','ct-mn',CT_MN,{min:0,max:50,step:1,hint:'A pupil must have at least this many sanctions in the recent window before flagging. At 3 a pupil could be flagged on three codes in two days, which is usually noise. Default 5.'})
+          'A pupil is flagged when the number of sanctions in their recent window is unlikely '
+          +'given their OWN earlier rate \u2014 so three codes from a pupil who normally gets none is a '
+          +'flag, while twenty from a pupil who normally gets twenty is not. Three labels, one test: '
+          +'Sudden (last 10sd against the 10 before), Long-Term (last 10sd against the preceding 90) '
+          +'and Recent (last 20sd against the 40 before). '
+          +'\u26a0\ufe0f These measure CHANGE. A pupil who is consistently very high but FLAT is picked '
+          +'up by Persistently High Sanctions instead, below.',
+          'Concerns tab \u2192 Pupil Concerns; Behavioural Concerns tab; Pupil tab',
+          inputRow('Minimum events before testing','ct-ev-min',CT_EV_MIN,{min:1,max:20,step:1,hint:'Sanctions in the recent window before the pupil is tested at all. Its ONLY job is to stop a single incident becoming a flag \u2014 it is not a severity setting. \u26a0\ufe0f This replaced \u201cMinimum recent sanctions\u201d, which was an absolute count (default 5, often set higher). At 8, six pupils in the school could clear it on a 10-day window and 44 on a 20-day window, and rolled across a year no pupil with under 27 sanctions was ever flagged \u2014 the trigger could only see children who were already heavily sanctioned. Leave this at 3.'})
+          +inputRow('Amber at probability below','ct-p-amb',CT_P_AMB,{min:0.001,max:0.5,step:0.005,hint:'How unlikely the recent count must be, against the pupil\u2019s own baseline, before an amber flag. 0.05 means \u201cwould happen by chance less than one time in twenty\u201d. Raise it to catch more, lower it to catch less \u2014 this is the dial, not the minimum above.'})
+          +inputRow('Red at probability below','ct-p-red',CT_P_RED,{min:0.0005,max:0.5,step:0.005,hint:'The same scale, for red. \u26a0\ufe0f An ABSOLUTE level, not a multiple of amber \u2014 which is what put red out of reach in several other triggers when their amber threshold was tightened. Must be at or below the amber figure; it is clamped if not.'})
+          +inputRow('Minimum for top-5 lists','ct-list-min',CT_LIST_MIN,{min:0,max:50,step:1,hint:'A separate floor, and NOT part of any trigger: how many sanctions a pupil needs before appearing in the \u201ctop 5 by sanctions\u201d lists on the class and tutor-group views. This inherits whatever the old \u201cMinimum recent sanctions\u201d was set to, so those lists are unchanged.'})
+        )}
+        ${groupPanel(
+          'Persistently High Sanctions',
+          'A LEVEL test, and the counterpart to Sanctions Acceleration. A pupil sitting in the worst '
+          +'decile of their year group is flagged for as long as they stay there \u2014 not because anything '
+          +'has changed, but because nothing has. Without it the heaviest-sanctioned pupils in the school '
+          +'appear on no list at all, since every other sanctions trigger measures change against the '
+          +'pupil\u2019s own baseline and a flat line is not a change. '
+          +'\u26a0\ufe0f Read it as a caseload ordered by rank, not as a list of alerts: a tenth of any year '
+          +'group is in the worst tenth by definition. It is always amber, never red, for that reason. '
+          +'Uses the same two settings as Entering the top decile, above.',
+          'Concerns \u2192 Persistently high sanctions (all views)',
+          '<div style="font-size:.7rem;color:var(--mu);line-height:1.4">Set by <b style="color:var(--tx)">Threshold (%)</b> and <b style="color:var(--tx)">Minimum sanctions</b> in <b style="color:var(--tx)">Entering the top decile</b>. Deliberately shared: the two triggers describe the same cut of the same cohort, one on the way in and one while they stay, and separate settings would let them contradict each other.</div>'
         )}
         ${groupPanel(
           'Recurring Seasonal Absence',
@@ -17002,7 +17268,8 @@ ${groupPanel(
     {id:'yoy-escalate', label:'Escalating year on year'},
     {id:'yoy-absence',  label:'Absence escalating year on year'},
     {id:'pos-drop',     label:'Attainment position falling'},
-    {id:'decile',       label:'Entered the top decile'}   // tutor view only
+    {id:'decile',       label:'Entered the top decile'},  // tutor view only
+    {id:'sanc-level',   label:'Persistently high sanctions'}
     // NOTE 'subj-engage' above is pushed ONLY by the class-concerns builder, so its
     // chip will always be empty in pupil-level views. Left in place deliberately.
   ];
@@ -17188,7 +17455,8 @@ ${groupPanel(
           wins.push({type:'att-improving',severity:strong?'green-strong':'green',label:'Attendance Improving',
             detail:`Recovering from a high absence rate — 20sd ${a20.rate.toFixed(1)}% absent vs 60sd ${a60.rate.toFixed(1)}% (${fac} the rolling average).`});
         }
-        // Sanctions Reducing — had ≥CT_MN sanctions earlier in the 60sd window, now eased off.
+        // Sanctions Reducing — had ≥CG_MN sanctions earlier in the 60sd window, now eased off.
+        // (The comment used to say CT_MN, which this has never read. CG_MN is the congrats floor.)
         const s20=sanRA(px,yg,20),s60=sanRA(px,yg,60),c20=sanCountIn(px,yg,20),c60=sanCountIn(px,yg,60);
         let sancRed=false;
         const _pSan=_priorWin(s20,20,s60,60);   // days 21-60, recovered by subtraction
@@ -17305,26 +17573,19 @@ ${groupPanel(
       // FLAT load trips none of them.
       const s10=sanRA(px,yg,10), s20=sanRA(px,yg,20),
             s60=sanRA(px,yg,60), s100=sanRA(px,yg,100);
-      const sanCount10=sanCountIn(px,yg,10), sanCount20=sanCountIn(px,yg,20);
-      // prior-period comparison, same as the pupil page — see _priorWin()
-      const _cp10v20 =_priorWin(s10,10,s20,20);
-      const _cp10v100=_priorWin(s10,10,s100,100);
-      const _cp20v60 =_priorWin(s20,20,s60,60);
-      const _cImm =_cp10v20 >0 && s10>_cp10v20 *CT_SC && sanCount10>=CT_MN;
-      const _cBld =_cp10v100>0 && s10>_cp10v100*CT_SC && sanCount10>=CT_MN;
-      const _cRise=_cp20v60 >0 && s20>_cp20v60 *CT_SC && sanCount20>=CT_MN;
+      const sanCount10=sanCountIn(px,yg,10), sanCount20=sanCountIn(px,yg,20),
+            sanCount60=sanCountIn(px,yg,60), sanCount100=sanCountIn(px,yg,100);
+      // ⚠️ THE SAME CALL AS THE PUPIL PAGE — not the same logic rewritten, the same
+      // function. These two blocks drifted apart twice before, and each time the symptom
+      // was a pupil whose own page and whose year leader's list disagreed about them.
+      const _cAcc=sanAccelTest(sanCount10,sanCount20,sanCount60,sanCount100);
       let sancAccel=false;
-      if(_cImm||_cBld||_cRise){
+      if(_cAcc){
         sancAccel=true;
-        const sev=((_cImm&&s10>_cp10v20*2)||(_cBld&&s10>_cp10v100*2)||(_cRise&&s20>_cp20v60*2))?'red':'amber';
-        const lbl=_cImm?'Sudden Sanctions Increase'
-                 :(_cBld?'Long-Term Sanctions Increase':'Recent Sanctions Increase');
-        const det=_cImm
-          ? `10sd weighted ${s10.toFixed(1)} vs ${_cp10v20.toFixed(1)} in the 10sd before (${sanCount10} sanctions, ${(s10/_cp10v20).toFixed(1)}× the earlier rate)`
-          : _cBld
-          ? `10sd weighted ${s10.toFixed(1)} vs ${_cp10v100.toFixed(1)} over the preceding 90sd (${sanCount10} sanctions, ${(s10/_cp10v100).toFixed(1)}× the term baseline)`
-          : `20sd weighted ${s20.toFixed(1)} vs ${_cp20v60.toFixed(1)} in the 40sd before (${sanCount20} sanctions, ${(s20/_cp20v60).toFixed(1)}× the earlier rate)`;
-        concerns.push({type:'sanc-accel', subkey:'', severity:sev, label:lbl, detail:det});
+        const _cExp=_cAcc.expected<1?_cAcc.expected.toFixed(1):Math.round(_cAcc.expected);
+        concerns.push({type:'sanc-accel', subkey:'', severity:_cAcc.severity, label:_cAcc.label,
+          detail:`${_cAcc.observed} sanctions in ${_cAcc.days}sd vs ${_cExp} typical for them over `
+                +`${_cAcc.win.replace(/^the /,'')} (p=${_cAcc.p<0.001?'<0.001':_cAcc.p.toFixed(3)})`});
       }
 
       // 4. Possible Disengagement — derived: both Attendance Declining AND a Sanctions Increase fire
