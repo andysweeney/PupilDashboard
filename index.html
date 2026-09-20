@@ -2642,6 +2642,21 @@ let CT_PA_WIN=20, CT_PA_PCT=10;
 // An episode is a maximal run of consecutive SCHOOL days with any absence, so a Friday
 // and the following Monday count as one.
 let CT_AB_EPI=2;                      // distinct absence episodes before a decline counts
+// ⚠️ RED IS AN ABSOLUTE LEVEL, NOT A MULTIPLE OF THE AMBER THRESHOLD.
+// These five used red = threshold x 1.4-1.6, which meant tightening the trigger pushed
+// red out of reach: at SC_PER_PCT 50 red needed 75%, and at SC_DOW_PCT 65 it needed
+// 97.5% — effectively unreachable, which is why those two showed 1 red and 0 red out of
+// 43 and 3 pupils. A severity that moves when you tune sensitivity cannot be explained
+// to a school, and cannot be tuned independently.
+let RED_AB_DOW=70, RED_SC_DOW=75, RED_SC_PER=70;   // share in one day / one period (%)
+let RED_YOY=3, RED_AYOY=3;                          // year-on-year multiple of last year
+// ⚠️ These two were HARD-CODED at 7 sites across the pupil and class paths — the same
+// duplication that let the two views disagree about Persistent Absence. Sanctions
+// Concentration red at ratio>=4 is why every one of its 24 firings showed red: the amber
+// gate (SA_RATIO, also 4) and the red gate were the same number, so amber was
+// unreachable. Setting RED_SA above SA_RATIO restores the distinction.
+let RED_SA=6;                         // sanctions concentration: x expected, for RED
+let RED_AP=60;                        // absence pattern: slot absence rate (%), for RED
 // Attendance "low" threshold. Was hardcoded at 90 in the engine, which pre-counted
 // pupils into fixed bands and discarded the values — so it could not be changed
 // without a rebuild. The engine now ships the values (peerStats *.attVals) and the
@@ -2677,7 +2692,7 @@ const _LS_KEY = 'pupilDashboard.thresholds.v1';
 function saveThresholds(){
   try {
     const obj = {
-      CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, ATT_LOW,
+      CT_AB, CT_EF, CT_SC, CT_MN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, RED_AB_DOW, RED_SC_DOW, RED_SC_PER, RED_YOY, RED_AYOY, RED_SA, RED_AP, ATT_LOW,
       CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT,
       AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
@@ -2709,6 +2724,13 @@ function applyThresholdValues(v){
   if((n=safeF(v.CT_AT))!=null) CT_AT=n;
   if((n=safeI(v.CT_AM))!=null) CT_AM=n;
   if((n=safeI(v.CT_AB_EPI))!=null&&n>0) CT_AB_EPI=n;
+  if((n=safeF(v.RED_AB_DOW))!=null&&n>0&&n<=100) RED_AB_DOW=n;
+  if((n=safeF(v.RED_SC_DOW))!=null&&n>0&&n<=100) RED_SC_DOW=n;
+  if((n=safeF(v.RED_SC_PER))!=null&&n>0&&n<=100) RED_SC_PER=n;
+  if((n=safeF(v.RED_YOY))!=null&&n>1) RED_YOY=n;
+  if((n=safeF(v.RED_AYOY))!=null&&n>1) RED_AYOY=n;
+  if((n=safeF(v.RED_SA))!=null&&n>0) RED_SA=n;
+  if((n=safeF(v.RED_AP))!=null&&n>0&&n<=100) RED_AP=n;
   if((n=safeI(v.CT_PA_WIN))!=null) CT_PA_WIN=n;
   if((n=safeF(v.CT_PA_PCT))!=null) CT_PA_PCT=n;
   if((n=safeF(v.CG_AT))!=null) CG_AT=n;
@@ -2763,7 +2785,7 @@ function applyThresholdValues(v){
 
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
-  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, ATT_LOW:90,
+  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, RED_AB_DOW:70, RED_SC_DOW:75, RED_SC_PER:70, RED_YOY:3, RED_AYOY:3, RED_SA:6, RED_AP:60, ATT_LOW:90,
   SA_YRS:2, SA_MIN:5, SA_SHARE:40, SA_LEAD:2,
   CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
@@ -2780,6 +2802,7 @@ const _THRESHOLD_INPUTS = {
   ATT_LOW:'att-low',
   CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
   CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct', CT_AB_EPI:'ct-ab-epi',
+  RED_AB_DOW:'red-ab-dow', RED_SC_DOW:'red-sc-dow', RED_SC_PER:'red-sc-per', RED_YOY:'red-yoy', RED_AYOY:'red-ayoy', RED_SA:'red-sa', RED_AP:'red-ap',
   SA_YRS:'sa-yrs', SA_MIN:'sa-abs-min', SA_SHARE:'sa-share', SA_LEAD:'sa-lead',
   CG_AT:'cg-at', CG_PA_PCT:'cg-pa-pct', CG_SC:'cg-sc', CG_MN:'cg-mn', CG_EX_PCT:'cg-ex-pct',
   AP_MIN:'ct-ap-min', AP_PCT:'ct-ap-pct', AP_SLOT:'ct-ap-slot', AP_MULT:'ap-mult', AP_HIGH_ABS:'ap-high-abs',
@@ -2851,6 +2874,13 @@ function applyCT(){
   CT_AT=parseFloat(document.getElementById('ct-at').value)||1.3;
   CT_AM=parseInt(document.getElementById('ct-am').value)||3;
   CT_AB_EPI=parseInt(document.getElementById('ct-ab-epi').value)||2;
+  RED_AB_DOW=parseFloat(document.getElementById('red-ab-dow').value)||70;
+  RED_SC_DOW=parseFloat(document.getElementById('red-sc-dow').value)||75;
+  RED_SC_PER=parseFloat(document.getElementById('red-sc-per').value)||70;
+  RED_YOY=parseFloat(document.getElementById('red-yoy').value)||3;
+  RED_AYOY=parseFloat(document.getElementById('red-ayoy').value)||3;
+  RED_SA=parseFloat(document.getElementById('red-sa').value)||6;
+  RED_AP=parseFloat(document.getElementById('red-ap').value)||60;
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
   CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
   ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
@@ -14700,12 +14730,12 @@ function rPeer(){
       const worst=sortedFlags[0];
       const overallTxt=worst.pupilOverallRate!=null?`${worst.pupilOverallRate.toFixed(0)}% overall`:'their overall rate';
       const more=sortedFlags.length>1?` + ${sortedFlags.length-1} more Periods`:'';
-      items.push({type:'abs-pattern',subkey:'',label:'Absence Pattern',severity:worst.rate>=60?'red':'amber',detail:`${fn} seems to regularly miss ${worst.day} P${worst.per}. There have been ${worst.count} absences (a ${worst.rate.toFixed(0)}% rate vs ${overallTxt})${more}.`});
+      items.push({type:'abs-pattern',subkey:'',label:'Absence Pattern',severity:worst.rate>=RED_AP?'red':'amber',detail:`${fn} seems to regularly miss ${worst.day} P${worst.per}. There have been ${worst.count} absences (a ${worst.rate.toFixed(0)}% rate vs ${overallTxt})${more}.`});
     }
     // 5. Subject Avoidance
     const avoidFlags=getSubjectAvoidance(px);
     avoidFlags.forEach(a=>{
-      const sev=parseFloat(a.ratio)>=4?'red':'amber';
+      const sev=parseFloat(a.ratio)>=RED_SA?'red':'amber';
       const breakdown=a.p1Whole?`${a.partial} partial-day and ${a.p1Whole} whole-day where ${a.subj} was P1`:`${a.partial} partial-day`;
       items.push({type:'subj-avoid',subkey:a.subj,label:'Possible Subject Avoidance',severity:sev,detail:`${fn} may be avoiding ${a.subj}. They have ${a.absences} subject absences (${breakdown}). This represents a ${a.actualPct}% absence rate vs an expected rate of ${a.expectedPct}%. ${a.ratio}× expectations.`});
     });
@@ -14713,7 +14743,7 @@ function rPeer(){
     const scFlags=getSanctionsConcentration(px);
     const engFlags=getSubjectEngagement(px);
     scFlags.forEach(f=>{
-      const sev=parseFloat(f.ratio)>=4?'red':'amber';
+      const sev=parseFloat(f.ratio)>=RED_SA?'red':'amber';
       const subjLabel=f.subjects.length>1?`${f.subjects.slice(0,-1).join(', ')} & ${f.subjects.slice(-1)}`:f.subjects[0];
       let detail=`${fn} is receiving more sanctions from ${f.teacher} (${f.subjects.join(', ')}) than expected, given sanctions in other lessons. ${f.codes}/${f.totalCodes} subject codes are in ${subjLabel} (${f.actualPct}% vs expected ${f.expectedPct}%).`;
       const eng=engFlags.find(e=>e.subj===f.subjects[0]);
@@ -14825,7 +14855,7 @@ function rPeer(){
       if(rNow<=rPrev*YOY_RATIO)return;
       const x=(rNow/rPrev);
       items.push({type:'yoy-escalate',subkey:'',label:'Escalating year on year',
-        severity:x>=YOY_RATIO*1.6?'red':'amber',
+        severity:x>=RED_YOY?'red':'amber',   // absolute multiple, not a multiple of the amber threshold
         detail:`${fn} has had ${cNow} sanction${cNow===1?'':'s'} so far this year against `
           +`${cPrev} by the same point last year \u2014 ${x.toFixed(1)}\u00d7 the rate, weighted. `
           +`⚠️ Nothing else would show this: every other trigger compares at most the last `
@@ -14860,7 +14890,7 @@ function rPeer(){
       const ppd=_hmPerPerDay()||5;
       const pctNow=100-(aNow/(dNow*ppd)*100), pctPrev=100-(aPrev/(dPrev*ppd)*100);
       items.push({type:'yoy-absence',subkey:'',label:'Absence escalating year on year',
-        severity:(rNow/rPrev)>=AYOY_RATIO*1.6?'red':'amber',
+        severity:(rNow/rPrev)>=RED_AYOY?'red':'amber',
         detail:`${fn}'s attendance is ${pctNow.toFixed(1)}% so far this year against `
           +`${pctPrev.toFixed(1)}% by the same point last year \u2014 ${aNow} absent periods `
           +`against ${aPrev}. A drift of a few points a year never looks like a decline `
@@ -14990,7 +15020,7 @@ function rPeer(){
       if(pct<AB_DOW_PCT)return;
       const wd=wholeDays[top]||0;
       items.push({type:'abs-dow',subkey:top,label:'Absence on one day',
-        severity:pct>=AB_DOW_PCT*1.4?'red':'amber',
+        severity:pct>=RED_AB_DOW?'red':'amber',
         detail:`${Math.round(pct)}% of ${fn}'s absence this year falls on a ${top} `
           +`\u2014 ${byDay[top]} of ${n} periods`
           +(wd?`, including ${wd} whole ${top}${wd===1?'':'s'}`:'')
@@ -15032,7 +15062,7 @@ function rPeer(){
       const dw=tally(r=>{ const d2=new Date(r[2]+'T12:00:00'); return isNaN(d2)?null:DOW[d2.getDay()]; });
       if(dw&&dw.total>=SC_DOW_MIN&&dw.pct>=SC_DOW_PCT){
         items.push({type:'sanc-dow',subkey:dw.top,label:'Sanctions on one day',
-          severity:dw.pct>=SC_DOW_PCT*1.5?'red':'amber',
+          severity:dw.pct>=RED_SC_DOW?'red':'amber',
           detail:`${Math.round(dw.pct)}% of ${fn}'s sanctions this year fall on a ${dw.top} `
             +`\u2014 ${dw.count} of ${dw.total}.`
             +(dw.subs.length?` Mostly ${named(dw.subs.slice(0,3))}.`:'')
@@ -15043,7 +15073,7 @@ function rPeer(){
       const pr=tally(r=>r[4]||null);
       if(pr&&pr.total>=SC_PER_MIN&&pr.pct>=SC_PER_PCT){
         items.push({type:'sanc-period',subkey:String(pr.top),label:'Sanctions in one period',
-          severity:pr.pct>=SC_PER_PCT*1.5?'red':'amber',
+          severity:pr.pct>=RED_SC_PER?'red':'amber',
           detail:`${Math.round(pr.pct)}% of ${fn}'s sanctions this year are in period ${pr.top} `
             +`\u2014 ${pr.count} of ${pr.total}.`
             +(pr.subs.length?` Mostly ${named(pr.subs.slice(0,3))}.`:'')
@@ -15439,7 +15469,7 @@ function rPeer(){
       flags.forEach(f=>{
         const subj=f.subj;
         if(!avoidBySubject[subj])avoidBySubject[subj]={pupils:[],slotAbs:[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]};
-        const sev=parseFloat(f.ratio)>=4?'red':'amber';
+        const sev=parseFloat(f.ratio)>=RED_SA?'red':'amber';
         const fname=firstName(px);
         const pid=REG[String(px)]?.id||`#${px}`;
         avoidBySubject[subj].pupils.push({px,name:fname,pid,severity:sev,ratio:f.ratio,absences:f.absences,partial:f.partial,p1Whole:f.p1Whole,actualPct:f.actualPct,expectedPct:f.expectedPct});
@@ -16401,8 +16431,10 @@ ${groupPanel(
           +'last year, which controls for seasonality \u2014 December is heavy everywhere.',
           'Concerns \u2192 Escalating year on year / Absence escalating year on year',
           inputRow('Sanctions \u2014 escalation (\u00d7)','yoy-ratio',YOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s weighted sanction rate to date is this many times last year\u2019s rate at the same point.'})
+          +inputRow('Sanctions \u2014 RED at (\u00d7)','red-yoy',RED_YOY,{min:1.2,max:8,step:.1,hint:'Multiple of last year\u2019s rate at which this becomes RED, as an absolute figure.'})
           +inputRow('Sanctions \u2014 minimum score','yoy-min',YOY_MIN,{min:5,max:200,step:5,hint:'Minimum weighted sanction score this year before the ratio is tested. A pupil going from 2 to 6 has tripled and means nothing.'})
           +inputRow('Absence \u2014 escalation (\u00d7)','ayoy-ratio',AYOY_RATIO,{min:1.1,max:5,step:.1,hint:'Flag when this year\u2019s absence rate to date is this many times last year\u2019s at the same point. Set lower than the sanctions equivalent \u2014 absence moves in smaller steps. \u26a0\ufe0f At 1.4 this fires for around a third of pupils; try 1.8 to 2.0.'})
+          +inputRow('Absence \u2014 RED at (\u00d7)','red-ayoy',RED_AYOY,{min:1.2,max:8,step:.1,hint:'Multiple of last year\u2019s absence rate at which this becomes RED.'})
           +inputRow('Absence \u2014 minimum periods','ayoy-min',AYOY_MIN,{min:5,max:200,step:5,hint:'Minimum absent periods this year before the ratio is tested.'})
         )}
         ${groupPanel(
@@ -16445,10 +16477,13 @@ ${groupPanel(
           +'Concentration is per TEACHER, and Absence Pattern covers slots but only for absence.',
           'Concerns \u2192 Absence on one day / Sanctions on one day / Sanctions in one period',
           inputRow('Absence \u2014 share on one day (%)','ab-dow-pct',AB_DOW_PCT,{min:25,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s absent periods fall on a single weekday. An even spread is 20%, so 50% is two and a half times expected. Catches a pupil who is otherwise a good attender but repeatedly misses one day.'})
+          +inputRow('Absence \u2014 RED at (%)','red-ab-dow',RED_AB_DOW,{min:20,max:100,step:5,hint:'Share on one weekday at which this becomes RED. \u26a0\ufe0f An ABSOLUTE level, not a multiple of the amber threshold \u2014 red used to be amber\u00d71.4, so tightening the trigger pushed red out of reach.'})
           +inputRow('Absence \u2014 minimum periods','ab-dow-min',AB_DOW_MIN,{min:3,max:60,step:1,hint:'The floor before the share is tested. One whole day off is usually 5 periods. \u26a0\ufe0f At 6 this fires for around 28% of pupils \u2014 try 10 or 11 so two separate absences are needed.'})
           +inputRow('Sanctions \u2014 share on one day (%)','sc-dow-pct',SC_DOW_PCT,{min:20,max:100,step:5,hint:'Flag when this percentage or more of a pupil\u2019s sanctions fall on a single weekday. With five teaching days an even spread is 20%, so 40% is double.'})
+          +inputRow('Sanctions day \u2014 RED at (%)','red-sc-dow',RED_SC_DOW,{min:20,max:100,step:5,hint:'Share on one weekday at which this becomes RED. At the old amber\u00d71.5 and a 65% threshold, red needed 97.5% \u2014 unreachable.'})
           +inputRow('Sanctions \u2014 day minimum','sc-dow-min',SC_DOW_MIN,{min:3,max:50,step:1,hint:'A share means nothing on small numbers \u2014 3 of 4 sanctions on a Monday is 75% and tells you nothing.'})
           +inputRow('Sanctions \u2014 share in one period (%)','sc-per-pct',SC_PER_PCT,{min:10,max:100,step:5,hint:'Flag when this percentage or more fall in one period of the day. \u26a0\ufe0f At 30% this fires for around 43% of pupils: sanctions cluster by period school-wide, so 30% is barely above the natural rate. Try 40 to 45.'})
+          +inputRow('Sanctions period \u2014 RED at (%)','red-sc-per',RED_SC_PER,{min:20,max:100,step:5,hint:'Share in one period at which this becomes RED. At the old amber\u00d71.5 and a 50% threshold, red needed 75% \u2014 which is why only 1 of 43 pupils was red.'})
           +inputRow('Sanctions \u2014 period minimum','sc-per-min',SC_PER_MIN,{min:3,max:50,step:1,hint:'The floor before the period share is tested.'})
         )}
         ${groupPanel(
@@ -16488,7 +16523,8 @@ ${groupPanel(
           inputRow('Minimum absences per slot','ct-ap-min',AP_MIN,{min:1,max:20,step:1,hint:'Minimum count of absences from a single (day, period) slot before it can be flagged. Default 3.'})+
           inputRow('Day-level concentration (%)','ct-ap-pct',AP_PCT,{min:10,max:100,step:5,hint:'For day-level flags: minimum percentage of total absences that must fall on a single day. Default 40%.'})+
           inputRow('Slot-level absence rate (%)','ct-ap-slot',AP_SLOT,{min:10,max:100,step:5,hint:'Minimum absence rate for a specific slot (absences ÷ times slot ran). Default 30%.'})+
-          inputRow('Slot rate multiplier','ap-mult',AP_MULT,{min:1.0,max:5.0,step:0.1,hint:'Slot absence rate must be at least this many times the pupil’s overall absence rate. Stops generally-absent pupils from triggering on every slot. Default 2.0×.'})+
+          inputRow('Absence pattern \u2014 RED at (%)','red-ap',RED_AP,{min:20,max:100,step:5,hint:'Absence rate in a single day+period slot at which this becomes RED.'})
+          +inputRow('Slot rate multiplier','ap-mult',AP_MULT,{min:1.0,max:5.0,step:0.1,hint:'Slot absence rate must be at least this many times the pupil’s overall absence rate. Stops generally-absent pupils from triggering on every slot. Default 2.0×.'})+
           inputRow('Skip pupils above (%)','ap-high-abs',AP_HIGH_ABS,{min:10,max:100,step:5,hint:'Pupils whose overall absence rate is above this are skipped entirely (already flagged by other concerns). Default 40%.'})
         )}
         ${groupPanel(
@@ -16497,7 +16533,8 @@ ${groupPanel(
           'Concerns tab → Pupil Concerns; Concerns tab → Relationship Concerns',
           inputRow('Minimum total sanctions','sa-min-total',SA_MIN_TOTAL,{min:1,max:50,step:1,hint:'A pupil must have at least this many total sanctions before any concentration flag fires. Default 6.'})+
           inputRow('Minimum from one teacher','sa-min-teacher',SA_MIN_TEACHER,{min:1,max:20,step:1,hint:'Minimum number of sanctions from a specific teacher to trigger concentration check. Default 3.'})+
-          inputRow('Concentration ratio','sa-ratio',SA_RATIO,{min:1,max:10,step:0.5,hint:'Teacher’s share of pupil’s sanctions ÷ teacher’s share of pupil’s timetable must reach this ratio. Default 2.0×.'})
+          inputRow('Concentration \u2014 RED at (\u00d7)','red-sa',RED_SA,{min:1.5,max:15,step:.5,hint:'Multiple of the expected share at which a teacher concentration becomes RED. \u26a0\ufe0f Keep it ABOVE the amber ratio \u2014 both were hard-coded at 4, the same value, so every firing was red and amber never appeared at all.'})
+          +inputRow('Concentration ratio','sa-ratio',SA_RATIO,{min:1,max:10,step:0.5,hint:'Teacher’s share of pupil’s sanctions ÷ teacher’s share of pupil’s timetable must reach this ratio. Default 2.0×.'})
         )}
         ${groupPanel(
           'Subject Engagement',
@@ -17303,7 +17340,7 @@ ${groupPanel(
       // 4. Sanctions concentration
       const scFlags=getSanctionsConcentration(px);
       scFlags.filter(f=>f.teacher!=='Unknown').forEach(f=>{
-        concerns.push({type:'sanc-conc', subkey:f.teacher,severity:parseFloat(f.ratio)>=4?'red':'amber',label:'Sanctions Concentration',detail:`${f.actualPct}% of codes from ${f.teacher} (${f.subjects.join(', ')}) — expected ${f.expectedPct}%, ratio ${f.ratio}×`});
+        concerns.push({type:'sanc-conc', subkey:f.teacher,severity:parseFloat(f.ratio)>=RED_SA?'red':'amber',label:'Sanctions Concentration',detail:`${f.actualPct}% of codes from ${f.teacher} (${f.subjects.join(', ')}) — expected ${f.expectedPct}%, ratio ${f.ratio}×`});
       });
 
       // 5. Absence pattern flags
@@ -17311,7 +17348,7 @@ ${groupPanel(
       if(absAnalysis.slotFlags.length){
         const worst=absAnalysis.slotFlags.sort((a,b)=>b.rate-a.rate)[0];
         const overallTxt = worst.pupilOverallRate!=null ? ` vs ${worst.pupilOverallRate.toFixed(0)}% overall` : '';
-        concerns.push({type:'abs-pattern', subkey:'',severity:worst.rate>=60?'red':'amber',label:'Absence Pattern',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate${overallTxt})${absAnalysis.slotFlags.length>1?' + '+(absAnalysis.slotFlags.length-1)+' more':''}`});
+        concerns.push({type:'abs-pattern', subkey:'',severity:worst.rate>=RED_AP?'red':'amber',label:'Absence Pattern',detail:`${worst.day} P${worst.per}: ${worst.count} absences (${worst.rate.toFixed(0)}% rate${overallTxt})${absAnalysis.slotFlags.length>1?' + '+(absAnalysis.slotFlags.length-1)+' more':''}`});
       }
 
       // 6. Subject Engagement — correlated absences with sanctions
@@ -17323,7 +17360,7 @@ ${groupPanel(
       // 7. Subject Avoidance — disproportionate skipping of one subject (no sanctions required)
       const avoidFlags=getSubjectAvoidance(px);
       avoidFlags.forEach(a=>{
-        const sev=parseFloat(a.ratio)>=4?'red':'amber';
+        const sev=parseFloat(a.ratio)>=RED_SA?'red':'amber';
         concerns.push({type:'subj-avoid', subkey:a.subj,severity:sev,label:'Subject Avoidance',detail:`Avoiding ${a.subj} — ${a.absences} qualifying absences (${a.partial} partial-day${a.p1Whole?', '+a.p1Whole+' P1 whole-day':''}), ${a.actualPct}% of qualifying absences vs expected ${a.expectedPct}%, ratio ${a.ratio}×`});
       });
 
