@@ -2686,6 +2686,81 @@ let RED_AP=60;                        // absence pattern: slot absence rate (%),
 // comparator (PAPerc, 24.21% England secondary) is fixed at 90. A school raising
 // this for internal use makes its own chart stop matching the national figure.
 let ATT_LOW=90;
+// Attendance TARGET: at or above is green. Below target but at or above ATT_LOW is amber;
+// below ATT_LOW is red. 95 is the conventional school target, not a DfE definition.
+let ATT_TARGET=95;
+// Band edges for the distribution panel and the peer filter, highest first.
+// 100 gives perfect attendance its own band; the rest are the DfE's familiar steps.
+let ATT_BAND_EDGES=[100,97,95,90,85];
+// Tutor view: flag a pupil when they can miss this many whole days, or fewer, before
+// falling below ATT_LOW. In DAYS, so it means the same in October as in June.
+let ATT_HEADROOM_WARN=3;
+
+// ── ATTENDANCE BANDS: ONE DEFINITION ──────────────────────────────────────────────────
+// ⚠️ THIS REPLACES FOURTEEN COPIES. The 95/90 cut was written out by hand at eleven colour
+// sites across eight tabs, and the band list twice more (the Attendance spread panel and
+// the peer filter). They had already drifted three ways:
+//   • The middle band was AMBER at three sites and UNCOLOURED at nine, so a pupil at 91%
+//     read as a warning on one tab and as unremarkable on the next.
+//   • Every site hardcoded 90, so ATT_LOW — configurable in Admin, and persisted — moved
+//     the persistent-absence count but not one colour anywhere in the dashboard.
+//   • The spread panel's top band was "97% and above"; the peer filter's was "100%" then
+//     "97-99". The same pupil fell in differently-named bands on two tabs.
+// Every colour, band and label now comes from here.
+//
+// Tone vocabulary is 'ok' | 'warn' | 'bad', matching _hmBar(), so a band's tone can be
+// passed straight through.
+// ⚠️ AMBER, NOT NEUTRAL, FOR THE MIDDLE BAND. Nine sites left 90-95% uncoloured; the
+// standard is amber, because that group is one bad week from persistent absence and is
+// the most actionable group in the school. Bold is reserved for red, so a table of
+// mostly-good attendance does not become a wall of bold green.
+function _attNum(v){
+  if(v==null||v===''||v==='\u2014'||v==='—') return null;
+  const n=typeof v==='number'?v:parseFloat(v);
+  return isNaN(n)?null:n;
+}
+function attTone(v){
+  const n=_attNum(v); if(n==null) return null;
+  return n>=ATT_TARGET?'ok':(n>=ATT_LOW?'warn':'bad');
+}
+// A bare colour, for `color:${...}` in markup.
+function attColour(v){
+  const t=attTone(v);
+  return t==null?'var(--mu)':t==='ok'?'var(--green)':t==='warn'?'var(--gold)':'var(--red)';
+}
+// A complete CSS fragment, for sites that splice a style string.
+function attStyle(v){
+  const t=attTone(v);
+  return t==null?'color:var(--mu)':t==='ok'?'color:var(--green)'
+        :t==='warn'?'color:var(--gold)':'color:var(--red);font-weight:600';
+}
+// The configured edges, with ATT_TARGET and ATT_LOW always included.
+// ⚠️ AUTO-INCLUDED, NOT VALIDATED AWAY. A band that straddles the PA line has no single
+// tone — "88 to 92%" is partly amber and partly red — so the two lines the colours rest
+// on are merged into whatever edges the school has chosen. The stored setting is left
+// alone; only the edges used for display gain them.
+function _attEdges(){
+  const s=new Set((ATT_BAND_EDGES||[]).filter(x=>typeof x==='number'&&x>0&&x<=100));
+  s.add(ATT_TARGET); s.add(ATT_LOW);
+  return [...s].sort((a,b)=>b-a);
+}
+// Ordered bands, best first: {key, label, lo, hi, tone, test(v)}.
+// Keys are stable strings ('100', '97-100', 'lt85') so a peer-filter selection survives
+// a re-render; they change only if the edges themselves change.
+function attBands(){
+  const e=_attEdges(), out=[];
+  e.forEach((lo,i)=>{
+    const hi=i===0?null:e[i-1];
+    const key=hi==null?String(lo):`${lo}-${hi}`;
+    const label=hi==null?(lo>=100?'100%':`${lo}% and above`):`${lo} to ${hi}%`;
+    out.push({key,label,lo,hi,tone:attTone(lo),
+      test:v=>v!=null&&v>=lo&&(hi==null||v<hi)});
+  });
+  const floor=e[e.length-1];
+  out.push({key:'lt'+floor,label:`Below ${floor}%`,lo:null,hi:floor,tone:attTone(floor-0.001),
+    test:v=>v!=null&&v<floor});
+  return out;
+}
 // Congrats / praise thresholds — fully independent of the concern thresholds above.
 // Defaults match their concern counterparts; lower them to make praise easier to earn.
 let CG_AT=1.3, CG_PA_PCT=10, CG_SC=1.5, CG_MN=3, CG_EX_PCT=99;
@@ -2713,7 +2788,7 @@ const _LS_KEY = 'pupilDashboard.thresholds.v1';
 function saveThresholds(){
   try {
     const obj = {
-      CT_AB, CT_EF, CT_SC, CT_MN, CT_EV_MIN, CT_P_AMB, CT_P_RED, CT_LIST_MIN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, RED_AB_DOW, RED_SC_DOW, RED_SC_PER, RED_YOY, RED_AYOY, RED_SA, RED_AP, ATT_LOW,
+      CT_AB, CT_EF, CT_SC, CT_MN, CT_EV_MIN, CT_P_AMB, CT_P_RED, CT_LIST_MIN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, RED_AB_DOW, RED_SC_DOW, RED_SC_PER, RED_YOY, RED_AYOY, RED_SA, RED_AP, ATT_LOW, ATT_TARGET, ATT_BAND_EDGES, ATT_HEADROOM_WARN,
       CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT,
       AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
@@ -2738,6 +2813,16 @@ function applyThresholdValues(v){
   const safeI = (x) => { const n = parseInt(x); return isNaN(n) ? null : n; };
   let n;
   if((n=safeF(v.ATT_LOW))!=null && n>0 && n<=100) ATT_LOW=n;   // a percentage; reject nonsense
+  if((n=safeF(v.ATT_TARGET))!=null && n>0 && n<=100) ATT_TARGET=n;
+  // A target below the PA line would make every amber pupil read green. Refuse it.
+  if(ATT_TARGET<ATT_LOW) ATT_TARGET=ATT_LOW;
+  if((n=safeI(v.ATT_HEADROOM_WARN))!=null && n>=0 && n<=30) ATT_HEADROOM_WARN=n;
+  // An array, so it cannot go through safeF. Keep only real percentages; anything else
+  // leaves the default in place rather than producing an empty band list.
+  if(Array.isArray(v.ATT_BAND_EDGES)){
+    const e=v.ATT_BAND_EDGES.map(Number).filter(x=>!isNaN(x)&&x>0&&x<=100);
+    if(e.length>=2) ATT_BAND_EDGES=[...new Set(e)].sort((a,b)=>b-a);
+  }
   if((n=safeF(v.CT_AB))!=null) CT_AB=n;
   if((n=safeF(v.CT_EF))!=null) CT_EF=n;
   if((n=safeF(v.CT_SC))!=null) CT_SC=n;
@@ -2816,7 +2901,7 @@ function applyThresholdValues(v){
 
 // Defaults — single source of truth. Used by reset and as fallback.
 const _THRESHOLD_DEFAULTS = {
-  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_EV_MIN:3, CT_P_AMB:0.05, CT_P_RED:0.01, CT_LIST_MIN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, RED_AB_DOW:70, RED_SC_DOW:75, RED_SC_PER:70, RED_YOY:3, RED_AYOY:3, RED_SA:6, RED_AP:60, ATT_LOW:90,
+  CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_EV_MIN:3, CT_P_AMB:0.05, CT_P_RED:0.01, CT_LIST_MIN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, RED_AB_DOW:70, RED_SC_DOW:75, RED_SC_PER:70, RED_YOY:3, RED_AYOY:3, RED_SA:6, RED_AP:60, ATT_LOW:90, ATT_TARGET:95, ATT_BAND_EDGES:[100,97,95,90,85], ATT_HEADROOM_WARN:3,
   SA_YRS:2, SA_MIN:5, SA_SHARE:40, SA_LEAD:2,
   CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
@@ -2830,7 +2915,7 @@ const _THRESHOLD_DEFAULTS = {
 
 // Map of global name → DOM input id. Used to push values into Admin inputs after reset.
 const _THRESHOLD_INPUTS = {
-  ATT_LOW:'att-low',
+  ATT_LOW:'att-low', ATT_TARGET:'att-target', ATT_BAND_EDGES:'att-bands', ATT_HEADROOM_WARN:'att-headroom',
   CT_AB:'ct-ab', CT_EF:'ct-ef', CT_SC:'ct-sc', CT_MN:'ct-mn', CT_AT:'ct-at', CT_AM:'ct-am',
   CT_EV_MIN:'ct-ev-min', CT_P_AMB:'ct-p-amb', CT_P_RED:'ct-p-red', CT_LIST_MIN:'ct-list-min',
   CT_PA_WIN:'ct-pa-win', CT_PA_PCT:'ct-pa-pct', CT_AB_EPI:'ct-ab-epi',
@@ -2925,7 +3010,16 @@ function applyCT(){
   RED_AP=parseFloat(document.getElementById('red-ap').value)||60;
   CT_PA_WIN=parseInt(document.getElementById('ct-pa-win').value)||20;
   CT_PA_PCT=parseFloat(document.getElementById('ct-pa-pct').value)||10;
-  ATT_LOW=parseFloat(document.getElementById('att-low').value)||90;
+  // ⚠️ Guarded: this read was unguarded and would throw if the panel had not rendered.
+  ATT_LOW=_gv('att-low',ATT_LOW);
+  ATT_TARGET=_gv('att-target',ATT_TARGET);
+  ATT_HEADROOM_WARN=Math.max(0,Math.round(_gv('att-headroom',ATT_HEADROOM_WARN)));
+  if(ATT_TARGET<ATT_LOW) ATT_TARGET=ATT_LOW;
+  (function(){
+    const el=document.getElementById('att-bands'); if(!el) return;
+    const e=String(el.value).split(/[,\s]+/).map(Number).filter(x=>!isNaN(x)&&x>0&&x<=100);
+    if(e.length>=2) ATT_BAND_EDGES=[...new Set(e)].sort((a,b)=>b-a);
+  })();
   AYOY_RATIO=parseFloat(document.getElementById('ayoy-ratio').value)||1.4;
   AYOY_MIN=parseInt(document.getElementById('ayoy-min').value)||15;
   CG_EF=parseInt(document.getElementById('cg-ef').value)||1;
@@ -3358,6 +3452,27 @@ const SEN_LABELS=Object.assign({'K':'SEN Support','E':'EHCP','Add':'Additional H
 const SEN_COLORS={'K':PAL.orange,'E':PAL.lilac,'Add':PAL.sky,'add':PAL.sky,'Strat':PAL.green,'strat':PAL.green,'N':PAL.slate};
 const UNAUTH_MARKS=new Set(DD.config?.att_codes?.unauthorised_absent||['G','N','O','U','-','?']);
 const NOT_COUNTED_MARKS=new Set(DD.config?.att_codes?.not_counted||['Y1','Y2','Y3','Y4','Y5','Y6','Y7']);
+// Codes in the data that the school's settings do not cover: {code: marks}. Written by the
+// engine since it stopped folding them silently into the unauthorised list.
+function _attUnknownCodes(){
+  const u=DD&&DD.config&&DD.config.unknown_attendance_codes;
+  return (u&&typeof u==='object'&&!Array.isArray(u))?u:{};
+}
+// ⚠️ UNKNOWN CODES ARE UNAUTHORISED HERE TOO, until classified. The engine counts them as
+// unauthorised absence (a cautious default), so the dashboard must label them the same way
+// or the heatmap would show those absences without the unauthorised marker. Once the school
+// classifies a code, its choice wins here immediately; the COUNTS follow on the next rebuild.
+function _attRebuildMarkSets(ac){
+  ac=ac||{};
+  const classified=new Set();
+  ['present','authorised_absent','unauthorised_absent','not_counted'].forEach(c=>(ac[c]||[]).forEach(x=>classified.add(x)));
+  UNAUTH_MARKS.clear();
+  (ac.unauthorised_absent||[]).forEach(c=>UNAUTH_MARKS.add(c));
+  Object.keys(_attUnknownCodes()).forEach(c=>{ if(!classified.has(c)) UNAUTH_MARKS.add(c); });
+  NOT_COUNTED_MARKS.clear();
+  (ac.not_counted||[]).forEach(c=>NOT_COUNTED_MARKS.add(c));
+}
+_attRebuildMarkSets(DD.config&&DD.config.att_codes);
 
 // Global tooltip for sanctions codes with category breakdown
 function sancTipAttrs(codes,dets,cats,label){
@@ -3727,7 +3842,7 @@ function makeSummaryCards(pupils, opts){
   }
   const expectedTotal = totalLessons * pupils.length;
   const attPct = expectedTotal > 0 ? ((expectedTotal - totalAbs) / expectedTotal * 100).toFixed(1) : '—';
-  const attCol = attPct === '—' ? 'var(--mu)' : parseFloat(attPct) >= 95 ? PAL.green : parseFloat(attPct) >= 90 ? 'var(--tx)' : PAL.red;
+  const attCol = attColour(attPct);   // one band definition — see attBands()
   
   // Sanctions YTD — read from DD.sanctions (the global SAN const isn't in module scope)
   const sanc = (DD.sanctions||[]).filter(s => pupilPx.has(s[0]) && s[2] >= ayStart && s[2] <= endDate);
@@ -4502,7 +4617,7 @@ function rP(){
   let ayTotalLessons=0;
   for(const[w,tl]of Object.entries(WLK2)){if(w>=ayStart&&w<=ayEnd)ayTotalLessons+=tl}
   const ayAttPct=ayTotalLessons>0?((ayTotalLessons-ayAbsCounts.total)/ayTotalLessons*100).toFixed(1):'—';
-  const ayAttCol=ayAttPct==='—'?'var(--mu)':parseFloat(ayAttPct)>=95?PAL.green:parseFloat(ayAttPct)>=90?PAL.gold:PAL.red;
+  const ayAttCol=attColour(ayAttPct);
 
   // Subject-specific attendance for current AY
   let subjAttHtml='';
@@ -4511,7 +4626,7 @@ function rP(){
     // Approximate subject lessons: total / 14 subjects
     const subjLessons=Math.round(ayTotalLessons/14);
     const subjPct=subjLessons>0?((subjLessons-Math.min(subjAbs,subjLessons))/subjLessons*100).toFixed(1):'—';
-    const subjCol=subjPct==='—'?'var(--mu)':parseFloat(subjPct)>=95?PAL.green:parseFloat(subjPct)>=90?PAL.gold:PAL.red;
+    const subjCol=attColour(subjPct);
     subjAttHtml=`<span style="margin-left:.8rem;color:var(--mu)">${sf}: <b style="color:${subjCol}">${subjPct}%</b></span>`;
   }
 
@@ -4790,7 +4905,7 @@ function rP(){
   }
 
   // Attendance sparkline — standalone, independent of sanctions
-  rAttSpark(x,'p-att-spark');
+  rAttHeat(x,'p-att-spark');   // calendar heatmap; replaced the weekly sparkline
 
   // Sanctions charts — compute group attendance for overlay
   // For All Subjects: TG average attendance
@@ -4893,143 +5008,335 @@ function rP(){
   }
 }
 
-// ── ATTENDANCE SPARKLINE (Pupil tab) ──
-// Standalone weekly attendance % visualisation with target/PA reference bands.
-// Sits above the sanctions chart on the Pupil tab. Independent of sanctions —
-// no implied correlation between the two metrics.
-function rAttSpark(x, wrapId){
-  dc('p-att-spark-chart');
+// ── ATTENDANCE CALENDAR HEATMAP (Pupil tab) ──
+// Replaces the weekly attendance sparkline. One cell per school day, coloured by how much
+// of that day was missed, with a marker on unauthorised absence.
+//
+// ⚠️ WHY A CALENDAR AND NOT A WEEKLY LINE. A week's rate is dominated by single events —
+// one day of flu is a 20-point dip — so the line swung wildly and read as a trend when it
+// was noise. And it hid the thing that matters: WHICH days. A pupil missing every other
+// Monday and one who had a week of illness can have the same weekly rate; on a calendar
+// they look nothing alike.
+//
+// ⚠️ OWN NAMES THROUGHOUT. The sanctions heatmap below uses `rect[data-hm-date]`, a tip
+// element with id 'hm-tip', and grabs `wrap.querySelector('.dw')`. This one uses
+// `data-att-date`, 'att-hm-tip', and its own wrapper element, so neither can pick up the
+// other's cells or tooltip. An earlier attempt at this chart was backed out after an edit
+// overshot into the neighbouring chart function; the two are deliberately independent.
+//
+// Three defects of the sparkline, fixed here:
+//   1. Its headline said "YTD" but summed every week since the data began in 2022 — a
+//      lifetime figure under a year-to-date label. This header is the current academic
+//      year, computed exactly as the Pupil tab summary and the peer filter compute it.
+//   2. It never consulted getSuppressed(), so an absence already corrected as "present in
+//      another subject" still counted against the pupil on this chart and nowhere else.
+//   3. It hardcoded 95 and 90 in three places and ignored ATT_LOW.
+
+// DfE descriptions for the codes a tutor is most likely to meet. Anything else shows its
+// code and whether it counts as authorised; nothing is guessed.
+const _ATT_CODE_DESC={
+  'I':'Illness','M':'Medical or dental appointment','R':'Religious observance',
+  'S':'Study leave','T':'Traveller absence','E':'Suspended or excluded',
+  'C':'Other authorised','C2':'Part-time timetable','H':'Holiday (authorised)',
+  'G':'Holiday not authorised','O':'Unauthorised absence','U':'Arrived after registers closed',
+  'N':'Reason not yet provided','-':'No mark'
+};
+
+// ⚠️ SCHOOL DAYS FROM THE REGISTER, NOT FROM THE WEEK. _hmDaysBuild() emits five days for
+// every week in DD.weekLessons whatever that week's lesson count, so a one-day week becomes
+// five school days. In AGGREGATE that washes out — _hmPerPerDay() is averaged down by the
+// same short weeks — which is why every percentage in the dashboard is right. But a
+// calendar draws each day: at TWS 36 of 149 weeks are short, and each would show phantom
+// "present" days that were holidays.
+// A date is a school day here if anyone in the school has a register mark on it. On the
+// TWS data that matches lessons ÷ periods-per-day in 148 of 149 weeks, and the one miss is
+// a 7-lesson week (a full day plus a part day) that the register reads MORE accurately.
+// Where a week yields fewer register days than its lesson count implies — possible at a
+// very small school where nobody is absent on some day — weekdays are filled in order.
+let _ATT_SD=null;
+function _attSchoolDays(){
+  if(_ATT_SD) return _ATT_SD;
+  const WLK=DD.weekLessons||{}, tt=(DD.config&&+DD.config.ttPeriods)||5;
+  const byWeek={};
+  const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const monOf=s=>{const d=new Date(s+'T12:00:00');d.setDate(d.getDate()-((d.getDay()+6)%7));return iso(d);};
+  Object.values(DD.attAbsSubj||{}).forEach(rows=>rows.forEach(r=>{
+    const d=new Date(r[0]+'T12:00:00'), wd=d.getDay();
+    if(wd===0||wd===6) return;
+    const m=monOf(r[0]); if(!(m in WLK)) return;
+    (byWeek[m]=byWeek[m]||new Set()).add(r[0]);
+  }));
+  const out=new Set();
+  Object.keys(WLK).forEach(m=>{
+    const got=byWeek[m]||new Set(), want=Math.max(1,Math.round(WLK[m]/tt));
+    got.forEach(d=>out.add(d));
+    for(let off=0;got.size<want&&off<5;off++){
+      const d=new Date(m+'T12:00:00'); d.setDate(d.getDate()+off);
+      const s=iso(d); if(!got.has(s)){got.add(s);out.add(s);}
+    }
+  });
+  return (_ATT_SD=out);
+}
+
+// ── ATTENDANCE POSITION: STATUS, DIRECTION, HEADROOM, RECOVERY ───────────────────────
+// ⚠️ DAYS, NOT PERCENTAGE POINTS. The year-to-date figure is cumulative, so what one missed
+// day does to it shrinks all year: at 95% it is 4.5 points on school day 20, 1.6 on day 60,
+// 0.5 by day 190. The old tutor view put FIXED thresholds on that shrinking quantity —
+// "Biggest fall this week" at -0.8 fired on a single absence until about February and
+// needed more than a day after it; "Approaching 90%" (within 2 points) meant under one
+// day's absence in October and about four in June. The thresholds were fixed; the scale
+// beneath them was not.
+// Everything here is expressed in the unit a tutor acts in — school days:
+//   STATUS    ytd       the official cumulative figure; persistent absence is judged on it
+//   DIRECTION r20       the last 20 school days, whose sensitivity does not decay
+//   HEADROOM  headroom  whole days this pupil can still miss before falling below ATT_LOW
+//   RECOVERY  recovery  whole days of full attendance needed to get back above it,
+//                       set against the days left in the year
+// "Falling" is r20 below ytd by more than one lesson's worth of the window. That is exactly
+// the condition under which the cumulative figure is moving down — no tuned threshold.
+let _ATT_YL=null;
+// School days in the most recent COMPLETE academic year, from the register. Future weeks
+// are not in weekLessons, so the length of this year has to be estimated; last year's is
+// the best estimate there is. 190 (the statutory year) if no complete year is available.
+function _attYearLength(){
+  if(_ATT_YL!=null) return _ATT_YL;
+  const SD=[..._attSchoolDays()];
+  let n=null;
+  for(let y=CAY-1;y>=CAY-5;y--){
+    const c=SD.filter(d=>d>=ayStartISO(y)&&d<=`${y+1}-07-31`).length;
+    if(c>=150){ n=c; break; }
+  }
+  return (_ATT_YL=n||190);
+}
+function attPosition(px, upto){
+  const WLK=DD.weekLessons||{}, tt=(DD.config&&+DD.config.ttPeriods)||5;
+  const ayS=ayStartISO(CAY), ayE=`${CAY+1}-07-31`;
+  const t=new Date(), today=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
+  const cap=upto||(today<ayE?today:ayE);
+  const days=[..._attSchoolDays()].filter(d=>d>=ayS&&d<=cap).sort();
+  if(!days.length) return null;
+  const end=days[days.length-1];
+  // Status: the canonical method — countAbsPeriods() over scheduled lessons — so this
+  // agrees with the Pupil tab summary, the peer filter and the heatmap header.
+  let T=0; for(const [w,n] of Object.entries(WLK)) if(w>=ayS&&w<=end) T+=n;
+  if(!T) return null;
+  const abs=countAbsPeriods(px,ayS,end).total, A=T-abs, ytd=A/T*100;
+  const L=ATT_LOW/100, left=Math.max(0,_attYearLength()-days.length);
+  let headroom=null, recovery=null;
+  // Miss k whole days: A/(T+k·tt) < L  ⇔  k > (A/L − T)/tt.
+  if(ytd>=ATT_LOW) headroom=Math.floor((A/L-T)/tt+1e-9);
+  // Attend k whole days: (A+k·tt)/(T+k·tt) ≥ L  ⇔  k ≥ (L·T − A)/(tt·(1−L)).
+  else recovery=L>=1?Infinity:Math.ceil((L*T-A)/(tt*(1-L))-1e-9);
+  const last=days.slice(-20);
+  let r20=null;
+  if(last.length>=10){
+    const a=countAbsPeriods(px,last[0],last[last.length-1]).total;
+    r20=100-a/(last.length*tt)*100;
+  }
+  const margin=100/(Math.max(last.length,1)*tt);   // one lesson's worth of the window
+  return {ytd,abs,days:days.length,left,headroom,recovery,r20,
+    falling: r20!=null&&r20<ytd-margin,
+    safe: headroom!=null&&headroom>=left,            // could miss every remaining day
+    cannotRecover: recovery!=null&&recovery>left};
+}
+const _pl=(n,w)=>n+' '+w+(n===1?'':'s');
+// One decimal, EXCEPT where rounding would carry a figure across the low or target line:
+// 89.97% is below 90 and must not read "90.0%" beside a "Crossed below 90%" tag. Those
+// cases get two decimals, so the figure agrees with toFixed(1) everywhere else in the
+// dashboard except exactly at the line, where the extra precision is the honest answer.
+function attFmt(v){
+  if(v==null||isNaN(v)) return '\u2014';
+  let t=v.toFixed(1);
+  for(const L of [ATT_LOW,ATT_TARGET]) if((v<L)!==(parseFloat(t)<L)){ t=v.toFixed(2); break; }
+  return t+'%';
+}
+// The tutor view's attendance list. Top-level so it can be tested outside the tab.
+// Order: crossed, still falling, close to the line, recovering — worst first within each.
+function attTutorItems(pupils, prevEnd){
+  const L=ATT_LOW, out=[];
+  pupils.forEach(p=>{
+    const now=attPosition(p);
+    if(!now) return;
+    const was=prevEnd?attPosition(p,prevEnd):null;
+    if(was&&was.ytd>=L&&now.ytd<L){
+      out.push({px:p,now:now.ytd,rank:0,tone:'var(--red)',tag:'Crossed below '+L+'%',
+        detail:now.cannotRecover?'not enough school days left to get back above '+L+'% this year'
+          :_pl(now.recovery,'full day')+' of attendance to get back above'});
+      return;
+    }
+    if(now.ytd<L){
+      if(now.r20!=null&&now.r20>=L)
+        out.push({px:p,now:now.ytd,rank:3,tone:'var(--green)',tag:'Recovering',
+          detail:'last 20 school days '+now.r20.toFixed(0)+'% \u2014 '
+            +(now.cannotRecover?'but not enough days left to get back above '+L+'% this year'
+              :_pl(now.recovery,'full day')+' to get back above '+L+'%')});
+      else if(now.falling)
+        out.push({px:p,now:now.ytd,rank:1,tone:'var(--red)',tag:'Still falling',
+          detail:'last 20 school days '+now.r20.toFixed(0)+'%, pulling the year down'});
+      return;
+    }
+    if(now.headroom!=null&&now.headroom<=ATT_HEADROOM_WARN&&!now.safe){
+      const h=now.headroom;
+      out.push({px:p,now:now.ytd,rank:2,tone:now.falling?'var(--red)':'var(--orange)',
+        tag:h===0?'Next absence crosses':_pl(h,'day')+' from '+L+'%',
+        detail:(h===0?'one more day absent takes them below '+L+'%'
+          :'can miss '+_pl(h,'more day')+' this year before falling below '+L+'%')
+          +(now.falling?' \u2014 and the last 20 school days are pulling it down':'')});
+    }
+  });
+  out.sort((a,b)=>(a.rank-b.rank)||(a.now-b.now));
+  return out;
+}
+
+function rAttHeat(x, wrapId){
+  dc('p-att-spark-chart');          // a chart left registered by the retired sparkline
   const wrap=document.getElementById(wrapId);
   if(!wrap) return;
   const WLK=DD.weekLessons||{};
-  const wlKeys=Object.keys(WLK).sort();
-  if(!wlKeys.length){wrap.innerHTML='';return}
+  if(!Object.keys(WLK).length){ wrap.innerHTML=''; return; }
+  const tt=(DD.config&&+DD.config.ttPeriods)||5;
+  const SD=_attSchoolDays();
+  const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const t=new Date(), todayISO=iso(t);
 
-  // Local ISO date helper (timezone-safe)
-  function localISO(d){const y=d.getFullYear(),m=d.getMonth()+1,dd=d.getDate();return`${y}-${m<10?'0'+m:m}-${dd<10?'0'+dd:dd}`}
-  const gm=d=>{const dt=new Date(d);dt.setHours(12,0,0,0);dt.setDate(dt.getDate()-(dt.getDay()+6)%7);return dt};
-
-  // Build week list
-  const fm=gm(new Date(wlKeys[0]+'T12:00:00'));
-  const lm=gm(new Date(wlKeys[wlKeys.length-1]+'T12:00:00'));
-  const wks=[];let cur=new Date(fm);
-  while(cur<=lm){wks.push(localISO(cur));cur.setDate(cur.getDate()+7)}
-
-  // Period-level absence count per week (deduplicated)
-  const abw={};
-  const aas=(DD.attAbsSubj||{})[String(x)]||[];
-  const seen=new Set();
-  aas.forEach(r=>{
-    const key=r[0]+'|'+r[2];
-    if(seen.has(key))return;
-    seen.add(key);
-    const wk=localISO(gm(new Date(r[0]+'T12:00:00')));
-    abw[wk]=(abw[wk]||0)+1;
+  // Per-day absence, with the same dedup AND suppression as countAbsPeriods().
+  const supp=getSuppressed(x), seen=new Set(), day={};
+  ((DD.attAbsSubj||{})[String(x)]||[]).forEach(r=>{
+    const k=r[0]+'|'+r[2];
+    if(supp.has(k)||seen.has(k)) return;
+    seen.add(k);
+    const d=day[r[0]]||(day[r[0]]={n:0,un:0,rows:[]});
+    d.n++; if(r[3]&&isUnauth(r[3])) d.un++;
+    d.rows.push([r[2],r[1],r[3]]);
   });
 
-  // Weekly attendance % series (null where no lessons that week — holidays)
-  const attP=wks.map(w=>{
-    const tl=WLK[w];if(!tl)return null;
-    const abs=abw[w]||0;
-    return Math.max(0,Math.min(100,parseFloat(((tl-abs)/tl*100).toFixed(1))));
-  });
+  // ── HEADER: the current academic year, computed exactly as the Pupil tab summary and
+  // the peer filter compute it, so this pupil's figure agrees with the group figures it
+  // rolls up into.
+  const ay=CAY, ayS=ayStartISO(ay), ayEnd=`${ay+1}-07-31`;
+  const endISO=todayISO<ayEnd?todayISO:ayEnd;
+  let lessons=0; for(const [w,n] of Object.entries(WLK)) if(w>=ayS&&w<=endISO) lessons+=n;
+  const ytdAbs=countAbsPeriods(x,ayS,endISO).total;
+  const ytd=lessons>0?(lessons-ytdAbs)/lessons*100:null;
+  // Last 20 school days — the rolling rate Attendance Declining already uses. Constant
+  // sensitivity through the year, unlike the cumulative figure beside it.
+  const recent=[...SD].filter(d=>d>=ayS&&d<=endISO).sort().slice(-20);
+  let r20=null;
+  if(recent.length>=10){
+    const a=recent.reduce((s,d)=>s+(day[d]?day[d].n:0),0);
+    r20=100-a/(recent.length*tt)*100;
+  }
+  const fmt=attFmt;   // two decimals only where rounding would cross a line
 
-  // YTD attendance for headline
-  let totalLessons=0,totalAbs=0;
-  wks.forEach(w=>{const tl=WLK[w];if(tl){totalLessons+=tl;totalAbs+=(abw[w]||0)}});
-  const ytdAtt=totalLessons>0?((totalLessons-totalAbs)/totalLessons*100).toFixed(1):null;
-  const ytdCol=ytdAtt==null?'var(--mu)':parseFloat(ytdAtt)>=95?PAL.green:parseFloat(ytdAtt)>=90?'var(--tx)':PAL.red;
+  // ── CALENDAR, one per academic year the pupil has data for ──
+  const reg=(DD.registry||{})[String(x)]||{};
+  const ink=reg.intake||CAY;
+  const ayList=[]; for(let y=Math.max(ink,ay-4);y<=ay;y++) ayList.push(y);
 
-  // Lowest weekly value to anchor y-axis (with floor/headroom)
-  const realVals=attP.filter(v=>v!=null);
-  const minVal=realVals.length?Math.min(...realVals):85;
-  const yMin=Math.max(0,Math.floor(minVal/5)*5-5);
+  function cellFill(n){
+    if(!n) return 'rgba(46,148,105,0.16)';                 // present all day
+    const f=Math.min(n/tt,1);
+    if(f>=1)   return 'rgba(181,72,59,0.88)';              // whole day missed
+    if(f>=0.5) return 'rgba(187,107,26,0.72)';             // most of the day
+    return 'rgba(187,107,26,0.38)';                        // one or two lessons
+  }
 
-  // Month labels along x
-  const wl=wks.map((w,i)=>{const d2=new Date(w+'T12:00:00');const day=d2.getDate();if(day<=7)return d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'});return''});
-  const monthSeen={};
-  wks.forEach((w,i)=>{const d2=new Date(w+'T12:00:00');const mk=d2.getFullYear()+'-'+d2.getMonth();if(!monthSeen[mk]&&!wl[i]){wl[i]=d2.toLocaleDateString('en-GB',{month:'short',year:'2-digit'})}monthSeen[mk]=true});
-
-  wrap.innerHTML=`<div class="dw"><div class="dwt">Attendance <span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem"><span style="color:${ytdCol};font-weight:600">${ytdAtt!=null?ytdAtt+'%':'—'}</span> <span style="color:var(--mu)">YTD</span> <span style="color:var(--green);margin-left:.5rem">▬</span> 95% target <span style="color:var(--red);margin-left:.3rem">▬</span> 90% Persistent Absence</span></div><div style="position:relative;height:90px"><canvas id="p-att-spark-chart"></canvas></div></div>`;
-
-  // Reference-band plugin: shade 90-95 (amber) and below 90 (red faint)
-  const refBands={
-    id:'refBands',
-    beforeDatasetsDraw(chart){
-      const{ctx,chartArea:{left,right},scales:{y}}=chart;
-      // Below 90 — pale red
-      const y90=y.getPixelForValue(90);
-      const yBottom=y.getPixelForValue(yMin);
-      ctx.save();
-      ctx.fillStyle='rgba(181,72,59,0.06)';
-      ctx.fillRect(left,y90,right-left,yBottom-y90);
-      // 90-95 — pale amber
-      const y95=y.getPixelForValue(95);
-      ctx.fillStyle='rgba(187,107,26,0.05)';
-      ctx.fillRect(left,y95,right-left,y90-y95);
-      // 95-100 — pale green
-      const yTop=y.getPixelForValue(100);
-      ctx.fillStyle='rgba(46,148,105,0.04)';
-      ctx.fillRect(left,yTop,right-left,y95-yTop);
-      // Reference lines
-      ctx.strokeStyle=PAL.green;ctx.lineWidth=1;ctx.setLineDash([3,3]);
-      ctx.beginPath();ctx.moveTo(left,y95);ctx.lineTo(right,y95);ctx.stroke();
-      ctx.strokeStyle=PAL.red;
-      ctx.beginPath();ctx.moveTo(left,y90);ctx.lineTo(right,y90);ctx.stroke();
-      ctx.restore();
+  const cal=ayList.map(y=>{
+    const yS=ayStartISO(y), yE=`${y+1}-07-31`;
+    const days=[...SD].filter(d=>d>=yS&&d<=yE&&d<=todayISO).sort();
+    if(!days.length) return '';
+    // Grid runs from the Monday of the first school day to the last school day, so an
+    // August start does not leave a blank month and the current year stops at today.
+    const first=new Date(days[0]+'T12:00:00'); first.setDate(first.getDate()-((first.getDay()+6)%7));
+    const last=new Date(days[days.length-1]+'T12:00:00');
+    const sdSet=new Set(days);
+    const weeks=[]; const cur=new Date(first);
+    while(cur<=last){
+      const wk=[];
+      for(let d=0;d<5;d++){ const dd=new Date(cur); dd.setDate(dd.getDate()+d); wk.push(iso(dd)); }
+      weeks.push(wk); cur.setDate(cur.getDate()+7);
     }
-  };
+    const cs=11,gap=2,tc=cs+gap,left=36,top=15;
+    const w=weeks.length*tc+left+4, h=5*tc+top+4;
+    let lastM=-1;
+    const months=weeks.map((wk,wi)=>{
+      const m=new Date(wk[2]+'T12:00:00').getMonth();
+      if(m===lastM) return '';
+      lastM=m;
+      const lbl=new Date(wk[2]+'T12:00:00').toLocaleDateString('en-GB',{month:'short'});
+      return `<text x="${wi*tc+left}" y="10" fill="var(--mu)" font-size="8" font-family="Hanken Grotesk">${lbl}</text>`;
+    }).join('');
+    const dl=['M','','W','','F'].map((l,i)=>l?`<text x="${left-6}" y="${i*tc+top+9}" fill="var(--mu)" font-size="7" font-family="Hanken Grotesk" text-anchor="end">${l}</text>`:'').join('');
+    const cells=weeks.map((wk,wi)=>wk.map((d,di)=>{
+      if(!sdSet.has(d)) return '';                         // holiday, INSET, not yet
+      const rec=day[d], n=rec?rec.n:0;
+      const x0=wi*tc+left, y0=di*tc+top;
+      const dot=rec&&rec.un?`<circle cx="${x0+cs/2}" cy="${y0+cs/2}" r="2.3" fill="#fff" opacity="0.95" pointer-events="none"/>`:'';
+      return `<rect x="${x0}" y="${y0}" width="${cs}" height="${cs}" rx="2" fill="${cellFill(n)}" data-att-date="${d}" style="cursor:${n?'pointer':'default'}"/>${dot}`;
+    }).join('')).join('');
+    // Per-year figure beside each calendar, same method as the header.
+    let yl=0; for(const [wk,n] of Object.entries(WLK)) if(wk>=yS&&wk<=(todayISO<yE?todayISO:yE)) yl+=n;
+    const ya=countAbsPeriods(x,yS,todayISO<yE?todayISO:yE).total;
+    const yp=yl>0?(yl-ya)/yl*100:null;
+    return `<div style="margin-bottom:.55rem"><div style="font-size:.7rem;color:var(--mu);margin-bottom:.25rem;font-weight:500">${y}-${y+1}`
+      +` <span style="color:${attColour(yp)};font-weight:600;margin-left:.35rem">${fmt(yp)}</span></div>`
+      +`<svg width="${w}" height="${h}" style="display:block">${months}${dl}${cells}</svg></div>`;
+  }).join('');
 
-  sc2('p-att-spark-chart',new Chart(document.getElementById('p-att-spark-chart'),{
-    type:'bar',
-    data:{labels:wl,datasets:[
-      {
-        type:'bar',
-        label:'_spacer',
-        data:wks.map(()=>null),
-        backgroundColor:'transparent',
-        borderColor:'transparent',
-        barPercentage:0.9,
-        categoryPercentage:0.9
-      },
-      {
-        type:'line',
-        label:'Attendance',
-        data:attP,
-        borderColor:PAL.green,
-        backgroundColor:'rgba(46,148,105,0.18)',
-        borderWidth:1.5,
-        pointRadius:0,
-        pointHoverRadius:4,
-        tension:0,
-        fill:true,
-        spanGaps:false
-      }
-    ]},
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{
-        legend:{display:false},
-        tooltip:{
-          mode:'index',intersect:false,
-          filter:c=>c.dataset.label!=='_spacer',
-          callbacks:{
-            title:c=>c?.length?`Wk ${new Date(wks[c[0].dataIndex]+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`:'',
-            label:c=>{
-              const wk=wks[c.dataIndex];const tl=WLK[wk];const abs=abw[wk]||0;
-              if(c.parsed.y==null) return ' No lessons this week';
-              return [` ${c.parsed.y}% present`, ` ${abs} absent of ${tl} periods`];
-            }
-          }
-        }
-      },
-      scales:{
-        x:{offset:true,ticks:{color:'#6e7686',font:{size:7},maxRotation:0,autoSkip:true,maxTicksLimit:30},grid:{display:false},border:{color:'#e6dfd0'}},
-        y:{min:yMin,max:100,ticks:{color:'#6e7686',font:{size:7},callback:v=>v+'%',stepSize:5},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'},afterFit:a=>{a.width=35}}
-      }
-    },
-    plugins:[refBands]
-  }));
+  const sw=(c,l)=>`<span style="display:inline-flex;align-items:center;gap:.25rem;margin-right:.7rem"><span style="width:10px;height:10px;border-radius:2px;background:${c};display:inline-block"></span>${l}</span>`;
+  const legend=`<div style="font-size:.62rem;color:var(--mu);margin-top:.2rem;line-height:1.8">`
+    +sw('rgba(46,148,105,0.16)','Present')+sw('rgba(187,107,26,0.38)','Missed one or two lessons')
+    +sw('rgba(187,107,26,0.72)','Missed most of the day')+sw('rgba(181,72,59,0.88)','Missed the whole day')
+    +`<span style="display:inline-flex;align-items:center;gap:.25rem"><span style="width:10px;height:10px;border-radius:2px;background:rgba(181,72,59,0.88);display:inline-flex;align-items:center;justify-content:center"><span style="width:4px;height:4px;border-radius:50%;background:#fff"></span></span>Includes unauthorised absence</span>`
+    +`<div>Blank = not a school day. Colours for the year figures follow Admin \u2192 Attendance Display (target ${ATT_TARGET}%, persistent absence below ${ATT_LOW}%).</div></div>`;
+
+  wrap.innerHTML=`<div class="dw" id="att-hm-wrap"><div class="dwt">Attendance `
+    +`<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:.6rem;font-size:.68rem">`
+    +`<span style="color:var(--mu)">${ay}-${ay+1}</span> <span style="color:${attColour(ytd)};font-weight:600">${fmt(ytd)}</span>`
+    +`<span style="color:var(--mu);margin-left:.7rem" title="The last 20 school days only. Unlike the year figure, this moves as much in June as in September.">last 20 school days</span> `
+    +`<span style="color:${attColour(r20)};font-weight:600">${fmt(r20)}</span>`
+    +(()=>{ const q=attPosition(x); if(!q) return '';
+        const t=q.safe?'cannot fall below '+ATT_LOW+'% this year'
+          :q.headroom!=null?(q.headroom===0?'next day absent takes them below '+ATT_LOW+'%'
+            :'can miss '+_pl(q.headroom,'more day')+' before '+ATT_LOW+'%')
+          :q.cannotRecover?'cannot get back above '+ATT_LOW+'% this year'
+          :_pl(q.recovery,'full day')+' to get back above '+ATT_LOW+'%';
+        const c=q.headroom!=null?(q.headroom<=ATT_HEADROOM_WARN&&!q.safe?'var(--orange)':'var(--mu)'):'var(--red)';
+        return `<span style="color:${c};margin-left:.7rem" title="In school days, which mean the same all year. Days left are estimated from last year's length.">${t}</span>`; })()
+    +`</span></div>`
+    +`<div style="overflow-x:auto">${cal||'<div style="font-size:.7rem;color:var(--mu)">No school days recorded.</div>'}</div>${legend}</div>`;
+
+  // Tooltip — its own element and its own listener, scoped to this chart only.
+  const hw=document.getElementById('att-hm-wrap');
+  if(!hw) return;
+  hw.style.position='relative';
+  const tip=document.createElement('div');
+  tip.id='att-hm-tip';
+  tip.style.cssText='display:none;position:absolute;pointer-events:none;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:.6rem .7rem;box-shadow:0 8px 30px rgba(40,34,20,.4);max-width:320px;z-index:999;font-size:.72rem';
+  hw.appendChild(tip);
+  hw.addEventListener('mousemove',ev=>{
+    const r=ev.target.closest&&ev.target.closest('rect[data-att-date]');
+    if(!r){ tip.style.display='none'; return; }
+    const d=r.getAttribute('data-att-date'), rec=day[d];
+    const when=new Date(d+'T12:00:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+    let h=`<div style="font-weight:600;margin-bottom:.3rem;color:var(--tx)">${when}</div>`;
+    if(!rec) h+=`<div style="color:var(--green)">Present all day</div>`;
+    else{
+      h+=`<div style="margin-bottom:.3rem">Missed <b>${rec.n}</b> of ${tt} lesson${tt===1?'':'s'}`
+        +(rec.un?` \u00b7 <span style="color:var(--red);font-weight:600">${rec.un} unauthorised</span>`:'')+`</div>`;
+      rec.rows.slice().sort((a,b)=>a[0]-b[0]).forEach(([p,subj,mk])=>{
+        const desc=_ATT_CODE_DESC[mk]||(mk?(isUnauth(mk)?'Unauthorised':'Authorised'):'');
+        h+=`<div style="display:flex;justify-content:space-between;gap:.8rem;padding:.1rem 0;border-bottom:1px solid rgba(40,34,20,.15);font-size:.68rem">`
+          +`<span>P${p} ${subj||''}</span><span style="color:${mk&&isUnauth(mk)?'var(--red)':'var(--mu)'}">${mk||''}${desc?' \u2014 '+desc:''}</span></div>`;
+      });
+    }
+    tip.innerHTML=h; tip.style.display='block';
+    const b=hw.getBoundingClientRect();
+    let lx=ev.clientX-b.left+14, ly=ev.clientY-b.top+14;
+    if(lx+tip.offsetWidth>b.width) lx=ev.clientX-b.left-tip.offsetWidth-14;
+    tip.style.left=Math.max(0,lx)+'px'; tip.style.top=ly+'px';
+  });
+  hw.addEventListener('mouseleave',()=>{ tip.style.display='none'; });
 }
 
 // ── SANCTIONS CHART ──
@@ -5735,7 +6042,7 @@ function rCmp(){
       <td style="font-weight:500">${c.label}${c.left?' <span class="left-tag">LEFT</span>':c.status==='current'?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
       <td>Intake ${c.ink}</td>
       <td>${c.pupils}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${c.male}M · ${c.female}F</div></td>
-      <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:var(--green);font-weight:600':c.ytdAtt>=90?'':'color:var(--red);font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
+      <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${attStyle(c.ytdAtt)}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
       <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${c.abLabel}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${efAvgD(c.avgE)}</td>
       <td style="text-align:center;${c.send?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
@@ -5958,7 +6265,7 @@ function rPrg(){
     return`<tr>
       <td style="font-weight:500">Y${c.yg} — ${c.ayLabel}${c.isCurrent?' <span style="font-size:.6rem;color:var(--ac)">\u25cf current</span>':''}</td>
       <td>${c.pupils}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${c.male}M · ${c.female}F</div></td>
-      <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${c.ytdAtt==null?'color:var(--mu)':c.ytdAtt>=95?'color:var(--green);font-weight:600':c.ytdAtt>=90?'':'color:var(--red);font-weight:600'}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
+      <td style="text-align:center;font-family:'IBM Plex Mono',monospace;${attStyle(c.ytdAtt)}">${c.ytdAtt!=null?c.ytdAtt+'%':'\u2014'}</td>
       <td style="font-weight:600;color:${aC(c.avg)};cursor:help" title="${abTip}">${c.abLabel}</td>
       <td style="font-weight:600;color:${eC(c.avgE)};cursor:help" title="${efTip}">${efAvgD(c.avgE)}</td>
       <td style="text-align:center;${c.send?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${c.send||'\u2014'}</td>
@@ -6802,7 +7109,9 @@ function _sendAbVal(c){
   function buildTable(pupils,flagName,flagColor,tablePrefix,yearAvgs,nonFlagAvgs,extraRows){
     if(!pupils.length) return`<div class="dw" style="margin-bottom:1rem"><div class="dwt">${flagName} Pupils</div><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">No ${flagName} pupils found</div></div>`;
 
-    function attCol(v){if(v==='—')return'color:var(--mu)';const n=parseFloat(v);return n>=95?'color:var(--green)':n>=90?'color:var(--gold)':'color:var(--red);font-weight:600'}
+    // Was a local copy of the 95/90 cut. Kept as a hoisted declaration, not a const, so any
+    // caller above this line in the enclosing function still resolves it.
+    function attCol(v){ return attStyle(v); }
 
     // Summary header rows
     const hdrStyle='font-size:.62rem;font-family:"IBM Plex Mono",monospace;text-align:center;color:var(--mu);padding:.2rem .3rem';
@@ -7501,7 +7810,7 @@ function renderAttTable(){
     }
 
     const attStr=attPct!=null?attPct.toFixed(1)+'%':'—';
-    const attCol=attPct==null?'color:var(--mu)':attPct>=95?'color:var(--green)':attPct>=90?'':'color:var(--red)';
+    const attCol=attStyle(attPct);
     const lessonsStr=totalLessons>0?`${attended}/${totalLessons}`:'—';
     const clsStr=clsAtt!=null?clsAtt.toFixed(1)+'%':'—';
     const tgStr=tgAtt!=null?tgAtt.toFixed(1)+'%':'—';
@@ -9144,6 +9453,10 @@ function _hmItemsReset(){ _hmItemsCache=null; }
 // reload without a page reload, or a school switch that rebuilds DD).
 function _hmPerfReset(){
   _hmItemsCache=null; _hmTodayCache=null; _hmDaysCache=null;
+  // ⚠️ _HM_SD and _HM_PPD were missing from this list, so a rebuilt DD kept the previous
+  // school's school days and periods-per-day. _ATT_SD is the heatmap's register-derived set.
+  _HM_SD=null; _HM_PPD=null;
+  try{ _ATT_SD=null; _ATT_YL=null; }catch(e){}
   try{ _collRangeCache=null; }catch(e){}
   try{ _clsEnrolIdx=null; }catch(e){}
   try{ _enIdx=null; _fsmIdx=null; }catch(e){}
@@ -9320,27 +9633,10 @@ function _hmTutor(){
     });
     mile.sort((a,b)=>(b.bad-a.bad)||(b.items.length-a.items.length));
 
-    // ── attendance: the effect of this week on the YEAR-TO-DATE figure ──
-    const ppd=_hmPerPerDay();
-    const ytd=(p,upto)=>{
-      const days=sd.filter(d=>d<=upto);
-      if(!days.length)return null;
-      const n=days.length*ppd;
-      return n>0?100-(countAbsPeriods(p,days[0],days[days.length-1]).total/n*100):null;
-    };
-    const att=[];
-    px.forEach(p=>{
-      const now=ytd(p,sd[sd.length-1]), was=ytd(p,prevEnd);
-      if(now==null||was==null)return;
-      const d=now-was;
-      const near=now>=ATT_LOW&&now<ATT_LOW+2;
-      const crossed=was>=ATT_LOW&&now<ATT_LOW;
-      if(crossed)att.push({px:p,now:now,d:d,tag:'Crossed below '+ATT_LOW+'%',tone:'var(--red)'});
-      else if(now<ATT_LOW&&d<=-0.3)att.push({px:p,now:now,d:d,tag:'Still falling',tone:'var(--red)'});
-      else if(near&&d<0)att.push({px:p,now:now,d:d,tag:'Approaching '+ATT_LOW+'%',tone:'var(--orange)'});
-      else if(d<=-0.8)att.push({px:p,now:now,d:d,tag:'Biggest fall this week',tone:'var(--orange)'});
-    });
-    att.sort((a,b)=>a.now-b.now);
+    // ── attendance: where each pupil stands, in DAYS ──
+    // See attPosition(). Replaced a comparison of this week's effect on the year-to-date
+    // figure against fixed point thresholds, whose meaning drifted through the year.
+    const att=attTutorItems(px,prevEnd);
     return {mile:mile,att:att,days:W};
   })();
 
@@ -9428,19 +9724,20 @@ function _hmTutor(){
         +'<span style="color:'+r.tone+'">\u25cf</span> '+_hmName(r.px)+'</span>'
       +'<span style="width:120px"><span style="font-size:.62rem;padding:.05rem .35rem;border-radius:3px;'
         +'background:'+r.tone+';color:#fff">'+r.tag+'</span></span>'
-      +'<span style="flex:1;color:var(--tx2);font-size:.66rem">now <strong style="color:var(--tx)">'
-        +r.now.toFixed(1)+'%</strong> for the year, '+(r.d<0?'down ':'up ')+Math.abs(r.d).toFixed(1)
-        +' points this week</span></div>';
+      +'<span style="flex:1;color:var(--tx2);font-size:.66rem"><strong style="color:var(--tx)">'
+        +attFmt(r.now)+'</strong> for the year \u00b7 '+r.detail+'</span></div>';
     const as=_chg.att.slice(0,cap), ah=_chg.att.slice(cap);
-    h+=_hmPanel('Attendance moving the wrong way',
+    h+=_hmPanel('Attendance: distance from the line',
       _chg.att.length
-        ? 'What this week did to each pupil\u2019s <strong>year-to-date</strong> attendance, not the week '
-          +'on its own. ⚠️ A year-to-date figure is cumulative, so it gets harder to move as the year '
-          +'goes on \u2014 three days missed in September shift it far more than the same three in June. '
-          +'A week-on-week comparison would go quiet exactly when a slow slide is hardest to see. '
-          +'Lowest first.'
-        : 'No pupil\u2019s year-to-date attendance fell notably this week, and none crossed or '
-          +'approached '+ATT_LOW+'%.',
+        ? 'Measured in <strong>school days</strong>, not percentage points. A year-to-date figure '
+          +'gets harder to move as the year goes on \u2014 one day missed shifts it about 4 points in '
+          +'September and half a point in July \u2014 so a pupil two points above '+ATT_LOW+'% is one '
+          +'bad day from it in October and a week from it in June. Days mean the same thing all year. '
+          +'Listed: pupils who crossed below '+ATT_LOW+'% this week, pupils below it and still falling, '
+          +'pupils within '+_pl(ATT_HEADROOM_WARN,'day')+' of it, and pupils below it whose last 20 '
+          +'school days are back above it.'
+        : 'Nobody crossed below '+ATT_LOW+'% this week, nobody below it is still falling, and nobody '
+          +'is within '+_pl(ATT_HEADROOM_WARN,'day')+' of it.',
       _chg.att.length?(as.map(aline).join('')+_hmMore(ah.map(aline).join(''),ah.length)):'');
   }
 
@@ -10286,13 +10583,10 @@ function _hmSLT(){
     // A mean is the wrong headline: a school on 91.8% could have everyone near 92, or
     // most pupils at 97 and a tail at 40. Same number, different problem, different
     // response. Bands are the DfE's own vocabulary, so a reader already knows them.
-    const BANDS=[
-      ['97% and above', v=>v>=97,      'ok'],
-      ['95 to 97%',     v=>v>=95&&v<97,'ok'],
-      ['90 to 95%',     v=>v>=90&&v<95,'warn'],
-      ['85 to 90%',     v=>v>=85&&v<90,'bad'],
-      ['Below 85%',     v=>v<85,       'bad']
-    ];
+    // ⚠️ Built from attBands(), in the [label, test, tone] shape every consumer below
+    // already reads. This list and the peer filter's were defined separately and had
+    // drifted: this one had no 100% band, the peer filter did.
+    const BANDS=attBands().map(b=>[b.label,b.test,b.tone]);
     const counts=BANDS.map(b=>cur.filter(b[1]).length);
     const mxB=Math.max(...counts)||1;
     const below=cur.filter(v=>v<ATT_LOW).length;
@@ -12845,7 +13139,7 @@ function rCL(){
     for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=dhAyStart&&w<=dhTodayISO)_dhTotalL+=tl}
     const attPctRaw=_dhTotalL>0?((_dhTotalL-_dhAbs.total)/_dhTotalL*100):null;
     const attPct=attPctRaw!=null?attPctRaw.toFixed(1):'—';
-    const attCol=attPctRaw==null?'var(--mu)':attPctRaw>=95?PAL.green:attPctRaw>=90?'var(--tx)':PAL.red;
+    const attCol=attColour(attPctRaw);
     return{px,pid,flags:r||null,...c,ayTotal,aySubjTotal,aySubjPct,weighted,pctCol,lastYr,lyCol,attPct,attCol};
   }).sort((a,b)=>b.weighted-a.weighted);
 
@@ -13092,7 +13386,7 @@ function rCC(){
     for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=_ccAyStart&&w<=_ccTodayISO2)_ccTotalL+=tl}
     const _ccExpected=_ccTotalL*info.pups.size;
     const ytdAttCC=_ccExpected>0?parseFloat(((_ccExpected-_ccTotalAbs)/_ccExpected*100).toFixed(1)):null;
-    const ytdAttCol=ytdAttCC==null?'color:var(--mu)':ytdAttCC>=95?'color:var(--green);font-weight:600':ytdAttCC>=90?'':'color:var(--red);font-weight:600';
+    const ytdAttCol=attStyle(ytdAttCC);
     const sc2r=lr.map(r=>r[3][sub]?abRk(r[3][sub])||0:0).filter(v=>v>0);
     const avg=sc2r.length?sc2r.reduce((a,b)=>a+b,0)/sc2r.length:null;
     const ev=lr.map(r=>r[3][sub]?r[3][sub][1]:null).filter(e=>e!=null&&e>0);
@@ -13179,7 +13473,7 @@ function rTGC(){
     let totL=0;for(const[w,tl]of Object.entries(DD.weekLessons||{})){if(w>=ayStart&&w<=_todayISO)totL+=tl}
     const exp=totL*pupSet.size;
     const ytdAtt=exp>0?parseFloat(((exp-totAbs)/exp*100).toFixed(1)):null;
-    const attCol=ytdAtt==null?'color:var(--mu)':ytdAtt>=95?'color:var(--green);font-weight:600':ytdAtt>=90?'':'color:var(--red);font-weight:600';
+    const attCol=attStyle(ytdAtt);
     const avg=avgAbX(lr),avgE=avgEfX(lr);
     let pAvg=null,pAvgE=null;if(p3){const pr=ygRows(yearGroup,p3).filter(r=>pupSet.has(r[0]));pAvg=avgAbX(pr);pAvgE=avgEfX(pr)}
     const chg=avg!=null&&pAvg!=null?avg-pAvg:null;
@@ -13358,7 +13652,7 @@ function peerBuildSelects(id){
     <select data-peer="${id}" data-f="send" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">SEND: Any</option><option value="Y">Any SEND</option><option value="N">No SEND</option><option value="K">SEN Support</option><option value="E">EHCP</option><option value="Add">Additional Help</option><option value="Strat">Strategies</option><option value="Ncode">Monitoring</option></select>
     <select data-peer="${id}" data-f="gender" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">Gender: Both</option><option value="M">Male</option><option value="F">Female</option></select>
     <select data-peer="${id}" data-f="subject" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px">${subjOpts}</select>
-    <select data-peer="${id}" data-f="attband" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">Att: Any</option><option value="100">100%</option><option value="97-99">97-99%</option><option value="95-97">95-97%</option><option value="90-95">90-95%</option><option value="85-90">85-90%</option><option value="lt85">&lt;85%</option></select>
+    <select data-peer="${id}" data-f="attband" onchange="rPeer()" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem .3rem;border-radius:4px"><option value="any">Att: Any</option>${attBands().map(b=>`<option value="${b.key}">${b.label}</option>`).join('')}</select>
     <span id="peer-count-${id}" style="font-size:.6rem;color:var(--mu);min-width:3rem"></span>
     ${delBtn}
   </div>`;
@@ -13454,12 +13748,11 @@ function peerFilterPupils(filters){
         const sVals=ayPeriods2.map(p=>subjAbps[p]?.[subject]).filter(v=>v!=null);
         attPct=sVals.length?(sVals.reduce((a,b)=>a+b,0)/sVals.length):100;
       }
-      if(attband==='100'&&attPct<100) return false;
-      if(attband==='97-99'&&(attPct<97||attPct>=100)) return false;
-      if(attband==='95-97'&&(attPct<95||attPct>=97)) return false;
-      if(attband==='90-95'&&(attPct<90||attPct>=95)) return false;
-      if(attband==='85-90'&&(attPct<85||attPct>=90)) return false;
-      if(attband==='lt85'&&attPct>=85) return false;
+      // One band definition, shared with the Attendance spread panel — see attBands().
+      // ⚠️ An unknown key (the edges were changed while a filter was set) matches
+      // everyone rather than no one: an empty comparison group looks like a finding.
+      const _ab=attBands().find(b=>b.key===attband);
+      if(_ab&&!_ab.test(attPct)) return false;
     }
     return true;
   });
@@ -13763,7 +14056,7 @@ function rPeer(){
       <div style="margin-top:.4rem">${flagsStr(sendN,ehcpN,fsmN,tgRows)}</div>
     </div>
     <div class="crd"><div class="ct2">YTD Attendance</div>
-      <div style="font-size:1.5rem;font-weight:700;color:${parseFloat(tgYtdAtt)>=95?PAL.green:parseFloat(tgYtdAtt)>=90?'var(--tx)':PAL.red}">${tgYtdAtt}%</div>
+      <div style="font-size:1.5rem;font-weight:700;color:${attColour(tgYtdAtt)}">${tgYtdAtt}%</div>
       <div style="font-size:.72rem;color:var(--mu)">Codes: <span style="color:var(--orange);font-weight:600">${tgCodes}</span> · Detentions: <span style="color:var(--violet);font-weight:600">${tgDets}</span></div>
     </div>
     ${hasGradesTG?`<div class="crd"><div class="ct2">Avg Ability <span style="font-weight:400;font-size:.55rem;color:var(--mu)">(${ABILITY.bestLabel} = best)</span></div><div style="font-size:1.5rem;font-weight:700;color:${aC(avg)}">${_abAvgLabel(_abCells(tgRows,SUBS),avg)}</div></div>
@@ -13783,7 +14076,7 @@ function rPeer(){
     const senLabel=senCode?SEN_LABELS[senCode]||senCode:'';
     const senCol=senCode?SEN_COLORS[senCode]||'var(--mu)':'';
     const gender=REG[String(px)]?.gender||'U';
-    const attCol=pAttPct==='—'?'color:var(--mu)':parseFloat(pAttPct)>=95?'color:var(--green)':parseFloat(pAttPct)>=90?'':'color:var(--red);font-weight:600';
+    const attCol=attStyle(pAttPct);
 
     // Ability/Effort
     const curScores=SUBS.map(s=>r[3][s]?abRk(r[3][s])||0:0).filter(v=>v>0);
@@ -16436,7 +16729,59 @@ function rPeer(){
       +'</tbody></table></div>';
   };
 
-  function rAdmin(){
+  // ── REBUILD DATA (Admin) ─────────────────────────────────────────────────────────────
+// ⚠️ SETTINGS DO NOT REBUILD, BY DESIGN. New data rebuilds automatically when it is ingested.
+// A settings change — an attendance code, a grade mapping, a subject alias — only reaches
+// the figures when the engine next runs, and until now nothing said so: a school could move
+// a code, see no change, and reasonably conclude it had not worked. This is the explicit way
+// to apply settings now.
+// The browser cannot trigger a build itself (that needs a repository token, which must never
+// reach a browser). It asks the 'rebuild' Edge Function, which checks the caller is SLT or a
+// platform owner, applies a cooldown, and fires the build server-side.
+const REBUILD_FN='rebuild';
+function _rebuildStripHtml(){
+  if(!SB_ON) return '';                         // local or demo data: there is no server build
+  const raw=(DD.peerStats&&DD.peerStats.builtAt)||null;
+  let built='unknown';
+  if(raw){ const d=new Date(raw); if(!isNaN(d)) built=d.toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  return `<div class="dw" style="margin-bottom:1.25rem;display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem">`
+    +`<div style="font-size:.74rem"><b>Data last built:</b> ${built}</div>`
+    +`<button id="rebuild-btn" onclick="window._requestRebuild()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.72rem;font-weight:600;padding:.35rem .8rem;border-radius:6px;cursor:pointer">Rebuild data</button>`
+    +`<span id="rebuild-msg" style="font-size:.7rem;color:var(--mu)"></span>`
+    +`<div style="flex-basis:100%;font-size:.66rem;color:var(--mu);line-height:1.45">New data rebuilds automatically when it arrives. `
+    +`Changes to settings \u2014 attendance codes, grade mappings, subject names \u2014 reach the figures on the next rebuild; use this to apply them now. `
+    +`It takes a few minutes, and the dashboard keeps working on the current data meanwhile.</div></div>`;
+}
+window._requestRebuild=async function(){
+  const btn=document.getElementById('rebuild-btn'), msg=document.getElementById('rebuild-msg');
+  const say=(t,c)=>{ if(msg){ msg.textContent=t; msg.style.color=c||'var(--mu)'; } };
+  if(!confirm('Rebuild this school\u2019s data now? It takes a few minutes. The dashboard keeps working on the current data until it finishes.')) return;
+  if(btn) btn.disabled=true;
+  say('Requesting\u2026');
+  let sid=null; try{ sid=schoolId(); }catch(e){}
+  try{
+    const r=await fetch(SB_URL+'/functions/v1/'+REBUILD_FN,{method:'POST',
+      headers:{apikey:SB_KEY,Authorization:'Bearer '+authToken(),'Content-Type':'application/json'},
+      body:JSON.stringify({school_id:sid})});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){
+      const t=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+      say('Rebuild requested at '+t+'. Reload in a few minutes to see the new data.','var(--green)');
+      try{ auditLog('rebuild_requested','school',sid||'',{}); }catch(e){}
+      return;                                    // stays disabled: one request per page load
+    }
+    // ⚠️ Say what actually happened. A 404 means the function is not deployed on this
+    // server, which is a setup step, not something the user did wrong.
+    say(r.status===404?'The rebuild service is not installed on this server yet.'
+      :r.status===429?(j.error||'A rebuild was requested recently \u2014 try again shortly.')
+      :r.status===403?(j.error||'This account cannot rebuild data.')
+      :'Could not request a rebuild ('+r.status+(j.error?': '+j.error:'')+').','var(--red)');
+  }catch(e){
+    say('Could not request a rebuild: '+e.message,'var(--red)');
+  }
+  if(btn) btn.disabled=false;
+};
+function rAdmin(){
     const out=document.getElementById('admin-out');
     const attCodes=DD.config.att_codes||{};
     const senCodes=DD.config.sen_codes||{};
@@ -16447,6 +16792,9 @@ function rPeer(){
     Object.values(DD.attendanceMarks||{}).forEach(byDate=>{
       Object.values(byDate).forEach(marks=>{marks.forEach(m=>foundAttCodes.add(m))});
     });
+    // Lesson-register codes the key does not cover, reported by the engine with counts.
+    const unknownAtt=_attUnknownCodes();
+    Object.keys(unknownAtt).forEach(c=>foundAttCodes.add(c));
     const foundSenCodes=new Set(Object.values(DD.senStatus||{}));
     // Only Code/On-Call-type sanctions carry a classifiable incident code; detention rows (type 2)
     // store a detention type in this slot, not a behaviour code, so they're excluded here.
@@ -16464,12 +16812,13 @@ function rPeer(){
     // Build attendance table
     let attHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Attendance Codes</div>`;
     if(unclassifiedAtt.length){
-      attHtml+=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem"><span style="color:var(--red);font-weight:600">⚠ ${unclassifiedAtt.length} unclassified code${unclassifiedAtt.length!==1?'s':''}: </span>${unclassifiedAtt.map(c=>`<b>${c}</b>`).join(', ')}</div>`;
+      const _uMarks=unclassifiedAtt.reduce((a,c)=>a+(+unknownAtt[c]||0),0);
+      attHtml+=`<div style="background:rgba(181,72,59,.1);border:1px solid rgba(181,72,59,.3);border-radius:6px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.72rem;line-height:1.45"><span style="color:var(--red);font-weight:600">\u26a0 ${unclassifiedAtt.length} attendance code${unclassifiedAtt.length===1?'':'s'} in your data ${unclassifiedAtt.length===1?'is':'are'} not in your settings</span>${_uMarks?` \u2014 ${_uMarks.toLocaleString()} register mark${_uMarks===1?'':'s'}`:''}. Until you classify ${unclassifiedAtt.length===1?'it':'them'}, ${unclassifiedAtt.length===1?'it is':'they are'} counted as <b>unauthorised absence</b> in every attendance figure \u2014 a cautious default, not a decision. Choose a category below; attendance figures change when the data is next rebuilt.</div>`;
     }
     attHtml+=`<div style="overflow-x:auto"><table class="d"><thead><tr><th>Code</th><th>Category</th><th style="text-align:center">In Data</th><th>Change</th></tr></thead><tbody>`;
     // Show unclassified first
     unclassifiedAtt.forEach(c=>{
-      attHtml+=`<tr style="background:rgba(181,72,59,.08)"><td style="font-weight:600">${c}</td><td style="color:var(--red);font-weight:600">UNCLASSIFIED</td><td style="text-align:center">✓</td><td><select onchange="window._adminSetAtt('${c}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px"><option value="">— Select —</option>${allAttCategories.map(cat=>`<option value="${cat}">${attCatLabels[cat]}</option>`).join('')}</select></td></tr>`;
+      attHtml+=`<tr style="background:rgba(181,72,59,.08)"><td style="font-weight:600">${c}</td><td style="color:var(--red);font-weight:600">UNCLASSIFIED</td><td style="text-align:center;font-family:\'IBM Plex Mono\',monospace">${unknownAtt[c]!=null?(+unknownAtt[c]).toLocaleString():'✓'}</td><td><select onchange="window._adminSetAtt('${c}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px"><option value="">— Select —</option>${allAttCategories.map(cat=>`<option value="${cat}">${attCatLabels[cat]}</option>`).join('')}</select></td></tr>`;
     });
     // Then classified
     const allClassified=Object.entries(classifiedAtt).sort((a,b)=>a[1].localeCompare(b[1])||a[0].localeCompare(b[0]));
@@ -16477,7 +16826,7 @@ function rPeer(){
       const inData=foundAttCodes.has(c);
       attHtml+=`<tr><td style="font-weight:600">${c}</td><td style="color:${attCatColors[cat]};font-weight:500">${attCatLabels[cat]}</td><td style="text-align:center;color:${inData?'var(--tx)':'var(--mu)'}">${inData?'✓':'—'}</td><td><select onchange="window._adminSetAtt('${c}',this.value)" style="background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.68rem;padding:.2rem;border-radius:4px">${allAttCategories.map(ct=>`<option value="${ct}"${ct===cat?' selected':''}>${attCatLabels[ct]}</option>`).join('')}</select></td></tr>`;
     });
-    attHtml+=`</tbody></table></div></div>`;
+    attHtml+=`</tbody></table></div><div style="font-size:.66rem;color:var(--mu);margin-top:.45rem">Changes here reach the attendance figures when the data is next rebuilt \u2014 <b>Rebuild data</b> at the top of Admin.</div></div>`;
 
     // Build SEN codes table
     let senHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">SEN Codes</div>`;
@@ -16604,7 +16953,7 @@ function rPeer(){
     const inputRow=(label,id,value,opts)=>{
       const min=opts?.min ?? 0, max=opts?.max ?? 100, step=opts?.step ?? 1;
       const hint=opts?.hint ? `<span style="font-size:.65rem;color:var(--mu);font-style:italic">${opts.hint}</span>` : '';
-      return `<div style="display:flex;flex-direction:column;gap:.15rem;margin-bottom:.55rem"><div style="display:flex;align-items:center;gap:.6rem"><label style="font-size:.74rem;color:var(--tx);min-width:14rem;margin:0">${label}</label><input id="${id}" type="number" min="${min}" max="${max}" step="${step}" value="${value}" style="${inputStyle}"></div>${hint?`<div style="margin-left:.05rem;max-width:30rem;line-height:1.35">${hint}</div>`:''}</div>`;
+      return `<div style="display:flex;flex-direction:column;gap:.15rem;margin-bottom:.55rem"><div style="display:flex;align-items:center;gap:.6rem"><label style="font-size:.74rem;color:var(--tx);min-width:14rem;margin:0">${label}</label>${opts?.text?`<input id="${id}" type="text" value="${value}" style="${inputStyle}">`:`<input id="${id}" type="number" min="${min}" max="${max}" step="${step}" value="${value}" style="${inputStyle}">`}</div>${hint?`<div style="margin-left:.05rem;max-width:30rem;line-height:1.35">${hint}</div>`:''}</div>`;
     };
     // Helper to render a group panel
     const groupPanel=(title,description,affects,rows)=>{
@@ -16736,6 +17085,9 @@ ${groupPanel(
           'Where the line falls between low and acceptable attendance. This is a DISPLAY setting \u2014 it changes what the chart counts, not who is flagged as a concern.',
           'Heatmap tabs \u2192 "How your form is doing" \u2192 Pupils below X%',
           inputRow('Low attendance threshold (%)','att-low',ATT_LOW,{min:50,max:100,step:0.5,hint:'Pupils below this figure are counted in the "Pupils below X%" chart, and the chart title follows this setting. 90% is the DfE definition of persistent absence and is what the national comparison figure (24.2% for England secondary) is based on \u2014 raising it will make this chart no longer comparable with the national number.'})
+          +inputRow('Attendance target (%)','att-target',ATT_TARGET,{min:50,max:100,step:0.5,hint:'At or above this is GREEN everywhere attendance is shown. Between this and the low threshold above is AMBER; below the low threshold is RED. \u26a0\ufe0f Before this setting existed, eleven tabs hardcoded 95 and 90 and ignored the low threshold entirely \u2014 changing it moved the persistent-absence count but no colour. Cannot be set below the low threshold.'})
+          +inputRow('Attendance bands','att-bands',ATT_BAND_EDGES.join(', '),{text:true,hint:'Band edges, comma-separated, e.g. 100, 97, 95, 90, 85. Used by the Attendance spread panel and the Peer comparison filter, which previously kept separate lists that had drifted apart. The target and low threshold above are always added as edges, so no band ever straddles the persistent-absence line.'})
+          +inputRow('Days from the line to flag','att-headroom',ATT_HEADROOM_WARN,{min:0,max:30,step:1,hint:'Tutor view: a pupil is listed when they could miss this many whole school days, or fewer, before falling below the low threshold. \u26a0\ufe0f In DAYS, not percentage points. The old rule flagged pupils within 2 points of the line \u2014 under one day\u2019s absence in October and about four in June, because a year-to-date figure gets harder to move as the year goes on. A number of days means the same thing all year.'})
         )}
         ${groupPanel(
           'Persistent Absence',
@@ -16947,7 +17299,7 @@ ${groupPanel(
       +`<div style="margin:.9rem .1rem 0;border-top:1px solid var(--bd);padding-top:.8rem"><div style="font-weight:600;font-size:.76rem;margin-bottom:.4rem">Add a user</div>`
       +`<div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center"><input id="mu-new-email" type="email" placeholder="teacher@school.uk" style="${_MU_INP}"><input id="mu-new-pw" type="text" placeholder="password (min 8)" style="${_MU_INP}"><button onclick="window._muAddUser()" style="${_MU_GO}">Add user</button></div>`
       +`<div id="mu-new-msg" style="font-size:.7rem;color:var(--mu);margin-top:.4rem"></div></div></div>`;
-    out.innerHTML=summaryHtml
+    out.innerHTML=_rebuildStripHtml()+summaryHtml
       +_accSec('brand','Branding — logo &amp; header colour',brandHtml)
       +_accSec('users','Users &amp; access',usersHtml)
       +_accSec('thr','Concern thresholds &amp; weighting',_noTitle(threshHtml,'Concern Thresholds &amp; Weightings'))
@@ -16998,8 +17350,7 @@ ${groupPanel(
     if(cat&&ac[cat]) ac[cat].push(code);
     ac[cat]=(ac[cat]||[]).sort();
     // Update runtime sets
-    UNAUTH_MARKS.clear();(ac.unauthorised_absent||[]).forEach(c=>UNAUTH_MARKS.add(c));
-    NOT_COUNTED_MARKS.clear();(ac.not_counted||[]).forEach(c=>NOT_COUNTED_MARKS.add(c));
+    _attRebuildMarkSets(ac);   // one rule for the sets, shared with page load
     _persistDataKeys();   // async: reports its own failure
     rAdmin();
   };
