@@ -728,10 +728,19 @@ att_all['Subject'] = _vmap(att_all['Subject'], norm_subject)
 all_marks = set(att_all['Mark'].dropna().unique())
 known_marks = PRESENT_CODES | ALL_ABSENT_CODES | NOT_COUNTED_CODES
 unknown_marks = all_marks - known_marks
+# ⚠️ SNAPSHOT THE KEY'S OWN LIST BEFORE MERGING. Unknown codes are counted as unauthorised
+# absence below — a deliberately cautious default — but att_code_config (emitted into
+# data.json) used to be built from the MERGED set. So an unknown code reached the dashboard
+# listed as unauthorised, indistinguishable from the school having chosen that, and the
+# Admin panel's "unclassified codes" warning could never fire. The config now carries only
+# what the key says; the unknowns travel separately, with counts, as unknown_attendance_codes.
+_UNAUTH_FROM_KEY = set(UNAUTH_ABSENT_CODES)
+_unknown_att_counts = {}
 if unknown_marks:
     print(f"⚠ UNKNOWN ATTENDANCE CODES: {unknown_marks}")
     for m in unknown_marks:
         count = len(att_all[att_all['Mark'] == m])
+        _unknown_att_counts[str(m)] = int(count)
         print(f"  '{m}': {count} occurrences — defaulting to unauthorised absent")
     UNAUTH_ABSENT_CODES |= unknown_marks
     ALL_ABSENT_CODES = AUTH_ABSENT_CODES | UNAUTH_ABSENT_CODES
@@ -2000,7 +2009,7 @@ for ay_str, pupils in tt_out.items():
 att_code_config = {
     'present': sorted(PRESENT_CODES),
     'authorised_absent': sorted(AUTH_ABSENT_CODES),
-    'unauthorised_absent': sorted(UNAUTH_ABSENT_CODES),
+    'unauthorised_absent': sorted(_UNAUTH_FROM_KEY),   # the key's list, NOT the merged set
     'not_counted': sorted(NOT_COUNTED_CODES),
 }
 
@@ -2077,6 +2086,9 @@ output = {
         "unmapped_ability": dict(_unmapped_ability.counts),
         "unmapped_effort": dict(_unmapped_effort.counts),
         "uncalibrated_grades": dict(_unmapped_rank.counts),
+        # {code: marks} for attendance codes the key does not cover. Counted as unauthorised
+        # absence until the school classifies them; the Admin panel lists them with counts.
+        "unknown_attendance_codes": dict(_unknown_att_counts),
         "house_point_weights": HOUSE_POINT_WEIGHTS,
         "house_point_types": HP_TYPES,
     },
