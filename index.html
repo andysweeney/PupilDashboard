@@ -15802,7 +15802,12 @@ function rPeer(){
   }
   // px -> this year's house point dates, ascending. Memoised: DD.housePoints is 246,960
   // rows at TWS, and a tutor page would otherwise scan all of them once per pupil.
-  let _hpIdxAY=null;
+  // ⚠️ var, NOT let. These functions are hoisted and pupilCongratsAlert() — declared
+  // earlier in the file — runs during page init, BEFORE execution reaches this line. With
+  // let, that hit the temporal dead zone and the page failed to load. var hoists as
+  // undefined, which `if(_hpIdxAY) return;` handles. The rest of this file uses var for
+  // its page-lifetime caches for the same reason.
+  var _hpIdxAY=null;
   function _hpBuild(){
     if(_hpIdxAY) return;
     _hpIdxAY={};
@@ -15822,7 +15827,7 @@ function rPeer(){
     const t=_hmToday();
     _HP_TODAY=(last>t?last:t);
   }
-  let _HP_TODAY=null;
+  var _HP_TODAY=null;
   function _hpDatesFor(px){ _hpBuild(); return _hpIdxAY[px]||[]; }
   function _hpToday(){ _hpBuild(); return _HP_TODAY; }
   function _hpIdxReset(){ _hpIdxAY=null; _HP_TODAY=null; }
