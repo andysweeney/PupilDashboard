@@ -2408,7 +2408,11 @@ function ygLabel(yg){ const r=_ygNameRec(yg); return (r&&r.name)||('Year '+yg); 
 // move a permission, orphan a saved setting, or make an old log entry unsearchable.
 // ⚠️ NO AUTOMATIC PLURALS. "Merit/Merits" follows a rule; "Praise" has no plural and
 // "Commendation" is longer than a suffix. The school types both forms.
-const _TERM_DEF={
+// ⚠️ LAZY, NOT A const. T() is a hoisted declaration and is called during boot — from
+// dsmBootstrap(), around line 655 — long before execution reaches this point. A const here
+// sits in the temporal dead zone at that moment and the page fails to load. A function is
+// hoisted whole, so it answers whenever it is asked.
+function _termDefs(){ return _TERM_DEF_CACHE || (_TERM_DEF_CACHE={
   sanction:{one:'sanction',many:'sanctions'},
   housePoint:{one:'house point',many:'house points'},
   detention:{one:'detention',many:'detentions'},
@@ -2417,10 +2421,11 @@ const _TERM_DEF={
   formTutor:{one:'form tutor',many:'form tutors'},
   period:{one:'period',many:'periods'},
   form:{one:'form',many:'forms'}
-};
+}); }
+var _TERM_DEF_CACHE=null;
 // n: 1 singular, anything else plural. caps: 0 lower, 1 Sentence case, 2 Title Case.
 function T(key,n,caps){
-  const d=_TERM_DEF[key]||{one:key,many:key};
+  const d=_termDefs()[key]||{one:key,many:key};
   const set=((typeof DD!=='undefined'&&DD.config&&DD.config.terms)||{})[key]||{};
   let w=(n===1?(set.one||d.one):(set.many||set.one||d.many))||'';
   // ⚠️ "Head Of Year" is wrong. Capitalise the first word and skip the small ones.
@@ -5155,13 +5160,14 @@ function rP(){
 
 // DfE descriptions for the codes a tutor is most likely to meet. Anything else shows its
 // code and whether it counts as authorised; nothing is guessed.
-const _ATT_CODE_DESC={
+function _attCodeDescs(){ return _ATT_CODE_CACHE || (_ATT_CODE_CACHE={
   'I':'Illness','M':'Medical or dental appointment','R':'Religious observance',
   'S':'Study leave','T':'Traveller absence','E':'Suspended or excluded',
   'C':'Other authorised','C2':'Part-time timetable','H':'Holiday (authorised)',
   'G':'Holiday not authorised','O':'Unauthorised absence','U':'Arrived after registers closed',
   'N':'Reason not yet provided','-':'No mark'
-};
+}); }
+var _ATT_CODE_CACHE=null;
 
 // ⚠️ SCHOOL DAYS FROM THE REGISTER, NOT FROM THE WEEK. _hmDaysBuild() emits five days for
 // every week in DD.weekLessons whatever that week's lesson count, so a one-day week becomes
@@ -5260,7 +5266,7 @@ function attPosition(px, upto){
     safe: headroom!=null&&headroom>=left,            // could miss every remaining day
     cannotRecover: recovery!=null&&recovery>left};
 }
-const _pl=(n,w)=>n+' '+w+(n===1?'':'s');
+function _pl(n,w){ return n+' '+w+(n===1?'':'s'); }   // hoisted, for the same reason
 // One decimal, EXCEPT where rounding would carry a figure across the low or target line:
 // 89.97% is below 90 and must not read "90.0%" beside a "Crossed below 90%" tag. Those
 // cases get two decimals, so the figure agrees with toFixed(1) everywhere else in the
@@ -5446,7 +5452,7 @@ function rAttHeat(x, wrapId){
       h+=`<div style="margin-bottom:.3rem">Missed <b>${rec.n}</b> of ${tt} lesson${tt===1?'':'s'}`
         +(rec.un?` \u00b7 <span style="color:var(--red);font-weight:600">${rec.un} unauthorised</span>`:'')+`</div>`;
       rec.rows.slice().sort((a,b)=>a[0]-b[0]).forEach(([p,subj,mk])=>{
-        const desc=_ATT_CODE_DESC[mk]||(mk?(isUnauth(mk)?'Unauthorised':'Authorised'):'');
+        const desc=_attCodeDescs()[mk]||(mk?(isUnauth(mk)?'Unauthorised':'Authorised'):'');
         h+=`<div style="display:flex;justify-content:space-between;gap:.8rem;padding:.1rem 0;border-bottom:1px solid rgba(40,34,20,.15);font-size:.68rem">`
           +`<span>P${p} ${subj||''}</span><span style="color:${mk&&isUnauth(mk)?'var(--red)':'var(--mu)'}">${mk||''}${desc?' \u2014 '+desc:''}</span></div>`;
       });
@@ -17024,8 +17030,8 @@ function applyStaticTerms(){
   });
 }
 function _termsHtml(){
-  const rows=Object.keys(_TERM_DEF).map(k=>{
-    const d=_TERM_DEF[k], set=((DD.config&&DD.config.terms)||{})[k]||{};
+  const rows=Object.keys(_termDefs()).map(k=>{
+    const d=_termDefs()[k], set=((DD.config&&DD.config.terms)||{})[k]||{};
     const box=(f,v,ph)=>`<input type="text" value="${String(v||'').replace(/"/g,'&quot;')}" placeholder="${ph}"`
       +` onchange="window._adminSetTerm('${k}','${f}',this.value)"`
       +` style="width:100%;background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.72rem;padding:.2rem .4rem;border-radius:4px">`;
