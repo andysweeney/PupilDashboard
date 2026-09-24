@@ -2764,6 +2764,18 @@ function attBands(){
 // Congrats / praise thresholds — fully independent of the concern thresholds above.
 // Defaults match their concern counterparts; lower them to make praise easier to earn.
 let CG_AT=1.3, CG_PA_PCT=10, CG_SC=1.5, CG_MN=3, CG_EX_PCT=99;
+// House point milestones. Tiers per year group, e.g. {"10":[10,25,100]}; a year group with
+// no entry uses CG_HP_DEFAULT. A pupil is congratulated when they CROSS a tier, and stays
+// on the list for CG_HP_WIN days afterwards.
+// ⚠️ CUMULATIVE, AND DELIBERATELY EASIER LATER IN THE YEAR. The opposite of the sanction
+// triggers, where a fixed number against a growing total was the defect. A milestone
+// rewards accumulation, so reaching 25 in June is still worth saying.
+// ⚠️ CROSSINGS, NOT STANDINGS. "Everyone above 25" is accurate and unread by the summer
+// term, when most of a form is on it. Every house point carries a date, so the crossing
+// date is exactly the date of the Nth point.
+let CG_HP_TIERS={};
+let CG_HP_DEFAULT=[10,25,100];
+let CG_HP_WIN=14;              // days a crossing stays on the Form Tutor page
 let SA_MIN_TOTAL=6, SA_MIN_TEACHER=3, SA_RATIO=2.0, SA_ENGAGE=3;
 let SAV_RATIO=2.0, SAV_MIN=3;
 let CL_MIN_PUPILS=5, CL_MIN_CODES=5, CL_RATIO_AMBER=2.0, CL_RATIO_RED=3.0;
@@ -2789,7 +2801,7 @@ function saveThresholds(){
   try {
     const obj = {
       CT_AB, CT_EF, CT_SC, CT_MN, CT_EV_MIN, CT_P_AMB, CT_P_RED, CT_LIST_MIN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, RED_AB_DOW, RED_SC_DOW, RED_SC_PER, RED_YOY, RED_AYOY, RED_SA, RED_AP, ATT_LOW, ATT_TARGET, ATT_BAND_EDGES, ATT_HEADROOM_WARN,
-      CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT,
+      CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT, CG_HP_TIERS, CG_HP_DEFAULT, CG_HP_WIN,
       AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
       SAV_RATIO, SAV_MIN,
@@ -2854,6 +2866,17 @@ function applyThresholdValues(v){
   if((n=safeF(v.CG_SC))!=null) CG_SC=n;
   if((n=safeI(v.CG_MN))!=null) CG_MN=n;
   if((n=safeF(v.CG_EX_PCT))!=null) CG_EX_PCT=n;
+  if((n=safeI(v.CG_HP_WIN))!=null && n>0 && n<=365) CG_HP_WIN=n;
+  // Objects and arrays cannot go through safeF/safeI. A bad value leaves the default.
+  const _tiers=(x)=>{ const a=(Array.isArray(x)?x:String(x||'').split(/[,\s]+/))
+      .map(Number).filter(y=>!isNaN(y)&&y>0);
+    return [...new Set(a)].sort((p,q)=>p-q); };
+  if(Array.isArray(v.CG_HP_DEFAULT)&&v.CG_HP_DEFAULT.length) CG_HP_DEFAULT=_tiers(v.CG_HP_DEFAULT);
+  if(v.CG_HP_TIERS&&typeof v.CG_HP_TIERS==='object'&&!Array.isArray(v.CG_HP_TIERS)){
+    const out={};
+    Object.entries(v.CG_HP_TIERS).forEach(([yg,list])=>{ const t=_tiers(list); if(t.length) out[String(yg)]=t; });
+    CG_HP_TIERS=out;
+  }
   if((n=safeI(v.AP_MIN))!=null) AP_MIN=n;
   if((n=safeI(v.AP_PCT))!=null) AP_PCT=n;
   if((n=safeI(v.AP_SLOT))!=null) AP_SLOT=n;
@@ -2903,7 +2926,7 @@ function applyThresholdValues(v){
 const _THRESHOLD_DEFAULTS = {
   CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_EV_MIN:3, CT_P_AMB:0.05, CT_P_RED:0.01, CT_LIST_MIN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, RED_AB_DOW:70, RED_SC_DOW:75, RED_SC_PER:70, RED_YOY:3, RED_AYOY:3, RED_SA:6, RED_AP:60, ATT_LOW:90, ATT_TARGET:95, ATT_BAND_EDGES:[100,97,95,90,85], ATT_HEADROOM_WARN:3,
   SA_YRS:2, SA_MIN:5, SA_SHARE:40, SA_LEAD:2,
-  CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99,
+  CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99, CG_HP_TIERS:{}, CG_HP_DEFAULT:[10,25,100], CG_HP_WIN:14,
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
   SA_MIN_TOTAL:6, SA_MIN_TEACHER:3, SA_RATIO:2.0, SA_ENGAGE:3,
   SAV_RATIO:2.0, SAV_MIN:3,
@@ -3038,6 +3061,20 @@ function applyCT(){
   SC_PER_PCT=parseFloat(document.getElementById('sc-per-pct').value)||30;
   SC_PER_MIN=parseInt(document.getElementById('sc-per-min').value)||8;
   CG_AT=parseFloat(document.getElementById('cg-at').value)||1.3;
+  CG_HP_WIN=Math.max(1,Math.round(_gv('cg-hp-win',CG_HP_WIN)));
+  // One box per year group, ids cg-hp-y7 … cg-hp-y13. Read whichever are on the page: the
+  // rows depend on which years the data holds, so they cannot be a fixed list.
+  (function(){
+    const boxes=document.querySelectorAll('input[id^="cg-hp-y"]');
+    if(!boxes.length) return;
+    const out={};
+    boxes.forEach(el=>{
+      const yg=el.id.slice(7);
+      const t=[...new Set(String(el.value).split(/[,\s]+/).map(Number).filter(n=>!isNaN(n)&&n>0))].sort((a,b)=>a-b);
+      if(t.length) out[yg]=t;          // a blank box means this year group is not flagged
+    });
+    CG_HP_TIERS=out;
+  })();
   CG_PA_PCT=parseFloat(document.getElementById('cg-pa-pct').value)||10;
   CG_SC=parseFloat(document.getElementById('cg-sc').value)||1.5;
   CG_MN=parseInt(document.getElementById('cg-mn').value)||3;
@@ -9457,6 +9494,7 @@ function _hmPerfReset(){
   // school's school days and periods-per-day. _ATT_SD is the heatmap's register-derived set.
   _HM_SD=null; _HM_PPD=null;
   try{ _ATT_SD=null; _ATT_YL=null; }catch(e){}
+  try{ _hpIdxReset(); }catch(e){}
   try{ _collRangeCache=null; }catch(e){}
   try{ _clsEnrolIdx=null; }catch(e){}
   try{ _enIdx=null; _fsmIdx=null; }catch(e){}
@@ -9486,8 +9524,11 @@ function _hmItemsBuild(p,scope){
   // asks for what it needs. Default is 'tutor' (everything) — callers that must not show
   // these pass 'wide'.
   const _live=ann.filter(a=>!a._dismissal);
+  // ⚠️ 'good' WAS NOT FILTERED. tutorOnly was applied to concerns only, so a tutor-only
+  // POSITIVE still reached the year leader and SLT — the very pages it exists to spare.
   return {live:(scope==='wide')?_live.filter(a=>!a.tutorOnly):_live,
-          considered:ann.filter(a=>a._dismissal), good:cong};
+          considered:ann.filter(a=>a._dismissal),
+          good:(scope==='wide')?cong.filter(c=>!c.tutorOnly):cong};
 }
 function _hmConcernRow(px,it){
   const col=it.severity==='red'?'var(--red)':'var(--orange)';
@@ -15742,6 +15783,50 @@ function rPeer(){
     return _pcgRender(px,items);
   }
   // Items only, so other views reuse the same CG_* triggers.
+  // Year groups present in the data, ascending — one Admin row per year.
+  function _ygPresent(){
+    const s=new Set();
+    Object.values(REG||{}).forEach(r=>{ const y=curYG(r&&r.intake); if(y) s.add(y); });
+    return [...s].sort((a,b)=>a-b);
+  }
+  // ⚠️ THE SEAM FOR TRADITIONAL YEAR NAMES. A school calling Year 8 "Lower IV" will set
+  // these in its key; everything internal stays numeric, and callers already ask for a
+  // label rather than building "Year "+n themselves.
+  function ygLabel(yg){
+    const m=(DD.config&&DD.config.year_group_names)||{};
+    return m[String(yg)]||('Year '+yg);
+  }
+  function hpTiersFor(yg){
+    const t=CG_HP_TIERS[String(yg)];
+    return (t&&t.length)?t:(CG_HP_DEFAULT||[]);
+  }
+  // px -> this year's house point dates, ascending. Memoised: DD.housePoints is 246,960
+  // rows at TWS, and a tutor page would otherwise scan all of them once per pupil.
+  let _hpIdxAY=null;
+  function _hpBuild(){
+    if(_hpIdxAY) return;
+    _hpIdxAY={};
+    const a=ayStartISO(CAY), b=`${CAY+1}-07-31`;
+    (DD.housePoints||[]).forEach(r=>{
+      const d=r&&r[2];
+      if(!d||d<a||d>b) return;
+      (_hpIdxAY[r[0]]=_hpIdxAY[r[0]]||[]).push(d);
+    });
+    Object.values(_hpIdxAY).forEach(v=>v.sort());
+    // ⚠️ The window counts back from the most recent house point IN THE SCHOOL, or the
+    // dashboard's usual "today", whichever is later. House points and sanctions do not
+    // necessarily arrive on the same day, and counting back from a real clock would make
+    // the list empty out on its own between rebuilds.
+    let last='';
+    Object.keys(_hpIdxAY).forEach(k=>{ const v=_hpIdxAY[k], x=v[v.length-1]; if(x>last) last=x; });
+    const t=_hmToday();
+    _HP_TODAY=(last>t?last:t);
+  }
+  let _HP_TODAY=null;
+  function _hpDatesFor(px){ _hpBuild(); return _hpIdxAY[px]||[]; }
+  function _hpToday(){ _hpBuild(); return _HP_TODAY; }
+  function _hpIdxReset(){ _hpIdxAY=null; _HP_TODAY=null; }
+
   function pupilCongratsItems(px){
     const yg=curYG(REG[String(px)]?.intake);
     if(!yg) return[];
@@ -15758,6 +15843,28 @@ function rPeer(){
       items.push({label:'Attendance Improving',severity:strong?'green-strong':'green',
         detail:`${fn} is recovering from a high absence rate — ${a20.rate.toFixed(1)}% of periods missed over the last 20 school days vs ${a60.rate.toFixed(1)}% across 60 days${fac}.`});
     }
+    // ── HOUSE POINT MILESTONE (Pupil page and Form Tutor page only) ──
+    (function(){
+      const tiers=hpTiersFor(yg);
+      if(!tiers.length) return;                    // this year group is not flagged
+      const dates=_hpDatesFor(px);
+      if(!dates.length) return;
+      // The highest tier reached, and the date the Nth point landed — that IS the crossing.
+      let tier=null, when=null;
+      tiers.forEach(t=>{ if(dates.length>=t){ tier=t; when=dates[t-1]; } });
+      if(tier==null) return;
+      const c=new Date(_hpToday()+'T12:00:00');
+      c.setDate(c.getDate()-CG_HP_WIN);
+      const cutISO=c.getFullYear()+'-'+String(c.getMonth()+1).padStart(2,'0')+'-'+String(c.getDate()).padStart(2,'0');
+      if(when<cutISO) return;                      // crossed too long ago to still be news
+      const top=(tier===tiers[tiers.length-1]);
+      const nice=new Date(when+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'long'});
+      items.push({label:'House Point Milestone', severity:top?'green-strong':'green',
+        tutorOnly:true,
+        detail:`${fn} passed ${tier} house points on ${nice}`
+          +(top?', the highest milestone set for ':', a milestone set for ')+ygLabel(yg)
+          +`. They are on ${dates.length} for the year.`});
+    })();
     const s20=sanRAMod(px,yg,20),s60=sanRAMod(px,yg,60),c20=sanCountInMod(px,yg,20),c60=sanCountInMod(px,yg,60);
     let sancRed=false;
     const _pSan=_priorWin(s20,20,s60,60);   // days 21-60, recovered by subtraction
@@ -17209,7 +17316,9 @@ ${groupPanel(
           inputRow('Recovery floor (%)','cg-pa-pct',CG_PA_PCT,{min:1,max:50,step:0.5,hint:'A pupil only counts as "improving" if their 60-day baseline absence was at least this high — i.e. they were genuinely struggling. Default 10%. Lower this to praise pupils who were less absent to begin with.'})+
           inputRow('Sanctions reduction multiplier','cg-sc',CG_SC,{min:0.5,max:5,step:0.1,hint:'Recent (20sd) weighted sanction score must be at least this many times LOWER than the 60-day baseline to praise. Default 1.5×. Lower this to celebrate smaller reductions.'})+
           inputRow('Minimum prior sanctions','cg-mn',CG_MN,{min:0,max:50,step:1,hint:'A pupil must have had at least this many sanctions earlier in the 60-day window (before the recent 20 days) to count as reducing. Default 3. Lower this to praise pupils with fewer prior sanctions.'})+
-          inputRow('Excellent attendance threshold (%)','cg-ex-pct',CG_EX_PCT,{min:90,max:100,step:0.1,hint:'Pupils with at least this whole-year attendance percentage — but below 100% — earn an Excellent Attendance flag. Pupils at exactly 100% earn Perfect Attendance instead (hard-wired). Default 99%.'})
+          _ygPresent().map((yg,i)=>inputRow('House point milestones \u2014 '+ygLabel(yg),'cg-hp-y'+yg,hpTiersFor(yg).join(', '),{text:true,hint:i===0?'Milestones for this year group, comma-separated \u2014 for example 10, 25, 100. A pupil is congratulated when they REACH one, and stays on the list for the number of days below. Leave a box blank to flag nothing for that year group. \u26a0\ufe0f Shown on the Pupil page and the Form Tutor page only, never to a year leader or SLT \u2014 by the summer term most of a year group would be on it.':''})).join('')
+          +inputRow('Keep a milestone on the list for (days)','cg-hp-win',CG_HP_WIN,{min:1,max:120,step:1,hint:'How long after reaching a milestone it stays on the Form Tutor page. Counted back from the most recent house point in the school rather than today\u2019s date, so the list does not empty itself out between rebuilds.'})
+          +inputRow('Excellent attendance threshold (%)','cg-ex-pct',CG_EX_PCT,{min:90,max:100,step:0.1,hint:'Pupils with at least this whole-year attendance percentage — but below 100% — earn an Excellent Attendance flag. Pupils at exactly 100% earn Perfect Attendance instead (hard-wired). Default 99%.'})
         )}
       </div>
       <div style="margin-top:1.2rem;padding-top:.9rem;border-top:1px solid var(--bd);display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"><button onclick="applyCT();applySW()" style="background:var(--ac);color:#fff;border:none;font-family:inherit;font-size:.74rem;font-weight:600;padding:.45rem 1rem;border-radius:6px;cursor:pointer">💾 Save thresholds</button><button onclick="resetThresholds()" style="background:transparent;color:var(--mu);border:1px solid var(--bd);font-family:inherit;font-size:.72rem;font-weight:500;padding:.45rem .9rem;border-radius:6px;cursor:pointer" title="Restore all thresholds to factory defaults and clear saved values">↺ Reset to defaults</button><span style="font-size:.65rem;color:var(--mu);margin-left:.25rem">Saves all threshold &amp; weighting values above. Syncs to all signed-in devices.</span></div>
