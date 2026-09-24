@@ -1767,7 +1767,7 @@ window._focusFix=function(id){
 // reference-ladder case the inline scale warning skips, and points each value at the control that
 // fixes it. Hidden when there's nothing flagged (and on data.json built before the engine emitted it).
 function _gradeMapperHtml(){
-  const cfg=(typeof DD!=='undefined'&&DD&&DD.config)?DD.config:{};
+  let cfg={}; try{ cfg=(DD&&DD.config)||{}; }catch(e){}   // typeof does not survive the TDZ
   const obj=v=>(v&&typeof v==='object'&&!Array.isArray(v))?v:{};
   const ug=obj(cfg.uncalibrated_grades), ua=obj(cfg.unmapped_ability), ue=obj(cfg.unmapped_effort);
   const ugK=Object.keys(ug), uaK=Object.keys(ua), ueK=Object.keys(ue);
@@ -2386,7 +2386,11 @@ function curYG(ink){return ygAt(ink,CAY)}
 // searchable after a school renames its years.
 // ygShort() is for chips, table cells and axis labels; ygLabel() for sentences and titles.
 function _ygNameRec(yg){
-  const m=(typeof DD!=='undefined'&&DD.config&&DD.config.year_group_names)||{};
+  // ⚠️ try/catch, NOT typeof. DD is declared with `let`, and inside the temporal
+  // dead zone `typeof DD` ITSELF throws — the guard that looks like it handles this
+  // case is the one thing that does not. This runs from renderLoginScreen(), which is
+  // reached on sign-out before DD is initialised.
+  let m={}; try{ m=(DD&&DD.config&&DD.config.year_group_names)||{}; }catch(e){}
   const r=m[String(yg)];
   if(!r) return null;
   return (typeof r==='string')?{name:r,short:r}:{name:r.name||r.short||'',short:r.short||r.name||''};
@@ -2426,7 +2430,11 @@ var _TERM_DEF_CACHE=null;
 // n: 1 singular, anything else plural. caps: 0 lower, 1 Sentence case, 2 Title Case.
 function T(key,n,caps){
   const d=_termDefs()[key]||{one:key,many:key};
-  const set=((typeof DD!=='undefined'&&DD.config&&DD.config.terms)||{})[key]||{};
+  // ⚠️ try/catch, NOT typeof. DD is declared with `let`, and inside the temporal
+  // dead zone `typeof DD` ITSELF throws — the guard that looks like it handles this
+  // case is the one thing that does not. This runs from renderLoginScreen(), which is
+  // reached on sign-out before DD is initialised.
+  let set={}; try{ set=((DD&&DD.config&&DD.config.terms)||{})[key]||{}; }catch(e){}
   let w=(n===1?(set.one||d.one):(set.many||set.one||d.many))||'';
   // ⚠️ "Head Of Year" is wrong. Capitalise the first word and skip the small ones.
   if(caps===2) w=w.replace(/\b[a-z]+/g,(m,i)=>(i>0&&['of','the','a','an','and','for','in','on'].indexOf(m)>=0)?m:m.charAt(0).toUpperCase()+m.slice(1));
@@ -2448,7 +2456,8 @@ function _ygStageDisp(stage){
 }
 function _ygPresent(){
   const s=new Set();
-  Object.values((typeof REG!=='undefined'&&REG)||{}).forEach(r=>{ const y=curYG(r&&r.intake); if(y) s.add(y); });
+  let reg={}; try{ reg=REG||{}; }catch(e){}   // same reason as above
+  Object.values(reg).forEach(r=>{ const y=curYG(r&&r.intake); if(y) s.add(y); });
   return [...s].sort((a,b)=>a-b);
 }
 function ygShort(yg){ const r=_ygNameRec(yg); return (r&&r.short)||('Y'+yg); }
@@ -3578,7 +3587,7 @@ const NOT_COUNTED_MARKS=new Set(DD.config?.att_codes?.not_counted||['Y1','Y2','Y
 // Codes in the data that the school's settings do not cover: {code: marks}. Written by the
 // engine since it stopped folding them silently into the unauthorised list.
 function _attUnknownCodes(){
-  const u=DD&&DD.config&&DD.config.unknown_attendance_codes;
+  let u=null; try{ u=DD&&DD.config&&DD.config.unknown_attendance_codes; }catch(e){}
   return (u&&typeof u==='object'&&!Array.isArray(u))?u:{};
 }
 // ⚠️ UNKNOWN CODES ARE UNAUTHORISED HERE TOO, until classified. The engine counts them as
@@ -11841,7 +11850,8 @@ function _upSig(headers){ return headers.map(h=>String(h).trim().toLowerCase()).
 // is only needed to CHANGE the pupil list. Returns null for a brand-new school (no pupils).
 function _upRosterFromData(){
   try{
-    var reg=(typeof DD!=='undefined')&&DD&&DD.registry; if(!reg) return null;
+    var reg=null; try{ reg=DD&&DD.registry; }catch(e){}
+    if(!reg) return null;
     var pupils=new Set(), byIntake={}, byGender={};
     Object.keys(reg).forEach(function(k){ var p=reg[k]; if(!p) return;
       pupils.add(String(k));
