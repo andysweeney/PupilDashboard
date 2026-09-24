@@ -2389,6 +2389,24 @@ function _ygNameRec(yg){
 function ygLabel(yg){ const r=_ygNameRec(yg); return (r&&r.name)||('Year '+yg); }
 // Year groups present in the data, ascending. Top level: both the Admin editor and the
 // congrats thresholds build one row per year from it.
+// The registry stores year as the STRING "Year 10", and it is used as a key: the scope
+// value 'year:Year 10', the peer index, and the coverage tallies all match on it. So the
+// string stays exactly as the engine writes it, and this turns it into a label at the
+// point of display only.
+// ⚠️ Never write back through this. It is one-way: key in, words out.
+function ygLabelOf(v){
+  if(v==null) return '';
+  const n=parseInt(String(v).replace(/\D+/g,''),10);
+  return isNaN(n)?String(v):ygLabel(n);
+}
+// "Y10 T1" -> "Lower V T1". The stage arrays are parsed back apart elsewhere, so the key
+// form is kept and only the axis label is translated.
+function _ygStageDisp(stage){
+  const sp=String(stage).indexOf(' ');
+  if(sp<0) return String(stage);
+  const n=parseInt(String(stage).slice(1,sp),10);
+  return (isNaN(n)?String(stage).slice(0,sp):ygShort(n))+String(stage).slice(sp);
+}
 function _ygPresent(){
   const s=new Set();
   Object.values((typeof REG!=='undefined'&&REG)||{}).forEach(r=>{ const y=curYG(r&&r.intake); if(y) s.add(y); });
@@ -6132,6 +6150,9 @@ function rCmp(){
 
   const stageLabels=[];
   for(let y=7;y<=11;y++) for(const t of['T1','T2','T3']) stageLabels.push(`Y${y} ${t}`);
+  // ⚠️ KEYS, NOT LABELS. stageLabels is parsed back apart below (split(' '), slice(1)) and
+  // by _ksStageBoundaryIdx(), so it must keep the Y7/Y8 form. Only the axis shows names.
+  const stageDisp=stageLabels.map(_ygStageDisp);
 
   const cohortColors=[PAL.blue,PAL.pink,PAL.green,PAL.orange,PAL.lilac,PAL.gold,PAL.red];
   const abDatasets=[];
@@ -6203,9 +6224,9 @@ function rCmp(){
   const efMin=Math.max(0.5,Math.floor((efMinV-0.1)*10)/10);
   const efMax=Math.min(4.5,Math.ceil((efMaxV+0.1)*10)/10);
 
-  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',plugins:[_ksDrawPlugin(_ksStageBoundaryIdx(stageLabels))].filter(Boolean),data:{labels:stageLabels,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets,true)},scales:{y:{min:abMin,max:abMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
+  sc2('cmpab',new Chart(document.getElementById('c-cmpab'),{type:'line',plugins:[_ksDrawPlugin(_ksStageBoundaryIdx(stageLabels))].filter(Boolean),data:{labels:stageDisp,datasets:abDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(abDatasets,true)},scales:{y:{min:abMin,max:abMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1,callback:abTick},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
 
-  sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageLabels,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
+  sc2('cmpef',new Chart(document.getElementById('c-cmpef'),{type:'line',data:{labels:stageDisp,datasets:efDatasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#6e7686',font:{family:'Hanken Grotesk',size:10},boxWidth:10,padding:10}},tooltip:flagTip(efDatasets)},scales:{y:{min:efMin,max:efMax,reverse:true,ticks:{color:'#6e7686',font:{size:11},stepSize:1},grid:{color:'#d4d4d444'},border:{color:'#e6dfd0'}},x:{ticks:{color:'#6e7686',font:{size:8},maxRotation:45},grid:{color:'#d4d4d422'},border:{color:'#e6dfd0'}}}}}));
 }
 
 // ── YEAR PROGRESSION VIEW ──
@@ -6358,6 +6379,8 @@ function rPrg(){
   // X-axis: one point per term across all school years (T1-T3 for Y7-Y11 = 15 points)
   const termLabels=[];
   for(let yg=7;yg<=11;yg++) for(const t of['T1','T2','T3']) termLabels.push(`Y${yg} ${t}`);
+  const termDisp=termLabels.map(_ygStageDisp);   // keys above, labels here — see _ygStageDisp
+
 
   const abPoints=[],efPoints=[],abMeta=[],efMeta=[];
   termLabels.forEach(stage=>{
@@ -6474,11 +6497,11 @@ function rPrg(){
   });
 
   sc2('prgab',new Chart(document.getElementById('c-prgab'),{type:'line',
-    data:{labels:termLabels,datasets:abDatasets},
+    data:{labels:termDisp,datasets:abDatasets},
     options:chartOpts2(abMin2,abMax2,true,true),plugins:[bandPlugin]}));   // reversed: rank 1 = best
 
   sc2('prgef',new Chart(document.getElementById('c-prgef'),{type:'line',
-    data:{labels:termLabels,datasets:efDatasets},
+    data:{labels:termDisp,datasets:efDatasets},
     options:chartOpts2(efMin2,efMax2,false,true),plugins:[bandPlugin]}));  // reversed: effort 1 = best
 
   // ── Stacked grade distribution bar chart ──
@@ -6514,7 +6537,7 @@ function rPrg(){
 
   sc2('prggrade',new Chart(document.getElementById('c-prggrade'),{
     type:'bar',
-    data:{labels:termLabels,datasets:gradeDatasets},
+    data:{labels:termDisp,datasets:gradeDatasets},
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
@@ -6566,7 +6589,7 @@ function rPrg(){
 
   sc2('prgefgrade',new Chart(document.getElementById('c-prgefgrade'),{
     type:'bar',
-    data:{labels:termLabels,datasets:effortDatasets},
+    data:{labels:termDisp,datasets:effortDatasets},
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
@@ -8507,7 +8530,7 @@ function _hmForms(){
 }
 function _hmYears(){
   const y=new Set();Object.values(DD.registry||{}).forEach(x=>{if(x.year)y.add(x.year)});
-  return [...y].sort().map(x=>['year:'+x,x]);
+  return [...y].sort().map(x=>['year:'+x,ygLabelOf(x)]);   // key unchanged, label translated
 }
 function _hmRender(outId,fn){
   const el=document.getElementById(outId);
@@ -8955,7 +8978,7 @@ function _hmPanelPeers(){
     const inner = built
       ? _hmCanvas(c.id, 172)
       : _hmNote(c.field === 'pos'
-          ? 'No positive behaviour has been recorded for ' + peers.year + ' in this academic year, so there is nothing to compare. This is a gap in the data, not a result for your form.'
+          ? 'No positive behaviour has been recorded for ' + ygLabelOf(peers.year) + ' in this academic year, so there is nothing to compare. This is a gap in the data, not a result for your form.'
           : 'Not enough data to compare.');
     return '<div style="flex:1;min-width:230px">'
       + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + c.title + '</div>'
@@ -8963,13 +8986,13 @@ function _hmPanelPeers(){
   }).join('');
 
   return _hmPanel(peers.me ? 'Your form against the year group'
-                           : 'Every form in ' + peers.year,
+                           : 'Every form in ' + ygLabelOf(peers.year),
     (peers.me ? peers.me + ' is highlighted. ' : '')
     + 'Attendance is the straight average, next to it a count of pupils below 90% \u2014 '
     + 'the national persistent-absence line, and the number a form is actually judged on. '
     + 'Positives and sanctions show two bars: the pale one counts every pupil, the solid '
     + 'one leaves out the highest and lowest few, so where they are far apart a small '
-    + 'number of pupils is moving the figure. The dashed line is the ' + peers.year + ' average.',
+    + 'number of pupils is moving the figure. The dashed line is the ' + ygLabelOf(peers.year) + ' average.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">' + body + '</div>');
 }
 
@@ -9111,14 +9134,14 @@ function _hmPanelYTD(){
       name: f.reg,
       data: all.find(a => a.reg === f.reg).s[field],
       color: _HM_FORM_COLORS[i % _HM_FORM_COLORS.length]
-    })).concat(yrRow2 ? [{ name: 'All of ' + peers.year, bold: true, color: PAL.slate,
+    })).concat(yrRow2 ? [{ name: 'All of ' + ygLabelOf(peers.year), bold: true, color: PAL.slate,
                            data: _hmYearSeries(yrRow2, field) }] : []);
     const oneF = (title, id, key, field, fmt) =>
       '<div style="flex:1;min-width:280px">'
       + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
       + _hmMultiLine(id, key, labels, build(field), fmt) + '</div>';
     return _hmPanel('Each form, month by month',
-      'One line per form, with the whole of ' + peers.year + ' in bold. Straight averages. '
+      'One line per form, with the whole of ' + ygLabelOf(peers.year) + ' in bold. Straight averages. '
       + 'Click a form name in the key to hide it, and again to bring it back.',
       '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
       + oneF('Attendance', 'hm-ig-fatt', 'hmIgFAtt', 'att', v => (Math.round(v*10)/10) + '%')
@@ -9127,8 +9150,8 @@ function _hmPanelYTD(){
       + '</div>') + _hmPanelYTDWinsorised(peers, labels, ps);
   }
 
-  const nameMine = peers.me || ('All of ' + peers.year);
-  const namePeer = peers.me ? (peers.year + ' median form') : 'Median form';
+  const nameMine = peers.me || ('All of ' + ygLabelOf(peers.year));
+  const namePeer = peers.me ? (ygLabelOf(peers.year) + ' median form') : 'Median form';
   const one = (title, id, key, data, medData, color, fmt, missing) => {
     const live = data.filter(v => v != null && v !== 0);
     const inner = live.length
@@ -9143,9 +9166,9 @@ function _hmPanelYTD(){
 
   return _hmPanel('This year, month by month',
     peers.me
-      ? 'Your form solid, the middle form in ' + peers.year + ' dashed. '
+      ? 'Your form solid, the middle form in ' + ygLabelOf(peers.year) + ' dashed. '
         + 'Straight averages, every pupil counted.'
-      : 'Straight averages for all of ' + peers.year + ', against the middle form.',
+      : 'Straight averages for all of ' + ygLabelOf(peers.year) + ', against the middle form.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-yatt', 'hmIgYAtt', mine.att, med('att'), PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -9179,7 +9202,7 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
       name: f.reg,
       data: series(ps[f.reg], field),
       color: _HM_FORM_COLORS[i % _HM_FORM_COLORS.length]
-    })).concat([{ name: 'All of ' + peers.year, bold: true, color: PAL.slate,
+    })).concat([{ name: 'All of ' + ygLabelOf(peers.year), bold: true, color: PAL.slate,
                   data: series(yr, field) }]);
     const oneW = (title, id, key, field, fmt) =>
       '<div style="flex:1;min-width:280px">'
@@ -9203,9 +9226,9 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
   // names have to say which, or the reader assumes both panels plot the same
   // thing and the numbers look wrong.
   const nameMine = peers.me ? (peers.me + ' \u00b7 extremes left out')
-                            : (peers.year + ' \u00b7 extremes left out');
-  const namePeer = peers.me ? (peers.year + ' \u00b7 extremes left out')
-                            : (peers.year + ' \u00b7 all pupils');
+                            : (ygLabelOf(peers.year) + ' \u00b7 extremes left out');
+  const namePeer = peers.me ? (ygLabelOf(peers.year) + ' \u00b7 extremes left out')
+                            : (ygLabelOf(peers.year) + ' \u00b7 all pupils');
   const one = (title, id, key, field, color, fmt, missing) => {
     const a = series(mine, field);
     const b = peers.me ? series(yr, field)
@@ -9224,7 +9247,7 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
       ? 'The same two lines, but each month leaves out the highest and lowest few pupils. '
         + 'If your form moves a long way from its line above, its figure there was being set '
         + 'by a small number of pupils.'
-      : 'All of ' + peers.year + ', leaving out the highest and lowest few pupils each month.',
+      : 'All of ' + ygLabelOf(peers.year) + ', leaving out the highest and lowest few pupils each month.',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-watt', 'hmIgWAtt', 'attW', PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -10931,7 +10954,7 @@ function _hmSLT(){
       yrs.map(y=>{
         const n=byYear[y]||0, t=allYear[y];
         return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.72rem">'
-          +'<span style="width:150px;color:var(--tx2)">'+y+'</span>'
+          +'<span style="width:150px;color:var(--tx2)">'+ygLabelOf(y)+'</span>'
           +'<span style="width:74px;text-align:right;color:'+(n?'var(--tx)':'var(--red)')+'">'+n+' of '+t+'</span>'
           +'<span style="flex:1;min-width:120px"><div style="max-width:260px">'
             +_hmBar(100*n/(t||1),n===0?'bad':n<t*0.8?'warn':'ok')+'</div></span>'
