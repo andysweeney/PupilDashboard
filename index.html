@@ -16914,7 +16914,12 @@ window._requestRebuild=async function(){
 // ⚠️ THE NUMBER IS THE IDENTITY. These are labels only. Year-leader scope, the scoped
 // year/{n}/data.json files, the grading-scale lookup and the audit log all stay numeric,
 // so a school can rename its years without moving a single permission or breaking a log.
-function _adminSetYgName(yg,field,val){
+// ⚠️ ON window, NOT A BARE DECLARATION. Everything in this file runs inside the async
+// IIFE, so an inline onchange="..." attribute is evaluated in GLOBAL scope and cannot see
+// a function declared in here. The other editors expose window._adminSetAtt and
+// window._adminSetSubject for exactly this reason. Declared bare, this silently threw a
+// ReferenceError and the rename was never saved.
+window._adminSetYgName=function(yg,field,val){
   const m=DD.config.year_group_names=DD.config.year_group_names||{};
   const cur=m[String(yg)];
   const rec=(typeof cur==='string')?{name:cur,short:cur}:Object.assign({name:'',short:''},cur||{});
@@ -16922,12 +16927,12 @@ function _adminSetYgName(yg,field,val){
   if(!rec.name&&!rec.short) delete m[String(yg)]; else m[String(yg)]=rec;
   _persistDataKeys();   // async: reports its own failure
   try{ _hmItemsReset(); }catch(e){}
-}
+};
 function _ygNamesHtml(){
   const years=(typeof _ygPresent==='function')?_ygPresent():[];
   if(!years.length) return '';
   const cell=(yg,f,v,ph)=>`<input type="text" value="${(v||'').replace(/"/g,'&quot;')}" placeholder="${ph}"`
-    +` onchange="_adminSetYgName(${yg},'${f}',this.value)"`
+    +` onchange="window._adminSetYgName(${yg},'${f}',this.value)"`
     +` style="width:100%;background:var(--sf2);border:1px solid var(--bd);color:var(--tx);font-family:inherit;font-size:.72rem;padding:.2rem .4rem;border-radius:4px">`;
   const rows=years.map(yg=>{
     const r=_ygNameRec(yg)||{name:'',short:''};
