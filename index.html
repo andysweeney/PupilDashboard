@@ -2441,6 +2441,44 @@ function T(key,n,caps){
   else if(caps===1) w=w.charAt(0).toUpperCase()+w.slice(1);
   return w;
 }
+// ── SCORE MEASURES ───────────────────────────────────────────────────────────────────
+// A score is an array whose positions are described by config.score_slots:
+//   attain · effort · predicted (on-track/OTA) · rank · target
+// ⚠️ READ BY NAME, NEVER BY INDEX. Indices were spelled out in 42 places, so adding a
+// measure meant 42 edits and one silent mistake. And a row built before a slot existed
+// simply stops early, so a missing tail is normal and must not read as a value.
+// ⚠️ TWO RANK SPACES, NOT ONE. Effort IS ranked — there is an effort rank, and tutor
+// groups are ranked on ability and effort separately — but it is ranked AMONG EFFORT.
+// The fault to prevent is mixing spaces: effort on the attainment ladder, or a target
+// counted as attainment, which would put the most ambitiously targeted pupils top on a
+// measure of what someone hopes for rather than what they did.
+// ⚠️ AND THE TWO SPACES RUN IN OPPOSITE DIRECTIONS. Effort is 1 = best; attainment rank
+// is best-last. A single "is this rankable" flag hid that, which is how an earlier bug
+// put every ability panel upside down.
+const _SLOT_FALLBACK={attain:0,effort:1,predicted:2,rank:3,target:4};
+function _slots(){
+  let m=null; try{ m=DD&&DD.config&&DD.config.score_slots; }catch(e){}
+  return (m&&typeof m==='object')?m:_SLOT_FALLBACK;
+}
+// sc is the score array; measure is 'attain' | 'effort' | 'predicted' | 'rank' | 'target'.
+function measureOf(sc,measure){
+  if(!sc) return null;
+  const i=_slots()[measure];
+  if(i==null||i>=sc.length) return null;          // slot not present in this build's data
+  const v=sc[i];
+  return (v===undefined)?null:v;
+}
+// Which rank space a measure belongs to: 'attain', 'effort', or null for measures that
+// are plotted but never ranked. Two measures may be ranked together only when they return
+// the same space.
+function rankSpace(measure){
+  if(measure==='attain'||measure==='rank') return 'attain';
+  if(measure==='effort') return 'effort';
+  return null;                       // target, predicted: shown beside attainment, not ranked
+}
+function sameRankSpace(a,b){ const x=rankSpace(a); return x!=null && x===rankSpace(b); }
+// Does 1 mean best in this space? Effort yes; attainment rank is best-last.
+function spaceBestIsLowest(space){ return space==='effort'; }
 function ygLabelOf(v){
   if(v==null) return '';
   const n=parseInt(String(v).replace(/\D+/g,''),10);
@@ -17039,6 +17077,31 @@ function applyStaticTerms(){
     });
   });
 }
+// A plain statement of what ranks pupils. Nothing in the dashboard said so, and the rule
+// is not guessable: positions come from attainment only, and a collection whose grades are
+// not comparable with its neighbours is deliberately left out of movement.
+function _rankingHtml(){
+  const row=(what,used,why)=>`<tr><td style="padding:.25rem .5rem;font-weight:500;font-size:.72rem;white-space:nowrap">${what}</td>`
+    +`<td style="padding:.25rem .5rem;font-size:.72rem;color:${used==='Yes'?'var(--green)':'var(--mu)'};font-weight:600">${used}</td>`
+    +`<td style="padding:.25rem .5rem;font-size:.7rem;color:var(--mu);line-height:1.4">${why}</td></tr>`;
+  return `<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">What ${T('pupil',2,1).toLowerCase()} are ranked on</div>`
+    +`<table style="border-collapse:collapse;max-width:46rem"><thead><tr>`
+    +`<th style="text-align:left;font-size:.62rem;color:var(--mu);text-transform:uppercase;padding:.2rem .5rem">Measure</th>`
+    +`<th style="text-align:left;font-size:.62rem;color:var(--mu);text-transform:uppercase;padding:.2rem .5rem">Ranked</th>`
+    +`<th style="text-align:left;font-size:.62rem;color:var(--mu);text-transform:uppercase;padding:.2rem .5rem">Why</th>`
+    +`</tr></thead><tbody>`
+    +row('Attainment','Yes','The achieved grade. Position, percentile, quartile, decile and every attainment trigger come from this and nothing else.')
+    +row('Target','No','A target is what someone hopes for. Ranking it would put the most ambitiously targeted '+T('pupil',2)+' at the top.')
+    +row('Predicted / on track','No','A forecast, and it moves. Shown beside attainment so the gap is visible, but never ranked with it.')
+    +row('Effort','Separately','Effort IS ranked \u2014 there is an effort rank, and tutor groups are ranked on it \u2014 but among effort only. It is a different scale, and at most schools 1 is the best, the opposite direction to attainment.')
+    +`</tbody></table>`
+    +`<div style="font-size:.68rem;color:var(--mu);line-height:1.45;margin-top:.55rem;max-width:46rem">`
+    +`Attainment and effort are ranked <b>separately</b>, never against each other. `
+    +`\u26a0\ufe0f <b>Rank is within a year group and a subject</b>, comparing only grades from the same collection. `
+    +`Where two collections are not comparable \u2014 one capped at a floor, or on a different scale \u2014 movement between `
+    +`them is deliberately not shown, because every ${T('pupil',1)} would appear to rise or fall together.`
+    +`</div></div>`;
+}
 function _termsHtml(){
   const rows=Object.keys(_termDefs()).map(k=>{
     const d=_termDefs()[k], set=((DD.config&&DD.config.terms)||{})[k]||{};
@@ -17608,7 +17671,7 @@ ${groupPanel(
       +`<div style="margin:.9rem .1rem 0;border-top:1px solid var(--bd);padding-top:.8rem"><div style="font-weight:600;font-size:.76rem;margin-bottom:.4rem">Add a user</div>`
       +`<div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center"><input id="mu-new-email" type="email" placeholder="teacher@school.uk" style="${_MU_INP}"><input id="mu-new-pw" type="text" placeholder="password (min 8)" style="${_MU_INP}"><button onclick="window._muAddUser()" style="${_MU_GO}">Add user</button></div>`
       +`<div id="mu-new-msg" style="font-size:.7rem;color:var(--mu);margin-top:.4rem"></div></div></div>`;
-    out.innerHTML=_rebuildStripHtml()+_ygNamesHtml()+summaryHtml
+    out.innerHTML=_rebuildStripHtml()+_rankingHtml()+_ygNamesHtml()+summaryHtml
       +_accSec('brand','Branding — logo &amp; header colour',brandHtml)
       +_accSec('users','Users &amp; access',usersHtml)
       +_accSec('thr','Concern thresholds &amp; weighting',_noTitle(threshHtml,'Concern Thresholds &amp; Weightings'))
