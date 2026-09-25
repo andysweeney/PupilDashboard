@@ -1307,7 +1307,21 @@ def map_attainment_scaled(raw, year_group, flagset):
     return canon
 
 # ── PARSE REPORTS (grades) -> per pupil × term × subject score lookup ──
-# report_scores[pid][period_label][subject] = [abilityLetter, effort, OTE, abilityRank]
+# report_scores[pid][period_label][subject] = the SCORE SLOTS below.
+#
+# ⚠️ SLOTS ARE NAMED IN config.score_slots AND READ BY NAME. They were addressed by index
+# in 42 places in the dashboard, so adding a measure meant editing all of them and getting
+# one wrong silently. The map is emitted with the data; readers look measures up.
+#
+#   0 attain     the achieved grade                 — the ONLY measure that feeds ranks
+#   1 effort     the school's effort scale          — its own charts, never ranked with attain
+#   2 predicted  the on-track / OTA grade           — plotted beside attainment, never ranked
+#   3 rank       attainment rank within the cohort  — derived, not a measure
+#   4 target     the target grade                   — plotted beside attainment, never ranked
+#
+# ⚠️ A ROW MAY BE SHORTER THAN THE LIST. Data built before a slot existed simply stops
+# early, so every reader must tolerate a missing tail rather than assume a length.
+SCORE_SLOTS = {'attain': 0, 'effort': 1, 'predicted': 2, 'rank': 3, 'target': 4}
 print("Parsing reports (grades)...")
 report_scores = defaultdict(lambda: defaultdict(dict))
 _rep_subject_set = set()
@@ -1379,7 +1393,13 @@ if len(reports):
         ability_rank = map_attainment_rank(ability, _yg)
         if ability is not None and ability_rank is None and _REF_RANK:
             _unmapped_rank.add(f"{_norm_raw(ability)}@Y{_yg}")
-        report_scores[p][term][subj] = [ability, effort, ote, ability_rank]
+        # Target has no column in the current staged shape, so it is None everywhere today.
+        # The slot exists so that when staging carries it, nothing downstream has to change.
+        target = None
+        row = [ability, effort, ote, ability_rank, target]
+        while len(row) > 4 and row[-1] is None:      # keep the payload small: drop an empty tail
+            row.pop()
+        report_scores[p][term][subj] = row
         _rep_subject_set.add(subj)
         _rep_rows_used += 1
 
@@ -2059,6 +2079,9 @@ output = {
         # Declaring the column order here means a reader resolves positions by NAME
         # and a future change to the row cannot silently break anything.
         "progressCols": ["px", "reg", "scores", "send", "ehcp", "fsm"],
+        # Which position in a score array holds which measure. Readers use this rather
+        # than a hard-coded index, so a new measure is one line here and nothing else.
+        "score_slots": SCORE_SLOTS,
         # DfE academic week anchor. The browser needs this to label a week the same
         # way the national figures do — a school's first teaching day is NOT week 1
         # (TWS starts on DfE week 5). Week n begins dfeWeek1 + 7*(n-1) days.
