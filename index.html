@@ -1969,7 +1969,17 @@ function abRk(c){ if(c==null)return 0; if(_USE_REF)return (c[3]!=null?c[3]:0); v
 // because rank is relative by construction. Keep an absolute measure alongside it.
 var _pctCache=null;
 function _pctBuild(pk, yg){
-  // mean ability rank per pupil in this year group for this collection
+  // ⚠️ AVERAGES POSITION WITHIN EACH SUBJECT, NOT THE RAW LADDER RANK. This used to mean
+  // abRk() across a pupil's subjects, which silently rewarded the subjects a pupil happened
+  // to take. Measured at TWS, T2 2025-26: mean ladder position is 2.23 in Computing and
+  // 2.39 in English Language against 3.37 in Spanish and 3.48 in Photography — more than a
+  // full rank apart. Averaging raw ranks therefore put a pupil taking Computing, English and
+  // History above an equally able pupil taking Art, Spanish and Photography. Every TWS pupil
+  // takes seven subjects, so this was never about how MANY subjects, only which.
+  // Averaging each pupil's percentile WITHIN each subject cancels that: 60th percentile in
+  // Photography counts exactly as much as 60th in Computing.
+  // ⚠️ subjPos()/_subjPctAll() is the same machinery the per-subject views use, so the
+  // pupil-level position and the subject-level ones can no longer disagree.
   const vals=[];
   for(const ik in (PRG||{})){
     (PRG[ik] && PRG[ik][pk] || []).forEach(r=>{
@@ -1977,14 +1987,20 @@ function _pctBuild(pk, yg){
       const info=REG[String(px)]; if(!info)return;
       if(curYG(info.intake)!==yg)return;
       const sc=progCol(r,'scores')||{};
-      let sum=0,n=0;
-      Object.values(sc).forEach(c=>{ const rk=abRk(c); if(rk){sum+=rk;n++;} });
-      if(n)vals.push({px:px, m:sum/n});
+      let sumPct=0, nSub=0, sumRk=0, nRk=0;
+      Object.keys(sc).forEach(subj=>{
+        const c=sc[subj];
+        const rk=abRk(c); if(rk){ sumRk+=rk; nRk++; }
+        const rec=_subjPctAll(subj, pk, yg)[px];
+        if(rec && rec.pct!=null){ sumPct+=rec.pct; nSub++; }
+      });
+      // mean is kept on the record as the OLD mean ladder rank, for anything reading it.
+      if(nSub) vals.push({px:px, m:sumPct/nSub, subjects:nSub, mean:(nRk?sumRk/nRk:null)});
     });
   }
   if(!vals.length)return {};
-  // best first: abRk 1 = best, so ascending mean rank is descending quality
-  vals.sort((a,b)=>a.m-b.m);
+  // best first: m is now a percentile (100 = best), so DESCENDING is descending quality.
+  vals.sort((a,b)=>b.m-a.m);
   const out={}, N=vals.length;
   // ties share a position, so two identical pupils get identical percentiles
   let i=0;
@@ -1992,10 +2008,19 @@ function _pctBuild(pk, yg){
     let j=i; while(j+1<N && vals[j+1].m===vals[i].m) j++;
     const mid=(i+j)/2;
     const pc=100*(1-(mid+0.5)/N);      // 100 = best
-    for(let k=i;k<=j;k++) out[vals[k].px]={pct:pc, mean:vals[k].m, n:N};
+    for(let k=i;k<=j;k++) out[vals[k].px]={pct:pc, mean:vals[k].mean, meanPct:vals[k].m,
+                                           subjects:vals[k].subjects, n:N};
     i=j+1;
   }
   return out;
+}
+// How many graded subjects a pupil's position rests on. Null when they have no position.
+// ⚠️ A position built on three subjects is not the same claim as one built on seven, and
+// the difference is invisible in a percentile.
+function pctSubjectsOf(px, pk){
+  const info=REG[String(px)]; if(!info)return null;
+  const rec=_pctAll(pk, curYG(info.intake))[px];
+  return rec?rec.subjects:null;
 }
 function _pctAll(pk, yg){
   if(!_pctCache)_pctCache={};
@@ -2435,7 +2460,14 @@ function T(key,n,caps){
   // case is the one thing that does not. This runs from renderLoginScreen(), which is
   // reached on sign-out before DD is initialised.
   let set={}; try{ set=((DD&&DD.config&&DD.config.terms)||{})[key]||{}; }catch(e){}
-  let w=(n===1?(set.one||d.one):(set.many||set.one||d.many))||'';
+  // ⚠️ A SCHOOL MAY FILL ONLY THE SINGULAR. Falling back to their singular rendered every
+  // plural as "student"; falling back to the built-in plural would render "pupils" at a
+  // school that renamed it. So the plural is guessed from THEIR singular with an "s", and
+  // the Admin panel asks for both so an irregular plural can be typed.
+  let w;
+  if(n===1) w=set.one||d.one;
+  else w=set.many||(set.one?set.one+'s':d.many);
+  w=w||'';
   // ⚠️ "Head Of Year" is wrong. Capitalise the first word and skip the small ones.
   if(caps===2) w=w.replace(/\b[a-z]+/g,(m,i)=>(i>0&&['of','the','a','an','and','for','in','on'].indexOf(m)>=0)?m:m.charAt(0).toUpperCase()+m.slice(1));
   else if(caps===1) w=w.charAt(0).toUpperCase()+w.slice(1);
@@ -2906,6 +2938,14 @@ let CG_AT=1.3, CG_PA_PCT=10, CG_SC=1.5, CG_MN=3, CG_EX_PCT=99;
 // ⚠️ CROSSINGS, NOT STANDINGS. "Everyone above 25" is accurate and unread by the summer
 // term, when most of a form is on it. Every house point carries a date, so the crossing
 // date is exactly the date of the Nth point.
+// Milestone tiers per event type. House points stay per year group; sanctions and
+// detentions are school-wide, because a behaviour ladder rarely differs by year and a row
+// per year would be clutter.
+// ⚠️ 1 AND 5 WERE HARDCODED. They were written out four times in the tutor milestone panel,
+// with the words "First" and "Fifth" baked into the labels, so a school could not change
+// them and changing them would have made the wording lie.
+let CG_SANC_TIERS=[1,5];
+let CG_DET_TIERS=[1];
 let CG_HP_TIERS={};
 let CG_HP_DEFAULT=[10,25,100];
 let CG_HP_WIN=14;              // days a crossing stays on the Form Tutor page
@@ -2934,7 +2974,7 @@ function saveThresholds(){
   try {
     const obj = {
       CT_AB, CT_EF, CT_SC, CT_MN, CT_EV_MIN, CT_P_AMB, CT_P_RED, CT_LIST_MIN, CT_AT, CT_AM, CT_PA_WIN, CT_PA_PCT, CT_AB_EPI, RED_AB_DOW, RED_SC_DOW, RED_SC_PER, RED_YOY, RED_AYOY, RED_SA, RED_AP, ATT_LOW, ATT_TARGET, ATT_BAND_EDGES, ATT_HEADROOM_WARN,
-      CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT, CG_HP_TIERS, CG_HP_DEFAULT, CG_HP_WIN,
+      CG_AT, CG_PA_PCT, CG_SC, CG_MN, CG_EX_PCT, CG_HP_TIERS, CG_HP_DEFAULT, CG_HP_WIN, CG_SANC_TIERS, CG_DET_TIERS,
       AP_MIN, AP_PCT, AP_SLOT, AP_MULT, AP_HIGH_ABS,
       SA_MIN_TOTAL, SA_MIN_TEACHER, SA_RATIO, SA_ENGAGE,
       SAV_RATIO, SAV_MIN,
@@ -3000,6 +3040,10 @@ function applyThresholdValues(v){
   if((n=safeI(v.CG_MN))!=null) CG_MN=n;
   if((n=safeF(v.CG_EX_PCT))!=null) CG_EX_PCT=n;
   if((n=safeI(v.CG_HP_WIN))!=null && n>0 && n<=365) CG_HP_WIN=n;
+  const _tl=(x)=>[...new Set((Array.isArray(x)?x:String(x||'').split(/[,\s]+/))
+      .map(Number).filter(y=>!isNaN(y)&&y>0))].sort((a,b)=>a-b);
+  if(v.CG_SANC_TIERS!=null) CG_SANC_TIERS=_tl(v.CG_SANC_TIERS);
+  if(v.CG_DET_TIERS!=null)  CG_DET_TIERS=_tl(v.CG_DET_TIERS);
   // Objects and arrays cannot go through safeF/safeI. A bad value leaves the default.
   const _tiers=(x)=>{ const a=(Array.isArray(x)?x:String(x||'').split(/[,\s]+/))
       .map(Number).filter(y=>!isNaN(y)&&y>0);
@@ -3059,7 +3103,7 @@ function applyThresholdValues(v){
 const _THRESHOLD_DEFAULTS = {
   CT_AB:2, CT_EF:2, CT_SC:1.5, CT_MN:5, CT_EV_MIN:3, CT_P_AMB:0.05, CT_P_RED:0.01, CT_LIST_MIN:5, CT_AT:1.3, CT_AM:3, CT_PA_WIN:20, CT_PA_PCT:10, CT_AB_EPI:2, RED_AB_DOW:70, RED_SC_DOW:75, RED_SC_PER:70, RED_YOY:3, RED_AYOY:3, RED_SA:6, RED_AP:60, ATT_LOW:90, ATT_TARGET:95, ATT_BAND_EDGES:[100,97,95,90,85], ATT_HEADROOM_WARN:3,
   SA_YRS:2, SA_MIN:5, SA_SHARE:40, SA_LEAD:2,
-  CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99, CG_HP_TIERS:{}, CG_HP_DEFAULT:[10,25,100], CG_HP_WIN:14,
+  CG_AT:1.3, CG_PA_PCT:10, CG_SC:1.5, CG_MN:3, CG_EX_PCT:99, CG_HP_TIERS:{}, CG_HP_DEFAULT:[10,25,100], CG_HP_WIN:14, CG_SANC_TIERS:[1,5], CG_DET_TIERS:[1],
   AP_MIN:3, AP_PCT:40, AP_SLOT:30, AP_MULT:2.0, AP_HIGH_ABS:40,
   SA_MIN_TOTAL:6, SA_MIN_TEACHER:3, SA_RATIO:2.0, SA_ENGAGE:3,
   SAV_RATIO:2.0, SAV_MIN:3,
@@ -3195,6 +3239,12 @@ function applyCT(){
   SC_PER_MIN=parseInt(document.getElementById('sc-per-min').value)||8;
   CG_AT=parseFloat(document.getElementById('cg-at').value)||1.3;
   CG_HP_WIN=Math.max(1,Math.round(_gv('cg-hp-win',CG_HP_WIN)));
+  (function(){
+    const lst=id=>{const e=document.getElementById(id); if(!e) return null;
+      return [...new Set(String(e.value).split(/[,\s]+/).map(Number).filter(n=>!isNaN(n)&&n>0))].sort((a,b)=>a-b);};
+    const a=lst('cg-sanc-tiers'); if(a) CG_SANC_TIERS=a;
+    const b=lst('cg-det-tiers');  if(b) CG_DET_TIERS=b;
+  })();
   // One box per year group, ids cg-hp-y7 … cg-hp-y13. Read whichever are on the page: the
   // rows depend on which years the data holds, so they cannot be a fixed list.
   (function(){
@@ -5313,7 +5363,27 @@ function attPosition(px, upto){
     safe: headroom!=null&&headroom>=left,            // could miss every remaining day
     cannotRecover: recovery!=null&&recovery>left};
 }
-function _pl(n,w){ return n+' '+w+(n===1?'':'s'); }   // hoisted, for the same reason
+function _pl(n,w){ return n+' '+w+(n===1?'':'s'); }
+// ── CONCERN AND CONGRATS DETAIL ──────────────────────────────────────────────────────
+// ⚠️ BULLETS, NOT PROSE, AND NEVER THE PUPIL'S NAME. The name is already on the row; a
+// sentence that repeats it reads as a paragraph and gets skipped. Each bullet is one fact
+// a reader can act on. Keep them to a line: the card is narrow.
+// Rendered with innerHTML, so plain text plus <strong> only.
+function _bul(lines){
+  const ls=(lines||[]).filter(Boolean);
+  if(!ls.length) return '';
+  if(ls.length===1) return ls[0];
+  return '<ul style="margin:.1rem 0 0 .9rem;padding:0;list-style:disc">'
+    +ls.map(l=>'<li style="margin:.05rem 0">'+l+'</li>').join('')+'</ul>';
+}
+// 1st, 2nd, 3rd … 11th, 12th, 13th, 21st. Replaces the words "First" and "Fifth", which
+// only worked while the thresholds were fixed at 1 and 5.
+function ord(n){
+  n=Math.round(n);
+  const t=n%100;
+  if(t>=11&&t<=13) return n+'th';
+  return n+({1:'st',2:'nd',3:'rd'}[n%10]||'th');
+}   // hoisted, for the same reason
 // One decimal, EXCEPT where rounding would carry a figure across the low or target line:
 // 89.97% is below 90 and must not read "90.0%" beside a "Crossed below 90%" tag. Those
 // cases get two decimals, so the figure agrees with toFixed(1) everywhere else in the
@@ -9799,19 +9869,31 @@ function _hmTutor(){
     });
     (DD.housePoints||[]).forEach(r=>{ if(hpD[r[0]])hpD[r[0]].push(_hmDate(r)); });
 
+    // ⚠️ ONE WINDOW FOR EVERY MILESTONE, AND IT IS THE CONFIGURED ONE. This panel used its
+    // own rolling 5 school days while the Congrats milestone used CG_HP_WIN — two systems
+    // counting the same house points to different rules.
+    // ⚠️ RATE IS NOT THIS PANEL'S JOB. Acceleration belongs to the Concerns tab and its
+    // baseline-relative test. This is events: the Nth of the year, whenever it happened.
+    const mCut=new Date(_hmToday()+'T12:00:00');
+    mCut.setDate(mCut.getDate()-CG_HP_WIN);
+    const mCutISO=mCut.getFullYear()+'-'+String(mCut.getMonth()+1).padStart(2,'0')+'-'+String(mCut.getDate()).padStart(2,'0');
     const nth=(list,n)=>{ const v=list.slice().sort(); return v.length>=n?v[n-1]:null; };
-    const inWeek=d=>d&&d>=cut;
+    const inWin=d=>d&&d>=mCutISO;
+    // The highest tier whose Nth event landed inside the window, so a pupil who passed two
+    // is reported at the more notable of them.
+    const hit=(dates,tiers)=>{
+      let best=null;
+      (tiers||[]).forEach(t=>{ const d=nth(dates,t); if(inWin(d)) best=t; });
+      return best;
+    };
     const mile=[];
     px.forEach(p=>{
       const items=[];
-      const s1=nth(sanD[p],1), s5=nth(sanD[p],5);
-      const h1=nth(hpD[p],1), h5=nth(hpD[p],5);
-      if(inWeek(s1))items.push(['First '+T('sanction',1)+'','var(--red)','of the year']);
-      else if(inWeek(s5))items.push(['Fifth '+T('sanction',1)+'','var(--red)','now on '+sanD[p].length]);
-      if(detD[p].some(inWeek))items.push([''+T('detention',1,1)+'','var(--red)',
-        detD[p].filter(inWeek).length>1?detD[p].filter(inWeek).length+' this week':'']);
-      if(inWeek(h1))items.push(['First '+T('housePoint',1)+'','var(--green)','of the year']);
-      else if(inWeek(h5))items.push(['Fifth '+T('housePoint',1)+'','var(--green)','now on '+hpD[p].length]);
+      const yg=curYG((REG[String(p)]||{}).intake);
+      const sT=hit(sanD[p],CG_SANC_TIERS), dT=hit(detD[p],CG_DET_TIERS), hT=hit(hpD[p],hpTiersFor(yg));
+      if(sT!=null)items.push([ord(sT)+' '+T('sanction',1),'var(--red)','now on '+sanD[p].length]);
+      if(dT!=null)items.push([ord(dT)+' '+T('detention',1),'var(--red)','now on '+detD[p].length]);
+      if(hT!=null)items.push([ord(hT)+' '+T('housePoint',1),'var(--green)','now on '+hpD[p].length]);
       if(items.length)mile.push({px:p,items:items,bad:items.some(i=>i[1]==='var(--red)')});
     });
     mile.sort((a,b)=>(b.bad-a.bad)||(b.items.length-a.items.length));
@@ -9870,8 +9952,9 @@ function _hmTutor(){
           +' <span style="color:var(--mu)">'+b.length+'</span></span>'
         +'<span style="flex:1">'+names+'</span></div>';
     }).join('');
-    h+=_hmPanel('Where your '+T('form',1)+' sits in the year, '+collLabel(lp),
-      'Each '+T('pupil',1)+' ranked against the <strong>whole year group</strong>, not against your '+T('form',1)+' \u2014 '
+    h+=_hmPanel('Where your '+T('form',1)+' sits in the year, based on the most recent grades',
+      'Positions are from <strong>'+collLabel(lp)+'</strong>, the most recent collection with grades. '
+      +'Each '+T('pupil',1)+' ranked against the <strong>whole year group</strong>, not against your '+T('form',1)+' \u2014 '
       +'a position among 29 says more about who else is in the room than about the '+T('pupil',1)+'. '
       +(prev?'A \u25bc or \u25b2 marks a move of 10 percentile points or more since '+collLabel(prev)+'. ':'')
       +'\u26a0\ufe0f This is position, not grade: if the whole year declines together nobody moves.',
@@ -9892,14 +9975,15 @@ function _hmTutor(){
           +(i[2]?' <span style="font-size:.64rem;color:var(--tx2)">'+i[2]+'</span>':'')
           +'</span>').join('')+'</span></div>';
     const ms=_chg.mile.slice(0,cap), mh=_chg.mile.slice(cap);
-    h+=_hmPanel('Milestones this week',
+    const _mt=(l)=>(l&&l.length)?l.map(ord).join(', '):'none';
+    h+=_hmPanel('Milestones',
       _chg.mile.length
-        ? 'Firsts and fifths in the last '+_chg.days+' school days \u2014 a '+T('pupil',1)+'\u2019s first '+T('sanction',1)+' of '
-          +'the year, their fifth, a '+T('detention',1)+', their first or fifth '+T('housePoint',1)+'. '
-          +'<strong>Events, not trends</strong>: the Concerns tab already watches rates and '
-          +'patterns, and a second system using different thresholds would only disagree with it.'
-        : 'No firsts or fifths in the last '+_chg.days+' school days. No '+T('pupil',1)+' in your '+T('form',1)+' picked up '
-          +'their first or fifth '+T('sanction',1)+' or '+T('housePoint',1)+', and none had a '+T('detention',1)+'.',
+        ? 'Counted from the start of the year, and listed for '+_pl(CG_HP_WIN,'day')+' after a '+T('pupil',1)
+          +' reaches one. Set in Admin: currently '+_mt(CG_SANC_TIERS)+' '+T('sanction',1)+', '
+          +_mt(CG_DET_TIERS)+' '+T('detention',1)+'. '
+          +'<strong>Events, not trends</strong>: the Concerns tab watches rates and patterns, and a second '
+          +'system using different thresholds would only disagree with it.'
+        : 'No '+T('pupil',1)+' in your '+T('form',1)+' has reached a milestone in the last '+_pl(CG_HP_WIN,'day')+'.',
       _chg.mile.length?(ms.map(mline).join('')+_hmMore(mh.map(mline).join(''),mh.length)):'');
 
     const aline=r=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.32rem;font-size:.72rem">'
@@ -9912,15 +9996,10 @@ function _hmTutor(){
     const as=_chg.att.slice(0,cap), ah=_chg.att.slice(cap);
     h+=_hmPanel('Attendance: distance from the line',
       _chg.att.length
-        ? 'Measured in <strong>school days</strong>, not percentage points. A year-to-date figure '
-          +'gets harder to move as the year goes on \u2014 one day missed shifts it about 4 points in '
-          +'September and half a point in July \u2014 so a '+T('pupil',1)+' two points above '+ATT_LOW+'% is one '
-          +'bad day from it in October and a week from it in June. Days mean the same thing all year. '
-          +'Listed: '+T('pupil',2)+' who crossed below '+ATT_LOW+'% this week, '+T('pupil',2)+' below it and still falling, '
-          +''+T('pupil',2)+' within '+_pl(ATT_HEADROOM_WARN,'day')+' of it, and '+T('pupil',2)+' below it whose last 20 '
-          +'school days are back above it.'
-        : 'Nobody crossed below '+ATT_LOW+'% this week, nobody below it is still falling, and nobody '
-          +'is within '+_pl(ATT_HEADROOM_WARN,'day')+' of it.',
+        ? 'How far each '+T('pupil',1)+' is from '+ATT_LOW+'%, in <strong>school days</strong>. '
+          +'A missed day moves the year figure about 4 points in September and half a point in July, '
+          +'so days mean the same all year and percentage points do not.'
+        : 'Nobody is within '+_pl(ATT_HEADROOM_WARN,'day')+' of '+ATT_LOW+'%, below it, or falling.',
       _chg.att.length?(as.map(aline).join('')+_hmMore(ah.map(aline).join(''),ah.length)):'');
   }
 
@@ -11539,7 +11618,7 @@ function _hmSLT(){
       +['top','second','third','bottom'].map((l,i)=>'<span><span style="display:inline-block;width:9px;height:9px;'
         +'border-radius:2px;background:'+QC[i]+';margin-right:.25rem;vertical-align:middle"></span>'
         +l+' quarter</span>').join('')+'</div>';
-    h+=_hmPanel('Where each group sits in the year, '+collLabel(lp),
+    h+=_hmPanel('Where each group sits in the year, based on the most recent grades',
       'Attainment <strong>position</strong>, not grade. Each '+T('pupil',1)+' is ranked against the whole year '
       +'group and placed in a quarter; the bars show how each group is spread across those quarters. '
       +'An even school would show four equal blocks on every row. '
@@ -15352,7 +15431,11 @@ function rPeer(){
     if(_pAbs>0 && a20.rate>_pAbs*CT_AT && a20.absent>=CT_AM && _ep20>=CT_AB_EPI){
       _attDecl=true;
       const sev=a20.rate>_pAbs*2?'red':'amber';
-      items.push({type:'att-rising',subkey:'',label:'Attendance Declining',severity:sev,detail:`${fn} has been absent for ${a20.absent} ${T('period',2,1)} in the last 20 school days (${a20.rate.toFixed(1)}% of ${T('period',2,1)}) compared with a ${a60.rate.toFixed(1)}% average over the last 60 days (${(a20.rate/a60.rate).toFixed(1)}× historic rolling average). Spread across ${_ep20} separate absences, so not a single illness.`});
+      items.push({type:'att-rising',subkey:'',label:'Attendance Declining',severity:sev,detail:_bul([
+        `Absent for <strong>${a20.absent} ${T('period',2)}</strong> in the last 20 school days (${a20.rate.toFixed(1)}%)`,
+        `Against ${_pAbs.toFixed(1)}% over the previous 40 \u2014 ${(a20.rate/_pAbs).toFixed(1)}\u00d7`,
+        `Spread across ${_pl(_ep20,'separate absence')}, so not one illness`
+      ])});
     }
     // ── 2. PERSISTENT ABSENCE ──
     // ⚠️ YEAR TO DATE, THE DfE DEFINITION — NOT A ROLLING WINDOW.
@@ -15372,11 +15455,15 @@ function rPeer(){
       const aPA=attRAMod(px,_sdPA);
       if(aPA.rate>=CT_PA_PCT){
         items.push({type:'att-pa',subkey:'',label:'Persistent Absence',severity:'red',
-          detail:`${fn} has attended ${(100-aPA.rate).toFixed(1)}% of ${T('period',2)} so far this year `
-            +`\u2014 ${aPA.absent} missed of ${_sdPA*(_hmPerPerDay()||5)}. `
-            +`The DfE counts a ${T('pupil',1)} as persistently absent below ${100-CT_PA_PCT}%. `
-            +`This is a LEVEL, measured across the whole year; Attendance Declining covers `
-            +`recent change separately.`});
+          // ⚠️ ROUND THE DENOMINATOR. _hmPerPerDay() is a MEAN across weeks (4.72 at TWS,
+          // because short weeks drag it below the timetabled 5), so this printed
+          // "71 missed of 679.0228187919463" on screen. It is an estimate either way; it
+          // must at least look like one.
+          detail:_bul([
+            `<strong>${(100-aPA.rate).toFixed(1)}%</strong> attendance so far this year `
+              +`(missed ${aPA.absent} of about ${Math.round(_sdPA*(_hmPerPerDay()||5))})`,
+            `Below the DfE's ${100-CT_PA_PCT}% persistent absence mark`
+          ])});
       }
     }
     // 3. Sanctions Increase — Sudden / Recent / Long-Term, by baseline window
@@ -15445,14 +15532,20 @@ function rPeer(){
       const worst=sortedFlags[0];
       const overallTxt=worst.pupilOverallRate!=null?`${worst.pupilOverallRate.toFixed(0)}% overall`:'their overall rate';
       const more=sortedFlags.length>1?` + ${sortedFlags.length-1} more ${T('period',2,1)}`:'';
-      items.push({type:'abs-pattern',subkey:'',label:'Absence Pattern',severity:worst.rate>=RED_AP?'red':'amber',detail:`${fn} seems to regularly miss ${worst.day} P${worst.per}. There have been ${worst.count} absences (a ${worst.rate.toFixed(0)}% rate vs ${overallTxt})${more}.`});
+      items.push({type:'abs-pattern',subkey:'',label:'Absence Pattern',severity:worst.rate>=RED_AP?'red':'amber',detail:_bul([
+      `Regularly misses <strong>${worst.day} P${worst.per}</strong> \u2014 ${worst.count} absences`,
+      `${worst.rate.toFixed(0)}% absence rate in that slot, against ${overallTxt}`
+    ])});
     }
     // 5. Subject Avoidance
     const avoidFlags=getSubjectAvoidance(px);
     avoidFlags.forEach(a=>{
       const sev=parseFloat(a.ratio)>=RED_SA?'red':'amber';
       const breakdown=a.p1Whole?`${a.partial} partial-day and ${a.p1Whole} whole-day where ${a.subj} was P1`:`${a.partial} partial-day`;
-      items.push({type:'subj-avoid',subkey:a.subj,label:'Possible Subject Avoidance',severity:sev,detail:`${fn} may be avoiding ${a.subj}. They have ${a.absences} subject absences (${breakdown}). This represents a ${a.actualPct}% absence rate vs an expected rate of ${a.expectedPct}%. ${a.ratio}× expectations.`});
+      items.push({type:'subj-avoid',subkey:a.subj,label:'Possible Subject Avoidance',severity:sev,detail:_bul([
+      `May be avoiding <strong>${a.subj}</strong> \u2014 ${a.absences} subject absences (${breakdown})`,
+      `${a.actualPct}% absence rate against an expected ${a.expectedPct}% \u2014 ${a.ratio}\u00d7`
+    ])});
     });
     // 6. Sanctions Concentration (per-teacher)
     const scFlags=getSanctionsConcentration(px);
@@ -15460,11 +15553,17 @@ function rPeer(){
     scFlags.forEach(f=>{
       const sev=parseFloat(f.ratio)>=RED_SA?'red':'amber';
       const subjLabel=f.subjects.length>1?`${f.subjects.slice(0,-1).join(', ')} & ${f.subjects.slice(-1)}`:f.subjects[0];
-      let detail=`${fn} is receiving more ${T('sanction',2)} from ${f.teacher} (${f.subjects.join(', ')}) than expected, given ${T('sanction',2)} in other lessons. ${f.codes}/${f.totalCodes} subject codes are in ${subjLabel} (${f.actualPct}% vs expected ${f.expectedPct}%).`;
+      // Built as a list of bullets so the engagement note becomes one of them rather than
+      // a sentence tacked on after the closing </ul>.
+      const _lines=[
+        `More ${T('sanction',2)} from <strong>${f.teacher}</strong> (${f.subjects.join(', ')}) than expected`,
+        `${f.count} of ${f.total} this year \u2014 ${f.ratio}\u00d7 the rate from their other teachers`
+      ];
       const eng=engFlags.find(e=>e.subj===f.subjects[0]);
       if(eng){
-        detail+=` There may also be an Engagement issue because there are ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''}).`;
+        _lines.push(`Possibly engagement too \u2014 ${eng.totalCorr} correlated absences (${eng.corrPartial} partial-day${eng.corrP1Whole?', '+eng.corrP1Whole+' P1 whole-day':''})`);
       }
+      const detail=_bul(_lines);
       items.push({type:'sanc-conc',subkey:f.teacher,label:''+T('sanction',2,1)+' Concentration',severity:sev,detail});
     });
 
@@ -15511,11 +15610,11 @@ function rPeer(){
         items.push({type:'seasonal-abs',subkey:String(m),
           label:'Recurring Seasonal Absence',
           severity:hits.length>=3?'red':'amber',
-          detail:`${fn} has been absent in ${MNAMES[m-1]} in ${hits.length} of the last `
-            +`${ays.filter(a=>a<curAY).length} years (`+counts.join(', ')+` sessions), each time `
-            +`accounting for ${Math.min.apply(null,shares)}\u2013${Math.max.apply(null,shares)}% of `
-            +`that year's absence. ${MNAMES[m-1]} is `
-            +(ahead===0?'under way now':ahead===1?'next month':`${ahead} months away`)+`.`});
+          detail:_bul([
+      `Absent in <strong>${MNAMES[m-1]}</strong> in ${hits.length} of the last ${ays.filter(a=>a<curAY).length} years (${counts.join(', ')} sessions)`,
+      `Each time ${Math.min.apply(null,shares)}\u2013${Math.max.apply(null,shares)}% of that year's absence`,
+      `${MNAMES[m-1]} is ${ahead===0?'under way now':ahead===1?'next month':ahead+' months away'}`
+    ])});
       }
     })();
 
@@ -15535,10 +15634,11 @@ function rPeer(){
                  +`against ${_accel.expected<1?_accel.expected.toFixed(1):Math.round(_accel.expected)} `
                  +`typical for them`;
       items.push({type:'disengage',subkey:'',label:'Possible Disengagement',severity:'red',
-        detail:`${fn} is absent more AND being sanctioned more at the same time \u2014 absence `
-          +`${a20.rate.toFixed(0)}% over the last 20 school days against ${_pAbs.toFixed(0)}% before that, `
-          +`and ${_sTxt}. Either on its own is common; together they are `
-          +`the pattern that usually comes before a ${T('pupil',1)} withdraws from school life.`});
+        detail:_bul([
+          `Absence ${a20.rate.toFixed(0)}% over the last 20 school days, against ${_pAbs.toFixed(0)}% before`,
+          `And ${_sTxt}`,
+          `<strong>Both at once</strong> \u2014 the pattern that usually precedes withdrawal`
+        ])});
     }
 
     // ── 6c. ESCALATING YEAR ON YEAR ──
@@ -15571,10 +15671,11 @@ function rPeer(){
       const x=(rNow/rPrev);
       items.push({type:'yoy-escalate',subkey:'',label:'Escalating year on year',
         severity:x>=RED_YOY?'red':'amber',   // absolute multiple, not a multiple of the amber threshold
-        detail:`${fn} has had ${cNow} sanction${cNow===1?'':'s'} so far this year against `
-          +`${cPrev} by the same point last year \u2014 ${x.toFixed(1)}\u00d7 the rate, weighted. `
-          +`⚠️ Nothing else would show this: every other trigger compares at most the last `
-          +`100 school days, and within this year alone the pattern is steady.`});
+        detail:_bul([
+      `<strong>${cNow} ${T('sanction',cNow===1?1:2)}</strong> so far this year, against ${cPrev} by this point last year`,
+      `${x.toFixed(1)}\u00d7 the rate, weighted`,
+      `Only visible across years \u2014 within this year the pattern is steady`
+    ])});
     })();
 
     // ── 6d. ABSENCE ESCALATING YEAR ON YEAR ──
@@ -15606,10 +15707,11 @@ function rPeer(){
       const pctNow=100-(aNow/(dNow*ppd)*100), pctPrev=100-(aPrev/(dPrev*ppd)*100);
       items.push({type:'yoy-absence',subkey:'',label:'Absence escalating year on year',
         severity:(rNow/rPrev)>=RED_AYOY?'red':'amber',
-        detail:`${fn}'s attendance is ${pctNow.toFixed(1)}% so far this year against `
-          +`${pctPrev.toFixed(1)}% by the same point last year \u2014 ${aNow} absent ${T('period',2)} `
-          +`against ${aPrev}. A drift of a few points a year never looks like a decline `
-          +`inside any single year, so nothing else would show it.`});
+        detail:_bul([
+      `<strong>${pctNow.toFixed(1)}%</strong> attendance so far this year, against ${pctPrev.toFixed(1)}% by this point last year`,
+      `${aNow} absent ${T('period',2)} against ${aPrev}`,
+      `A few points a year never looks like a decline inside one year`
+    ])});
     })();
 
     // ── 6e. ENTERED THE TOP DECILE ──
@@ -15635,10 +15737,11 @@ function rPeer(){
       const rank=peers.map(p=>now[p]||0).filter(v=>v>mine).length+1;
       items.push({type:'decile',subkey:'',tutorOnly:true,
         label:'Entered the top '+DEC_PCT+'% for '+T('sanction',2)+'',severity:'red',
-        detail:`${fn} has entered the worst ${DEC_PCT}% of ${yg} for ${T('sanction',2)} this year \u2014 `
-          +`${mine} ${T('sanction',2)}, ranking ${rank} of ${peers.length}. Six weeks ago they were `
-          +`outside it. This flags the crossing, not the standing: it will not fire again `
-          +`while they stay there.`});
+        detail:_bul([
+          `Now in the worst ${DEC_PCT}% of ${ygLabel(yg)} for ${T('sanction',2)} \u2014 ${mine} this year, ${rank} of ${peers.length}`,
+          `Outside it six weeks ago`,
+          `Flags the crossing only \u2014 it will not fire again while they stay there`
+        ])});
     })();
 
     // ── 6e-ii. PERSISTENTLY HIGH SANCTIONS (STANDING, NOT CROSSING) ──
@@ -15668,10 +15771,11 @@ function rPeer(){
       const med=_dc.median;
       items.push({type:'sanc-level',subkey:'',severity:'amber',
         label:'Persistently high '+T('sanction',2)+'',
-        detail:`${fn} is in the worst ${DEC_PCT}% of ${yg} for ${T('sanction',2)} this year \u2014 `
-          +`${mine} so far, ranking ${rank} of ${peers.length}, against a year-group median `
-          +`of ${med}. This is a standing position rather than a change: it will not appear `
-          +`as an increase, because nothing has increased.`});
+        detail:_bul([
+          `<strong>${mine} ${T('sanction',2)}</strong> this year \u2014 ${rank} of ${peers.length} in ${ygLabel(yg)}`,
+          `Year group median is ${med}`,
+          `A standing position, not a change \u2014 it will not show as an increase`
+        ])});
     })();
 
     // ── 6f. ATTAINMENT POSITION FALLING ──
@@ -15699,10 +15803,11 @@ function rPeer(){
       const QL=['top','second','third','bottom'];
       items.push({type:'pos-drop',subkey:'',label:'Attainment position falling',
         severity:(fell>=2||moved>=50)?'red':'amber',
-        detail:`${fn} has moved from the ${QL[qw-1]} quarter of the year group to the `
-          +`${QL[qn-1]} \u2014 ${ord(was)} percentile in ${collLabel(p5)}, ${ord(now)} in ${collLabel(lp)}. `
-          +`\u26a0\ufe0f This is position against peers, not a grade: it counts only because the rest `
-          +`of the cohort did not move the same way.`});
+        detail:_bul([
+      `Moved from the <strong>${QL[qw-1]} quarter</strong> of the year group to the ${QL[qn-1]}`,
+      `${ord(was)} percentile in ${collLabel(p5)}, ${ord(now)} in ${collLabel(lp)}`,
+      `Position against peers, not a grade \u2014 the rest of the cohort did not move the same way`
+    ])});
     })();
 
     // ── 7a. ABSENCE ON ONE DAY OF THE WEEK ──
@@ -15743,11 +15848,10 @@ function rPeer(){
       const wd=wholeDays[top]||0;
       items.push({type:'abs-dow',subkey:top,label:'Absence on one day',
         severity:pct>=RED_AB_DOW?'red':'amber',
-        detail:`${Math.round(pct)}% of ${fn}'s absence this year falls on a ${top} `
-          +`\u2014 ${byDay[top]} of ${n} periods`
-          +(wd?`, including ${wd} whole ${top}${wd===1?'':'s'}`:'')
-          +`. A ${T('pupil',1)} who misses one weekday repeatedly can still have a perfectly `
-          +`ordinary overall attendance figure, so this will not show up anywhere else.`});
+        detail:_bul([
+      `<strong>${Math.round(pct)}%</strong> of this year's absence falls on a ${top} \u2014 ${byDay[top]} of ${n} ${T('period',2)}`+(wd?`, including ${wd} whole ${top}${wd===1?'':'s'}`:''),
+      `One weekday missed repeatedly still leaves an ordinary overall figure`
+    ])});
     })();
 
     // ── 7b. SANCTIONS ON ONE DAY / IN ONE PERIOD ──
@@ -15785,21 +15889,22 @@ function rPeer(){
       if(dw&&dw.total>=SC_DOW_MIN&&dw.pct>=SC_DOW_PCT){
         items.push({type:'sanc-dow',subkey:dw.top,label:''+T('sanction',2,1)+' on one day',
           severity:dw.pct>=RED_SC_DOW?'red':'amber',
-          detail:`${Math.round(dw.pct)}% of ${fn}'s ${T('sanction',2)} this year fall on a ${dw.top} `
-            +`\u2014 ${dw.count} of ${dw.total}.`
-            +(dw.subs.length?` Mostly ${named(dw.subs.slice(0,3))}.`:'')
-            +` A day with this much of the total usually points at something in the timetable `
-            +`or the routine around it rather than at the ${T('pupil',1)}.`});
+          detail:_bul([
+      `<strong>${Math.round(dw.pct)}%</strong> of this year's ${T('sanction',2)} fall on a ${dw.top} \u2014 ${dw.count} of ${dw.total}`
+        +(dw.subs.length?`, mostly ${named(dw.subs.slice(0,3))}`:''),
+      `Usually the timetable or the routine around it rather than the ${T('pupil',1)}`
+    ])});
       }
 
       const pr=tally(r=>r[4]||null);
       if(pr&&pr.total>=SC_PER_MIN&&pr.pct>=SC_PER_PCT){
         items.push({type:'sanc-period',subkey:String(pr.top),label:''+T('sanction',2,1)+' in one '+T('period',1)+'',
           severity:pr.pct>=RED_SC_PER?'red':'amber',
-          detail:`${Math.round(pr.pct)}% of ${fn}'s ${T('sanction',2)} this year are in ${T('period',1)} ${pr.top} `
-            +`\u2014 ${pr.count} of ${pr.total}.`
-            +(pr.subs.length?` Mostly ${named(pr.subs.slice(0,3))}.`:'')
-            +` Worth checking what happens immediately before that lesson.`});
+          detail:_bul([
+      `<strong>${Math.round(pr.pct)}%</strong> of this year's ${T('sanction',2)} are in ${T('period',1)} ${pr.top} \u2014 ${pr.count} of ${pr.total}`
+        +(pr.subs.length?`, mostly ${named(pr.subs.slice(0,3))}`:''),
+      `Worth checking what happens immediately before that lesson`
+    ])});
       }
     })();
 
@@ -15866,15 +15971,18 @@ function rPeer(){
       if(ab.length){
         items.push({type:'attain-drop',subkey:'',label:'Attainment Dropped',
           severity:(ab.length>=3||ab.some(x=>x.by>=3))?'red':'amber',
-          detail:`${fn} has dropped ${ab.length===1?'a band':ab[0].by+' bands'} or more in `
-            +`${ab.length} subject${ab.length===1?'':'s'} between ${lbl(p5)} and ${lbl(lp)} `
-            +`\u2014 ${name(ab)}.`});
+          detail:_bul([
+      `Dropped ${ab.length===1?'a band':ab[0].by+' bands'} or more in <strong>${_pl(ab.length,'subject')}</strong> between ${lbl(p5)} and ${lbl(lp)}`,
+      name(ab)
+    ])});
       }
       if(ef.length){
         items.push({type:'effort-drop',subkey:'',label:'Effort Dropped',
           severity:(ef.length>=3)?'red':'amber',
-          detail:`${fn}'s effort grade has fallen in ${ef.length} subject${ef.length===1?'':'s'} `
-            +`between ${lbl(p5)} and ${lbl(lp)} \u2014 ${name(ef)}.`});
+          detail:_bul([
+      `Effort grade fallen in <strong>${_pl(ef.length,'subject')}</strong> between ${lbl(p5)} and ${lbl(lp)}`,
+      name(ef)
+    ])});
       }
     })();
 
@@ -15976,7 +16084,10 @@ function rPeer(){
       attImp=true;const strong=a20.rate*2<_pAbsI;
       const fac=a20.rate>0?` (${(a60.rate/a20.rate).toFixed(1)}× better than their rolling average)`:'';
       items.push({label:'Attendance Improving',severity:strong?'green-strong':'green',
-        detail:`${fn} is recovering from a high absence rate — ${a20.rate.toFixed(1)}% of ${T('period',2)} missed over the last 20 school days vs ${a60.rate.toFixed(1)}% across 60 days${fac}.`});
+        detail:_bul([
+      `Absence down to <strong>${a20.rate.toFixed(1)}%</strong> over the last 20 school days`,
+      `Against ${a60.rate.toFixed(1)}% across 60 days${fac}`
+    ])});
     }
     // ── HOUSE POINT MILESTONE (Pupil page and Form Tutor page only) ──
     (function(){
@@ -15996,9 +16107,11 @@ function rPeer(){
       const nice=new Date(when+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'long'});
       items.push({label:''+T('housePoint',1,2)+' Milestone', severity:top?'green-strong':'green',
         tutorOnly:true,
-        detail:`${fn} passed ${tier} ${T('housePoint',2)} on ${nice}`
-          +(top?', the highest milestone set for ':', a milestone set for ')+ygLabel(yg)
-          +`. They are on ${dates.length} for the year.`});
+        detail:_bul([
+          `Passed <strong>${tier} ${T('housePoint',2)}</strong> on ${nice}`,
+          `Now on ${dates.length} for the year`,
+          top?`The highest milestone set for ${ygLabel(yg)}`:`A milestone set for ${ygLabel(yg)}`
+        ])});
     })();
     const s20=sanRAMod(px,yg,20),s60=sanRAMod(px,yg,60),c20=sanCountInMod(px,yg,20),c60=sanCountInMod(px,yg,60);
     let sancRed=false;
@@ -16006,11 +16119,14 @@ function rPeer(){
         if((c60-c20)>=CG_MN && _pSan>0 && s20*CG_SC<_pSan){
       sancRed=true;const strong=s20*2<_pSan;
       items.push({label:''+T('sanction',2,1)+' Reducing',severity:strong?'green-strong':'green',
-        detail:`${fn} is easing off — only ${c20} sanction${c20===1?'':'s'} in the last 20 school days after ${c60-c20} in the prior 40 (weighted ${s20.toFixed(1)} now against ${_pSan.toFixed(1)} then).`});
+        detail:_bul([
+      `Only <strong>${c20} ${T('sanction',c20===1?1:2)}</strong> in the last 20 school days, after ${c60-c20} in the prior 40`,
+      `Weighted ${s20.toFixed(1)} now against ${_pSan.toFixed(1)} then`
+    ])});
     }
     if(attImp&&sancRed){
       items.push({label:'Re-engaging',severity:'green-strong',
-        detail:`Recovering attendance and easing ${T('sanction',2)} at once — a genuine turnaround for ${fn}.`});
+        detail:`Attendance recovering and ${T('sanction',2)} easing <strong>at once</strong> \u2014 a genuine turnaround`});
     }
     if((DD.timetables[String(CAY)]||{})[String(px)]){
       const _abs=countAbsPeriods(px,_ay,_tISO).total;
@@ -16018,10 +16134,10 @@ function rPeer(){
       const _pct=_T>0?((_T-_abs)/_T*100):0;
       if(_abs===0){
         items.push({label:'Perfect Attendance',severity:'green-strong',
-          detail:`${fn} has 100% attendance this year — not a single ${T('period',1)} missed since September.`});
+          detail:`<strong>100%</strong> attendance this year \u2014 not a single ${T('period',1)} missed since September`});
       } else if(_pct>=CG_EX_PCT){
         items.push({label:'Excellent Attendance',severity:'green-strong',
-          detail:`${fn} has ${_pct.toFixed(1)}% attendance this year — only ${_abs} period${_abs===1?'':'s'} missed since September.`});
+          detail:`<strong>${_pct.toFixed(1)}%</strong> attendance this year \u2014 only ${_pl(_abs,T('period',1))} missed since September`});
       }
     }
 
@@ -16054,8 +16170,10 @@ function rPeer(){
       up.sort((a,b)=>b.by-a.by);
       const name=l=>l.length>1?l.slice(0,-1).map(x=>x.s).join(', ')+' and '+l[l.length-1].s:l[0].s;
       items.push({label:'Effort Improving',severity:up.length>=3?'green-strong':'green',
-        detail:`${fn}'s effort grade has improved in ${up.length} subject${up.length===1?'':'s'} `
-          +`between ${p5} and ${lp} \u2014 ${name(up)}.`});
+        detail:_bul([
+      `Effort grade improved in <strong>${_pl(up.length,'subject')}</strong> between ${p5} and ${lp}`,
+      name(up)
+    ])});
     })();
 
     // ── IMPROVING YEAR ON YEAR ──
@@ -16083,10 +16201,11 @@ function rPeer(){
       if(rNow>rPrev*CG_YOY)return;
       const cut=Math.round((1-rNow/rPrev)*100);
       items.push({label:'Improving year on year',severity:cut>=70?'green-strong':'green',
-        detail:`${fn} has had ${cNow} sanction${cNow===1?'':'s'} so far this year against `
-          +`${cPrev} by the same point last year \u2014 a ${cut}% reduction. `
-          +`Nothing else would show this: every other measure compares at most the last 100 `
-          +`school days, and the improvement happened across years.`});
+        detail:_bul([
+      `<strong>${cNow} ${T('sanction',cNow===1?1:2)}</strong> so far this year, against ${cPrev} by this point last year`,
+      `A ${cut}% reduction`,
+      `Only visible across years \u2014 every other measure looks back 100 school days at most`
+    ])});
     })();
 
     return items;
@@ -17572,7 +17691,7 @@ ${groupPanel(
           inputRow('Minimum persistently-absent '+T('pupil',2)+'','tg-pa-min',TG_PA_MIN,{min:1,max:20,step:1,hint:'Minimum number of '+T('pupil',2)+' meeting Persistent Absence threshold to fire PA cluster flag. Default 3.'})
         )}
         ${groupPanel(
-          '🎉 Congrats / Praise Thresholds',
+          '🎉 Milestones, Congrats and Praise Thresholds',
           'Controls the positive mirror shown in the Congrats view and the '+T('pupil',1)+' "Going Well" panel — fully independent of the concern thresholds above. Defaults match their concern counterparts; LOWER a value to make praise easier to earn. (Perfect Attendance is hard-wired at 100% all year; Excellent Attendance uses the threshold below. Re-engaging fires automatically when both Attendance Improving and '+T('sanction',2,1)+' Reducing fire.)',
           'Concerns & Congrats tab → Congrats view; '+T('pupil',1,1)+' tab → Going Well panel',
           inputRow('Attendance improvement multiplier','cg-at',CG_AT,{min:1.0,max:3.0,step:0.05,hint:'Recent (20sd) absence rate must be at least this many times BETTER than the 60-day baseline to praise. Default 1.3. Lower this to celebrate smaller improvements.'})+
@@ -17580,6 +17699,8 @@ ${groupPanel(
           inputRow(''+T('sanction',2,1)+' reduction multiplier','cg-sc',CG_SC,{min:0.5,max:5,step:0.1,hint:'Recent (20sd) weighted '+T('sanction',1)+' score must be at least this many times LOWER than the 60-day baseline to praise. Default 1.5×. Lower this to celebrate smaller reductions.'})+
           inputRow('Minimum prior '+T('sanction',2)+'','cg-mn',CG_MN,{min:0,max:50,step:1,hint:'A '+T('pupil',1)+' must have had at least this many '+T('sanction',2)+' earlier in the 60-day window (before the recent 20 days) to count as reducing. Default 3. Lower this to praise '+T('pupil',2)+' with fewer prior '+T('sanction',2)+'.'})+
           _ygPresent().map((yg,i)=>inputRow(''+T('housePoint',1,1)+' milestones \u2014 '+ygLabel(yg),'cg-hp-y'+yg,hpTiersFor(yg).join(', '),{text:true,hint:i===0?'Milestones for this year group, comma-separated \u2014 for example 10, 25, 100. A '+T('pupil',1)+' is congratulated when they REACH one, and stays on the list for the number of days below. Leave a box blank to flag nothing for that year group. \u26a0\ufe0f Shown on the '+T('pupil',1,1)+' page and the '+T('formTutor',1,2)+' page only, never to a '+T('yearLeader',1)+' or SLT \u2014 by the summer term most of a year group would be on it.':''})).join('')
+          +inputRow('Milestones \u2014 '+T('sanction',2,1),'cg-sanc-tiers',(CG_SANC_TIERS||[]).join(', '),{text:true,hint:'Which '+T('sanction',1)+' of the year is worth telling a '+T('formTutor',1)+' about, comma-separated \u2014 e.g. 1, 5. Blank flags none. \u26a0\ufe0f Previously fixed at 1 and 5 in the code, with \u201cFirst\u201d and \u201cFifth\u201d written into the labels. They now read as ordinals, so any number works.'})
+          +inputRow('Milestones \u2014 '+T('detention',2,1),'cg-det-tiers',(CG_DET_TIERS||[]).join(', '),{text:true,hint:'The same for '+T('detention',2)+'. Default 1 \u2014 the first of the year.'})
           +inputRow('Keep a milestone on the list for (days)','cg-hp-win',CG_HP_WIN,{min:1,max:120,step:1,hint:'How long after reaching a milestone it stays on the '+T('formTutor',1,2)+' page. Counted back from the most recent '+T('housePoint',1)+' in the school rather than today\u2019s date, so the list does not empty itself out between rebuilds.'})
           +inputRow('Excellent attendance threshold (%)','cg-ex-pct',CG_EX_PCT,{min:90,max:100,step:0.1,hint:''+T('pupil',2,1)+' with at least this whole-year attendance percentage — but below 100% — earn an Excellent Attendance flag. '+T('pupil',2,1)+' at exactly 100% earn Perfect Attendance instead (hard-wired). Default 99%.'})
         )}
