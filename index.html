@@ -9530,14 +9530,6 @@ function _hmInfographics(ns){
     // Both are deliberate and neither is a mistake, but a page reporting two different
     // averages without saying so is how a reader stops trusting either. Say which, and
     // say why, once — here, where the two meet.
-    + '<div style="font-size:.66rem;color:var(--tx2);margin:-.2rem 0 .5rem">'
-      + 'These charts use a <strong>Winsorised mean</strong>: the top and bottom 10% are pulled in '
-      + 'to the 10th and 90th percentile rather than dropped, so every '+T('pupil',1)+' stays in the '
-      + 'denominator but one extreme '+T('pupil',1)+' cannot move a '+T('form',1)+'\u2019s bar. That suits comparing '
-      + ''+T('form',2)+' of similar size. The group breakdown lower down uses a <strong>median</strong> '
-      + 'instead, because those groups are small and heavily skewed \u2014 a few '+T('pupil',2)+' with very '
-      + 'high counts would carry the average. Different questions, different measure.'
-    + '</div>'
     + parts + '</details>';
 }
 
@@ -9938,11 +9930,8 @@ function _hmTutor(){
         +'<span style="flex:1">'+names+'</span></div>';
     }).join('');
     h+=_hmPanel('Where your '+T('form',1)+' sits in the year, based on the most recent grades',
-      'Positions are from <strong>'+collLabel(lp)+'</strong>, the most recent collection with grades. '
-      +'Each '+T('pupil',1)+' ranked against the <strong>whole year group</strong>, not against your '+T('form',1)+' \u2014 '
-      +'a position among 29 says more about who else is in the room than about the '+T('pupil',1)+'. '
-      +(prev?'A \u25bc or \u25b2 marks a move of 10 percentile points or more since '+collLabel(prev)+'. ':'')
-      +'\u26a0\ufe0f This is position, not grade: if the whole year declines together nobody moves.',
+      'Ranked against the whole year group. '+collLabel(lp)
+      +(prev?', \u25bc\u25b2 = 10+ percentile points since '+collLabel(prev):''),
       body);
   })();
 
@@ -9963,12 +9952,8 @@ function _hmTutor(){
     const _mt=(l)=>(l&&l.length)?l.map(ord).join(', '):'none';
     h+=_hmPanel('Milestones',
       _chg.mile.length
-        ? 'Counted from the start of the year, and listed for '+_pl(CG_HP_WIN,'day')+' after a '+T('pupil',1)
-          +' reaches one. Set in Admin: currently '+_mt(CG_SANC_TIERS)+' '+T('sanction',1)+', '
-          +_mt(CG_DET_TIERS)+' '+T('detention',1)+'. '
-          +'<strong>Events, not trends</strong>: the Concerns tab watches rates and patterns, and a second '
-          +'system using different thresholds would only disagree with it.'
-        : 'No '+T('pupil',1)+' in your '+T('form',1)+' has reached a milestone in the last '+_pl(CG_HP_WIN,'day')+'.',
+        ? 'Reached in the last '+_pl(CG_HP_WIN,'day')+'.'
+        : 'None in the last '+_pl(CG_HP_WIN,'day')+'.',
       _chg.mile.length?(ms.map(mline).join('')+_hmMore(mh.map(mline).join(''),mh.length)):'');
 
     const aline=r=>'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.32rem;font-size:.72rem">'
@@ -9999,14 +9984,13 @@ function _hmTutor(){
       c.considered?' <span style="font-size:.6rem;color:var(--tx2)">'+c.considered+' already considered</span>':'');
     const cap=_hmCapBySeverity(con,_hmCap('HM_AMBER_TG',4));
     conPanel=_hmPanel('Needs attention',
-      'The Concerns tab triggers, for your '+T('form',1)+'. Marking one considered here hides it there too.'
-      +(cap.hidden.length?' Every red is shown; '+cap.hidden.length+' amber '+(cap.hidden.length===1?''+T('pupil',1)+' is':''+T('pupil',2)+' are')+' below.':''),
+      (cap.hidden.length?'Every red shown; '+cap.hidden.length+' amber below.':''),
       cap.shown.map(blk).join('')+_hmMore(cap.hidden.map(blk).join(''),cap.hidden.length));
   }
   if(good.length){
     const gblk=g=>_hmPupilBlock(g.px,g.items.map(_hmGoodRow).join(''),'');
     const gcap=_hmCap('HM_AMBER_TG',4);
-    goodPanel=_hmPanel('Going well','The Congrats triggers. Worth a word for the right reason.',
+    goodPanel=_hmPanel('Going well','',
       good.slice(0,gcap).map(gblk).join('')
       +_hmMore(good.slice(gcap).map(gblk).join(''),Math.max(0,good.length-gcap)));
   }
@@ -10114,11 +10098,7 @@ function _hmYearLeader(){
     };
     const tot=[0,0,0,0]; fkeys.forEach(f=>forms[f].forEach((c,i)=>tot[i]+=c));
     h+=_hmPanel('Attainment position by '+T('form',1)+', '+collLabel(lp),
-      'Each '+T('pupil',1)+' ranked against the whole <strong>year group</strong> and placed in a quarter. '
-      +''+T('form',2,1)+' are usually mixed-ability, so an even spread is the expectation and an uneven one '
-      +'is worth a look \u2014 though a '+T('form',1)+' built around a setted subject, or one carrying more '
-      +'additional needs, will legitimately differ. '
-      +'\u26a0\ufe0f This is position, not grade: a year group that declines together shows no change.',
+      '',
       '<div style="display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.4rem;font-size:.66rem;color:var(--tx2)">'
       +['top','second','third','bottom'].map((l,i)=>'<span><span style="display:inline-block;width:9px;height:9px;'
         +'border-radius:2px;background:'+QC[i]+';margin-right:.25rem;vertical-align:middle"></span>'+l+' quarter</span>').join('')
