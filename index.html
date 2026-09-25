@@ -9147,12 +9147,7 @@ function _hmPanelPeers(){
 
   return _hmPanel(peers.me ? 'Your '+T('form',1)+' against the year group'
                            : 'Every '+T('form',1)+' in ' + ygLabelOf(peers.year),
-    (peers.me ? peers.me + ' is highlighted. ' : '')
-    + 'Attendance is the straight average, next to it a count of '+T('pupil',2)+' below 90% \u2014 '
-    + 'the national persistent-absence line, and the number a '+T('form',1)+' is actually judged on. '
-    + 'Positives and '+T('sanction',2)+' show two bars: the pale one counts every '+T('pupil',1)+', the solid '
-    + 'one leaves out the highest and lowest few, so where they are far apart a small '
-    + 'number of '+T('pupil',2)+' is moving the figure. The dashed line is the ' + ygLabelOf(peers.year) + ' average.',
+    (peers.me ? peers.me + ' is highlighted.' : ''),
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">' + body + '</div>');
 }
 
@@ -9300,9 +9295,7 @@ function _hmPanelYTD(){
       '<div style="flex:1;min-width:280px">'
       + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
       + _hmMultiLine(id, key, labels, build(field), fmt) + '</div>';
-    return _hmPanel('Each '+T('form',1)+', month by month',
-      'One line per '+T('form',1)+', with the whole of ' + ygLabelOf(peers.year) + ' in bold. Straight averages. '
-      + 'Click a '+T('form',1)+' name in the key to hide it, and again to bring it back.',
+    return _hmPanel('Monthly '+T('form',1,2)+' Performance', '',
       '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
       + oneF('Attendance', 'hm-ig-fatt', 'hmIgFAtt', 'att', v => (Math.round(v*10)/10) + '%')
       + oneF('Positives per '+T('pupil',1)+'', 'hm-ig-fpos', 'hmIgFPos', 'pos', v => Math.round(v*10)/10)
@@ -9368,10 +9361,7 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
       '<div style="flex:1;min-width:280px">'
       + '<div style="font-size:.72rem;color:var(--tx2);margin-bottom:.25rem">' + title + '</div>'
       + _hmMultiLine(id, key, labels, buildW(field), fmt) + '</div>';
-    return _hmPanel('The same, with extremes left out',
-      'The same lines, but each month leaves out the highest and lowest few '+T('pupil',2)+'. '
-      + 'Compare a '+T('form',1)+' with its line above: if it moves a long way, that '+T('form',1)+'\u2019s figure '
-      + 'was being set by a handful of '+T('pupil',2)+' rather than by the group as a whole.',
+    return _hmPanel('Winsorised Mean Monthly '+T('form',1,2)+' Performance', '',
       '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
       + oneW('Attendance', 'hm-ig-watt', 'hmIgWAtt', 'attW', v => (Math.round(v*10)/10) + '%')
       + oneW('Positives per '+T('pupil',1)+'', 'hm-ig-wpos', 'hmIgWPos', 'posW', v => Math.round(v*10)/10)
@@ -9402,12 +9392,7 @@ function _hmPanelYTDWinsorised(peers, labels, ps){
       + inner + '</div>';
   };
 
-  return _hmPanel('The same, with extremes left out',
-    peers.me
-      ? 'The same two lines, but each month leaves out the highest and lowest few '+T('pupil',2)+'. '
-        + 'If your '+T('form',1)+' moves a long way from its line above, its figure there was being set '
-        + 'by a small number of '+T('pupil',2)+'.'
-      : 'All of ' + ygLabelOf(peers.year) + ', leaving out the highest and lowest few '+T('pupil',2)+' each month.',
+  return _hmPanel('Winsorised Mean Monthly '+T('form',1,2)+' Performance', '',
     '<div style="display:flex;gap:.9rem;flex-wrap:wrap">'
     + one('Attendance', 'hm-ig-watt', 'hmIgWAtt', 'attW', PAL.sky,
           v => (Math.round(v*10)/10) + '%', 'No attendance recorded yet.')
@@ -9517,7 +9502,7 @@ function _hmPanelBySubject(){
              + a + '\u2013' + String(Number(a) + 1).slice(2) + '</option>'; }).join('')
     + '</select></label></div>';
   return _hmPanel(''+T('sanction',2,1)+' in ' + _scopeLabel + ', by subject',
-    'Split by incident category. Counts are raw, so a subject taught five times a week will sit higher than one taught once.',
+    '',
     _ayCtl +
     // Rows get tighter as the list grows, so a whole year's subjects still fit
     // on screen without the panel running away.
@@ -9540,7 +9525,7 @@ function _hmInfographics(ns){
   setTimeout(_hmFlushCharts, 0);
   // details/summary needs no script and survives a re-render, matching _hmMore.
   return '<details open style="margin-bottom:.7rem">'
-    + '<summary style="cursor:pointer;font-size:.8rem;font-weight:600;margin-bottom:.5rem">How your '+T('form',1)+' is doing</summary>'
+    + '<summary style="cursor:pointer;font-size:.8rem;font-weight:600;margin-bottom:.5rem">How your Year is Performing</summary>'
     // ⚠️ THIS BLOCK USES A WINSORISED MEAN; the group panel further down uses a MEDIAN.
     // Both are deliberate and neither is a mistake, but a page reporting two different
     // averages without saying so is how a reader stops trusting either. Say which, and
@@ -10184,13 +10169,7 @@ function _hmYearLeader(){
     const mxC=Math.max(...rows.map(r=>conRate(r.list)||0))||1;
 
     h+=_hmPanel('Who is this falling on',
-      'The same groups the leadership view uses, computed <strong>within this year group</strong> \u2014 '
-      +'so the baseline is your own '+T('pupil',2)+' with no FSM, SEN or EHCP, not the whole school. '
-      +'<strong>Median</strong> '+T('sanction',2)+', not mean: a few '+T('pupil',2)+' with very high counts pull an average '
-      +'away from what a typical '+T('pupil',1)+' in the group experiences. '
-      +'(The charts above use a Winsorised mean instead \u2014 right for comparing '+T('form',2)+' of similar '
-      +'size, wrong for small skewed groups. Both are deliberate.) '
-      +'Groups are \u201cever\u201d, not \u201cnow\u201d \u2014 a flag at any point in the data counts here.',
+      '',
       '<table style="width:100%;border-collapse:collapse;font-size:.72rem">'
       +'<tr style="color:var(--tx2);text-align:left">'
         +'<th style="font-weight:500;padding:.2rem 0">Group</th>'
@@ -10266,10 +10245,7 @@ function _hmYearLeader(){
           +'margin-right:.25rem;background:'+COL[d]+';color:#fff">'+d+'</span>').join('')+'</span>'
       +'<span style="width:74px;text-align:right;color:var(--tx2);font-size:.66rem">'+r.n+' triggers</span></div>';
     h+=_hmPanel('Flagged in more than one area',
-      '<strong>'+rows.length+' '+T('pupil',2)+'</strong> are firing triggers in two or more different areas. '
-      +'Not the same as \u201ccarrying more than one concern\u201d above, which counts triggers \u2014 two '
-      +'attendance triggers is one problem seen twice. Attendance <em>and</em> behaviour is two problems '
-      +'converging, and usually the shorter list to work through first. Reds first, then the widest spread.',
+      '<strong>'+rows.length+' '+T('pupil',2)+'</strong> flagged in two or more areas.',
       shown.map(line).join('')+_hmMore(hidden.map(line).join(''),hidden.length));
   })();
 
@@ -17572,7 +17548,7 @@ ${groupPanel(
         ${groupPanel(
           'Attendance Display',
           'Where the line falls between low and acceptable attendance. This is a DISPLAY setting \u2014 it changes what the chart counts, not who is flagged as a concern.',
-          'Heatmap tabs \u2192 "How your '+T('form',1)+' is doing" \u2192 '+T('pupil',2,1)+' below X%',
+          'Heatmap tabs \u2192 "How your Year is Performing" \u2192 '+T('pupil',2,1)+' below X%',
           inputRow('Low attendance threshold (%)','att-low',ATT_LOW,{min:50,max:100,step:0.5,hint:''+T('pupil',2,1)+' below this figure are counted in the "'+T('pupil',2,1)+' below X%" chart, and the chart title follows this setting. 90% is the DfE definition of persistent absence and is what the national comparison figure (24.2% for England secondary) is based on \u2014 raising it will make this chart no longer comparable with the national number.'})
           +inputRow('Attendance target (%)','att-target',ATT_TARGET,{min:50,max:100,step:0.5,hint:'At or above this is GREEN everywhere attendance is shown. Between this and the low threshold above is AMBER; below the low threshold is RED. \u26a0\ufe0f Before this setting existed, eleven tabs hardcoded 95 and 90 and ignored the low threshold entirely \u2014 changing it moved the persistent-absence count but no colour. Cannot be set below the low threshold.'})
           +inputRow('Attendance bands','att-bands',ATT_BAND_EDGES.join(', '),{text:true,hint:'Band edges, comma-separated, e.g. 100, 97, 95, 90, 85. Used by the Attendance spread panel and the Peer comparison filter, which previously kept separate lists that had drifted apart. The target and low threshold above are always added as edges, so no band ever straddles the persistent-absence line.'})
