@@ -6831,7 +6831,7 @@ function popBCTG(){
   const ygVal=document.getElementById('bc-yg').value;
   const sel=document.getElementById('bc-tg');
   const prev=sel.value;
-  sel.innerHTML='<option value="all">All Tutor Groups</option>';
+  sel.innerHTML='<option value="all">All '+T('form',2,2)+'</option>';
 
   // Collect TGs from matching year groups
   const ygs=ygVal==='all'?CFG.intakes.filter(ygInSchool).map(ink=>curYG(ink)):[parseInt(ygVal)];
@@ -11847,7 +11847,7 @@ const _UP_ROLE_NEEDS = {
   sen:           { req:['each pupil\u2019s enrolment number','each pupil\u2019s name','their year group'],
                    deg:[['gender','gender comparisons stop working — everyone reads as unknown'],['SEN status','SEN flags & filtering are empty']] },
   attendance:    { req:['the pupil\u2019s enrolment number','the date of each session','the attendance mark/code','the day & period of each session'],
-                   deg:[['the registration / tutor group','tutor-group labels & grouping disappear across the dashboard'],['subject','no attendance breakdown by subject'],['teacher','no teacher-level attendance']] },
+                   deg:[['the registration / '+T('form',1)+'','tutor-group labels & grouping disappear across the dashboard'],['subject','no attendance breakdown by subject'],['teacher','no teacher-level attendance']] },
   behave_current:{ req:['the pupil\u2019s enrolment number','the date','what the behaviour incident was'],
                    deg:[['subject','no behaviour breakdown by subject'],['the lesson day & period','no behaviour breakdown by period'],['teacher','no teacher-level behaviour']] },
   detention:     { req:['the pupil\u2019s enrolment number','the date of the detention','the type of detention'], deg:[] },
@@ -13708,7 +13708,7 @@ function rTGC(){
     return`<tr><td style="font-weight:500">${tg}</td><td>${pupSet.size}<div style="font-size:.55rem;color:var(--mu);font-weight:400;margin-top:.05rem">${m}M · ${f}F</div></td><td style="text-align:center;font-family:'IBM Plex Mono',monospace;${attCol}">${ytdAtt!=null?ytdAtt+'%':'\u2014'}</td><td style="font-weight:600;color:${aC(avg)}">${_abAvgLabel(_abCells(lr,SUBS),avg)}</td><td>${(()=>{const _st=posStats([...pupSet],lp);return _st?(posBox(_st,84)+'<div style="font-size:.6rem;color:var(--tx2);margin-top:.1rem">'+posText(_st)+'</div>'):'—';})()}</td><td style="font-weight:600;color:${eC(avgE)}">${efAvgD(avgE)}</td><td style="${chgS}">${chg!=null?(chg>0?'+':'')+chg.toFixed(2):'\u2014'}</td><td style="${chgES}">${chgE!=null?(chgE>0?'+':'')+chgE.toFixed(2):'\u2014'}</td><td style="text-align:center;${sendC?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${sendC||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.K||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.E||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Add||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.Strat||'\u2014'}</td><td style="text-align:center;font-size:.6rem;color:var(--mu)">${senCats.N||'\u2014'}</td><td style="text-align:center;${fsmC?'color:var(--blue);font-weight:600':'color:var(--mu)'}">${fsmC||'\u2014'}</td><td style="text-align:center;${nCodes?'color:var(--orange);font-weight:600':'color:var(--mu)'}">${nCodes||'\u2014'}</td><td style="text-align:center;${nOnCalls?'color:var(--red);font-weight:600':'color:var(--mu)'}">${nOnCalls||'\u2014'}</td><td style="text-align:center;${nDets?'color:var(--violet);font-weight:600':'color:var(--mu)'}">${nDets||'\u2014'}</td></tr>`;
   }).join('');
   const cmpLabel=p3?collLabel(p3):'previous '+T('period',1)+'';
-  document.getElementById('tgc-out').innerHTML=`<div class="dw"><div class="dwt">Tutor Group Comparison \u2014 ${ygShort(yearGroup)} (${collLabel(lp)})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Ability and effort are averaged across all subjects (${ABILITY.bestLabel} = best ability). \u0394 columns compare with ${cmpLabel}. Sanctions are this academic year, all subjects.</div><table class="d ctr"><thead><tr><th>Tutor Group</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th title="Median position in the year group, and the middle half of the form">Position</th><th>Avg Ef.</th><th>Ab. \u0394</th><th>Ef. \u0394</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--violet)">Det.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.getElementById('tgc-out').innerHTML=`<div class="dw"><div class="dwt">${T('form',1,2)} Comparison \u2014 ${ygShort(yearGroup)} (${collLabel(lp)})</div><div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">Ability and effort are averaged across all subjects (${ABILITY.bestLabel} = best ability). \u0394 columns compare with ${cmpLabel}. Sanctions are this academic year, all subjects.</div><table class="d ctr"><thead><tr><th>${T('form',1,2)}</th><th>#</th><th style="text-align:center">YTD Att.</th><th>Avg Ab.</th><th title="Median position in the year group, and the middle half of the form">Position</th><th>Avg Ef.</th><th>Ab. \u0394</th><th>Ef. \u0394</th><th style="color:var(--orange)">SEND</th><th style="color:var(--orange);font-size:.55rem">K</th><th style="color:var(--lilac);font-size:.55rem">E</th><th style="color:var(--sky);font-size:.55rem">Add</th><th style="color:var(--green);font-size:.55rem">Strat</th><th style="color:var(--slate);font-size:.55rem">N</th><th style="color:var(--blue)">FSM</th><th style="color:var(--orange)">Codes</th><th style="color:var(--red)">On-Calls</th><th style="color:var(--violet)">Det.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 (function(){
@@ -14174,7 +14174,7 @@ function rPeer(){
   // With a single group there is nothing to aggregate, and leaving it in would
   // stop the picker collapsing to a label.
   if(tgs.size>1){
-    const allOpt=document.createElement('option');allOpt.value='__all';allOpt.textContent='All Tutor Groups';sel.appendChild(allOpt);
+    const allOpt=document.createElement('option');allOpt.value='__all';allOpt.textContent='All '+T('form',2,2)+'';sel.appendChild(allOpt);
   }
   [...tgs].sort().forEach(tg=>{
     const o=document.createElement('option');o.value=tg;o.textContent=tg;sel.appendChild(o);
@@ -14224,7 +14224,7 @@ function rPeer(){
     ?new Set(enrols.filter(r=>r.t==='tg'&&r.u===null).map(r=>r.x))
     :new Set(enrols.filter(r=>r.t==='tg'&&r.v===tgName&&r.u===null).map(r=>r.x));
   const tgRows=lr.filter(r=>tgPupilPx.has(r[0]));
-  const tgDisplayName=isAllTG?'All Tutor Groups':tgName;
+  const tgDisplayName=isAllTG?'All '+T('form',2,2)+'':tgName;
 
   if(!tgRows.length){
     document.getElementById('tg-title').innerHTML=`<div style="color:var(--mu)">No pupils in ${tgDisplayName}</div>`;
@@ -14240,7 +14240,7 @@ function rPeer(){
   const WLK=DD.weekLessons||{};
 
   // ── TITLE ──
-  document.getElementById('tg-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">${ygShort(yearGroup)} Tutor Group ${tgDisplayName} Overview</div>`;
+  document.getElementById('tg-title').innerHTML=`<div style="font-size:.85rem;font-weight:600;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;padding-top:.8rem;border-top:1px solid var(--bd)">${ygShort(yearGroup)} ${T('form',1,2)} ${tgDisplayName} Overview</div>`;
 
   // ── SUMMARY CARDS ──
   const sendN=tgRows.filter(r=>r[4]).length;
@@ -14269,7 +14269,7 @@ function rPeer(){
   const hasGradesTG=avg!=null||avgE!=null;
 
   document.getElementById('tg-summary').innerHTML=`<div class="crd-g">
-    <div class="crd"><div class="ct2">Tutor Group ${tgDisplayName}</div>
+    <div class="crd"><div class="ct2">${T('form',1,2)} ${tgDisplayName}</div>
       <div style="font-size:1.5rem;font-weight:700;color:var(--ac)">${tgRows.length}</div>
       <div style="font-size:.72rem;color:var(--mu)">pupils</div>
       <div style="margin-top:.4rem">${flagsStr(sendN,ehcpN,fsmN,tgRows)}</div>
@@ -14363,7 +14363,7 @@ function rPeer(){
       // Kept only so the branch below stays intact. The whole-year network used
       // to be refused as unreadable; with the same-lesson join and a minimum
       // pair count it now renders, so this no longer fires.
-      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;display:flex;align-items:center;gap:.6rem;margin-bottom:0"><span>${T('sanction',1,1)} Pair Network</span></div><div style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">Pick a single tutor group above to see this. Across a whole year group there are too many ${T('pupil',2)} and too many connections between them for the picture to be readable.</div></div></div>`;
+      tgNetDiv.innerHTML=`<div class="dw" style="padding:0;overflow:hidden"><div class="dwt" style="padding:.75rem 1rem;display:flex;align-items:center;gap:.6rem;margin-bottom:0"><span>${T('sanction',1,1)} Pair Network</span></div><div style="padding:0 1rem .75rem"><div style="color:var(--mu);font-size:.8rem;padding:.5rem 0">Pick a single ${T('form',1)} above to see this. Across a whole year group there are too many ${T('pupil',2)} and too many connections between them for the picture to be readable.</div></div></div>`;
     }else{
     // Two pupils are a pair only if they were in the SAME LESSON — same date,
     // period, subject AND class. Keying on date+period alone linked pupils who
@@ -16928,15 +16928,15 @@ function rPeer(){
   const _AUDIT_ACTIONS={
     login:'Signed in', logout:'Signed out',
     pupil_view_opened:'Opened a '+T('pupil',1)+'', class_view:'Viewed a class',
-    year_group_view:'Viewed a tutor group', view_opened:'Opened a screen',
+    year_group_view:'Viewed a '+T('form',1), view_opened:'Opened a screen',
     report_generated:'Printed a report', export_downloaded:'Downloaded a file',
     flag_actioned:'Actioned a flag', config_changed:'Changed a setting',
     school_switched:'Switched school', import_run:'Ran an import',
     role_changed:'Changed someone\u2019s access'};
   // Screen codes as they appear in the tab bar, so the log reads in English.
   const _AUDIT_VIEWS={pupil:''+T('pupil',1,1)+'',compare:'Compare',progression:'Progression',
-    teacher:'Teacher',subject:'Subject',class:'Class',tutor:'Tutor group',
-    classcomp:'Class comparison',tgcomp:'Tutor group comparison',behaviour:'Behaviour',
+    teacher:'Teacher',subject:'Subject',class:'Class',tutor:T('form',1,1),
+    classcomp:'Class comparison',tgcomp:T('form',1,1)+' comparison',behaviour:'Behaviour',
     pairs:'Pairs',peer:'Peer groups',send:'SEND',analytics:'Analytics',
     concerns:'Concerns',sanctions:''+T('sanction',2,1)+'',slotavoid:'Slot avoidance',
     rebalance:'Rebalance',admin:'Admin',upload:'Upload',schools:'Schools'};
@@ -17133,7 +17133,8 @@ window._adminSetYgName=function(yg,field,val){
 // ⚠️ TEXT ONLY. It touches textContent, never an attribute, so onclick="sw('sanctions')"
 // and every id and class are untouched.
 function applyStaticTerms(){
-  const map=[['House Points','housePoint',2,2],['House Point','housePoint',1,2],
+  const map=[['Tutor Groups','form',2,2],['Tutor Group','form',1,2],
+             ['House Points','housePoint',2,2],['House Point','housePoint',1,2],
              ['Year Leader','yearLeader',1,2],['Form Tutor','formTutor',1,2],
              ['Sanctions','sanction',2,1],['Sanction','sanction',1,1],
              ['Detentions','detention',2,1],['Detention','detention',1,1],
@@ -17168,7 +17169,7 @@ function _rankingHtml(){
     +row('Attainment','Yes','The achieved grade. Position, percentile, quartile, decile and every attainment trigger come from this and nothing else.')
     +row('Target','No','A target is what someone hopes for. Ranking it would put the most ambitiously targeted '+T('pupil',2)+' at the top.')
     +row('Predicted / on track','No','A forecast, and it moves. Shown beside attainment so the gap is visible, but never ranked with it.')
-    +row('Effort','Separately','Effort IS ranked \u2014 there is an effort rank, and tutor groups are ranked on it \u2014 but among effort only. It is a different scale, and at most schools 1 is the best, the opposite direction to attainment.')
+    +row('Effort','Separately','Effort IS ranked \u2014 there is an effort rank, and '+T('form',2)+' are ranked on it \u2014 but among effort only. It is a different scale, and at most schools 1 is the best, the opposite direction to attainment.')
     +`</tbody></table>`
     +`<div style="font-size:.68rem;color:var(--mu);line-height:1.45;margin-top:.55rem;max-width:46rem">`
     +`Attainment and effort are ranked <b>separately</b>, never against each other. `
@@ -17445,7 +17446,7 @@ function rAdmin(){
     const aLevelMapHtml=_refMapPanel('A-Level Grade Mapping',['A*','A','B','C','D','E','U'],'al','ks5','applyAL','al-msg',
       'Pin each A-Level grade (Y12\u2013Y13) to a reference band, so KS5 grades sit on the same ladder as KS3 and GCSE and a '+T('pupil',1)+'\u2019s line continues across the GCSE \u2192 A-Level transition.');
     const threshHtml=`<div class="dw" style="margin-bottom:1.25rem"><div class="dwt">Concern Thresholds &amp; Weightings</div>
-      <div style="font-size:.72rem;color:var(--mu);margin-bottom:.85rem;line-height:1.5">These settings control how the dashboard decides when a pupil, class or tutor group is flagged as a concern. Each section below describes a single type of concern, lists the settings that affect it, and notes which tabs you'll see the change reflected in. Hover any value box for additional detail. After making changes, click <b style="color:var(--tx)">Save thresholds</b> at the foot of this panel.</div>
+      <div style="font-size:.72rem;color:var(--mu);margin-bottom:.85rem;line-height:1.5">These settings control how the dashboard decides when a ${T('pupil',1)}, class or ${T('form',1)} is flagged as a concern. Each section below describes a single type of concern, lists the settings that affect it, and notes which tabs you'll see the change reflected in. Hover any value box for additional detail. After making changes, click <b style="color:var(--tx)">Save thresholds</b> at the foot of this panel.</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem">
         ${groupPanel(
           ''+T('sanction',1,1)+' Weightings',
@@ -17537,7 +17538,7 @@ ${groupPanel(
         ${groupPanel(
           'Persistent Absence',
           'Rolling-window flag for '+T('pupil',2)+' whose absence is currently above a threshold. This is a leading indicator — separate from the official statutory year-to-date PA figure.',
-          'Concerns tab → '+T('pupil',1,1)+' Concerns; Tutor Group concern; '+T('pupil',1,1)+' tab',
+          'Concerns tab → '+T('pupil',1,1)+' Concerns; '+T('form',1,2)+' concern; '+T('pupil',1,1)+' tab',
           inputRow('Minimum school days before judging','ct-pa-win',CT_PA_WIN,{min:5,max:100,step:1,hint:'Persistent Absence is measured YEAR TO DATE, not over a rolling window. This is simply how many school days must have elapsed before that figure is trusted \u2014 without it, one absence in the first week of September reads as 20%.'})
           +inputRow('Separate absences before a decline counts','ct-ab-epi',CT_AB_EPI,{min:1,max:6,step:1,hint:'Attendance Declining requires the absence to be SPREAD, not one block. Three days of flu is 15 missed '+T('period',2)+' and passes any rate test, but it is not a developing problem. A run of consecutive school days counts as ONE absence. 2 removes single illnesses; 3 is tighter.'})+
           inputRow('Absence rate threshold (%)','ct-pa-pct',CT_PA_PCT,{min:1,max:50,step:0.5,hint:''+T('pupil',2,1)+' whose absence rate over the window meets or exceeds this percentage are flagged. Default 10%.'})
@@ -17637,10 +17638,10 @@ ${groupPanel(
           inputRow('Red ratio','cl-ratio-red',CL_RATIO_RED,{min:1,max:10,step:0.1,hint:'Same comparison, higher threshold for red severity. Default 3.0×.'})
         )}
         ${groupPanel(
-          'Tutor Group Concerns',
-          'A tutor group is flagged when one or more of three signals fire: high absence, high '+T('sanction',2)+', or many persistently-absent '+T('pupil',2)+'.',
-          'Concerns tab → Tutor Group Concerns; Tutor Group tab',
-          inputRow('Minimum tutor group size','tg-min-size',TG_MIN_SIZE,{min:1,max:40,step:1,hint:'Tutor groups smaller than this are skipped. Default 5.'})+
+          ''+T('form',1,2)+' Concerns',
+          'A '+T('form',1)+' is flagged when one or more of three signals fire: high absence, high '+T('sanction',2)+', or many persistently-absent '+T('pupil',2)+'.',
+          'Concerns tab → '+T('form',1,2)+' Concerns; '+T('form',1,2)+' tab',
+          inputRow('Minimum '+T('form',1)+' size','tg-min-size',TG_MIN_SIZE,{min:1,max:40,step:1,hint:T('form',2,1)+' smaller than this are skipped. Default 5.'})+
           inputRow('Absence rate above year (pp)','tg-abs-delta',TG_ABS_DELTA,{min:0.5,max:20,step:0.5,hint:'TG absence rate must exceed the year average by this many percentage points to fire absence flag. Default +2pp.'})+
           inputRow(''+T('sanction',2,1)+' ratio above year','tg-san-ratio',TG_SAN_RATIO,{min:1,max:10,step:0.1,hint:'TG codes-per-pupil ÷ year average must reach this ratio for '+T('sanction',2)+' flag. Default 1.5×.'})+
           inputRow('Minimum total codes','tg-san-min',TG_SAN_MIN,{min:1,max:100,step:1,hint:'TG must have at least this many codes before '+T('sanction',2)+' flag fires. Default 5.'})+
@@ -18299,7 +18300,7 @@ ${groupPanel(
             <div style="font-size:.65rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em">Improving Pupils</div></div>
         </div></div>`;
       if(!won.length){
-        h+=`<div class="dw"><div style="color:var(--mu);padding:1rem">No improvements to celebrate in this group yet — try a different year or tutor group, or switch back to Concerns.</div></div>`;
+        h+=`<div class="dw"><div style="color:var(--mu);padding:1rem">No improvements to celebrate in this group yet — try a different year or ${T('form',1)}, or switch back to Concerns.</div></div>`;
         out.innerHTML=h;return;
       }
       let rh='';
